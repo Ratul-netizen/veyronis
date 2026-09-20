@@ -241,7 +241,7 @@ column pairs to read.
       creates no resource
 - [x] A packet from an exporter that is not in inventory produces a provisional resource
       and a review item rather than a dropped packet — SPEC §M0.2 rule 1
-- [ ] A packet arriving on tenant A's listener cannot produce a row in tenant B, whatever
+- [x] A packet arriving on tenant A's listener cannot produce a row in tenant B, whatever
       it claims — the isolation test, as an adversarial case
 - [ ] Each decoder survives a fuzzing run without a panic
 - [x] The suite runs against the live ClickHouse and the flow queries return correct rows

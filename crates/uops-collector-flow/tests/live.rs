@@ -114,6 +114,62 @@ fn free_port() -> SocketAddr {
     socket.local_addr().expect("its address")
 }
 
+/// A resource in `tenant`, already claiming `address` as its management IP.
+///
+/// Inserted directly for the same reason the tenant is: the point of the test below is
+/// what the collector does with an identifier that already exists, not how it came to.
+async fn resource_at(
+    store: &PgStore,
+    tenant: uops_core::TenantId,
+    address: &str,
+    name: &str,
+) -> uops_core::ResourceId {
+    let resource = uops_core::ResourceId::new();
+
+    sqlx::query(
+        "INSERT INTO resource (id, tenant_id, kind, name, status) \
+         VALUES ($1, $2, 'device', $3, 'up')",
+    )
+    .bind(resource.into_uuid())
+    .bind(tenant.into_uuid())
+    .bind(name)
+    .execute(store.pool())
+    .await
+    .expect("resource");
+
+    sqlx::query(
+        "INSERT INTO resource_identifier \
+             (id, tenant_id, resource_id, kind, value, confidence, source) \
+         VALUES ($1, $2, $3, 'mgmt_ip', $4, 1.0, 'manual')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(tenant.into_uuid())
+    .bind(resource.into_uuid())
+    .bind(address)
+    .execute(store.pool())
+    .await
+    .expect("identifier");
+
+    resource
+}
+
+/// The configuration for one listener, so a test says what it is about rather than
+/// repeating twenty lines of struct literal.
+fn one_listener(slug: String, udp: SocketAddr) -> Config {
+    Config {
+        listeners: vec![Listener { tenant: slug, udp }],
+        postgres: uops_store_pg::Config {
+            url: std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgres://uops@127.0.0.1:5432/uops".into()),
+            ..uops_store_pg::Config::default()
+        },
+        clickhouse: ch_config(),
+        queue: 1024,
+        workers: 2,
+        receive_buffer: 1 << 20,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_netflow_v5_datagram_becomes_a_row() {
     let store = postgres().await;
@@ -328,4 +384,124 @@ async fn a_listener_naming_a_tenant_that_does_not_exist_refuses_to_start() {
         .await
         .expect_err("a missing tenant must not start");
     assert!(error.contains("no-such-tenant-anywhere"), "{error}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_packet_on_one_tenants_listener_cannot_produce_a_row_in_another() {
+    // The adversarial case, and the one the whole tenancy argument rests on.
+    //
+    // The bait: tenant B already owns a resource claiming 127.0.0.1 as its management
+    // address — which is exactly the address this test sends from. A collector that
+    // resolved the exporter globally, or that let the packet's contents pick a tenant,
+    // would file this flow under B. §2.6 says the socket decides and nothing else does,
+    // so it must land in A and only in A.
+    let store = postgres().await;
+    let (tenant_a, slug_a) = tenant(&store, "flow-iso-a").await;
+    let (tenant_b, _slug_b) = tenant(&store, "flow-iso-b").await;
+
+    let planted = resource_at(&store, tenant_b, "127.0.0.1", "someone-elses-router").await;
+
+    let address = free_port();
+    let telemetry = ChStore::new(ChClient::new(ch_config()));
+    let (stop, mut stopped) = tokio::sync::watch::channel(false);
+    let collector = tokio::spawn(run(
+        one_listener(slug_a, address),
+        store.clone(),
+        telemetry,
+        async move {
+            let _ = stopped.changed().await;
+        },
+    ));
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    sender
+        .send_to(&v5_packet(10_000_000, export_seconds()), address)
+        .await
+        .unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    let _ = stop.send(true);
+    collector.await.expect("the task").expect("no error");
+
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM flows WHERE tenant_id = '{tenant_a}'"
+        ))
+        .await,
+        "1",
+        "the flow did not reach the tenant whose socket it arrived on"
+    );
+
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM flows WHERE tenant_id = '{tenant_b}'"
+        ))
+        .await,
+        "0",
+        "a packet on tenant A's listener wrote into tenant B"
+    );
+
+    // And the resource it was attributed to is A's own, not the one B had already
+    // registered for that address. Sharing it would be a cross-tenant read even though
+    // the row itself landed correctly.
+    let attributed = scalar(&format!(
+        "SELECT DISTINCT toString(resource_id) FROM flows WHERE tenant_id = '{tenant_a}'"
+    ))
+    .await;
+    assert_ne!(
+        attributed,
+        planted.into_uuid().to_string(),
+        "the exporter resolved to another tenant's resource"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_listeners_keep_their_own_tenants_flow() {
+    // The ordinary MSP case rather than the adversarial one: two customers, two sockets,
+    // one process. Each packet belongs to the socket it arrived on.
+    let store = postgres().await;
+    let (tenant_a, slug_a) = tenant(&store, "flow-two-a").await;
+    let (tenant_b, slug_b) = tenant(&store, "flow-two-b").await;
+
+    let (address_a, address_b) = (free_port(), free_port());
+    let mut config = one_listener(slug_a, address_a);
+    config.listeners.push(Listener {
+        tenant: slug_b,
+        udp: address_b,
+    });
+
+    let telemetry = ChStore::new(ChClient::new(ch_config()));
+    let (stop, mut stopped) = tokio::sync::watch::channel(false);
+    let collector = tokio::spawn(run(config, store.clone(), telemetry, async move {
+        let _ = stopped.changed().await;
+    }));
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let packet = v5_packet(10_000_000, export_seconds());
+    sender.send_to(&packet, address_a).await.unwrap();
+    sender.send_to(&packet, address_b).await.unwrap();
+    sender.send_to(&packet, address_b).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    let _ = stop.send(true);
+    let stats = collector.await.expect("the task").expect("no error");
+    assert_eq!(stats.datagrams.load(Relaxed), 3);
+
+    // Identical packets, from one sender, told apart only by which socket took them.
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM flows WHERE tenant_id = '{tenant_a}'"
+        ))
+        .await,
+        "1"
+    );
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM flows WHERE tenant_id = '{tenant_b}'"
+        ))
+        .await,
+        "2"
+    );
 }
