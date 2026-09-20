@@ -30,15 +30,31 @@
 //! Buffering is the obvious alternative and it is memory exhaustion with a public UDP
 //! port in front of it.
 //!
-//! # What this does not do yet
+//! # Where the sampling rate comes from
 //!
-//! **Options templates (`FlowSet` 1) are skipped, and counted.** They are how some
-//! exporters report their sampling rate, so an exporter that samples 1-in-1000 and
-//! announces it only that way is currently read as unsampled — which §2.4 is explicit is
-//! the error worth a factor of a thousand. [`Decoded::options_skipped`] is non-zero
-//! exactly when that is possible, so it is visible rather than silent. A sampling rate
-//! carried as a *field in the data record* is read, which covers the exporters that do
-//! it that way.
+//! §2.4 turns on getting this right: a 1-in-1000 exporter read as unsampled under-reports
+//! by three orders of magnitude, and nothing about the number looks wrong.
+//!
+//! There are three ways an exporter can say it, and all three are read, in this order of
+//! precedence:
+//!
+//! 1. **A field in the data record** — `samplingInterval` or
+//!    `flowSamplerRandomInterval` sitting alongside the addresses. Unambiguous, so it
+//!    wins.
+//! 2. **A sampler the record names.** The record carries `flowSamplerId`, and an options
+//!    record sent earlier said what interval that sampler runs at. This is what Cisco
+//!    does.
+//! 3. **A rate the exporter declared with no sampler id**, which applies to everything
+//!    it sends.
+//!
+//! Two and three arrive in *options* records, which is why [`Learned`] holds more than
+//! templates: an options template registers an id like any other, and its data records
+//! turn up in an ordinary data `FlowSet` carrying the exporter's own configuration rather
+//! than traffic.
+//!
+//! An exporter that samples and says so in none of these ways is indistinguishable from
+//! one that does not sample. That is a limit of the protocol rather than of this decoder,
+//! and [`Decoded::sampling_unknown`] counts the records it applies to.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -79,6 +95,7 @@ const OUT_PKTS: u16 = 24;
 const IPV6_SRC_ADDR: u16 = 27;
 const IPV6_DST_ADDR: u16 = 28;
 const SAMPLING_INTERVAL: u16 = 34;
+const FLOW_SAMPLER_ID: u16 = 48;
 const FLOW_SAMPLER_RANDOM_INTERVAL: u16 = 50;
 
 /// How much template state one collector will hold.
@@ -94,6 +111,11 @@ pub struct Limits {
     pub max_sources: usize,
     /// Templates held for any one source.
     pub max_templates_per_source: usize,
+    /// Distinct samplers remembered for any one source.
+    ///
+    /// Bounded for the same reason as the templates: the sampler id is a number the
+    /// exporter chooses, and the exporter is unauthenticated.
+    pub max_samplers_per_source: usize,
 }
 
 impl Default for Limits {
@@ -104,6 +126,7 @@ impl Default for Limits {
         Self {
             max_sources: 1024,
             max_templates_per_source: 64,
+            max_samplers_per_source: 32,
         }
     }
 }
@@ -115,12 +138,22 @@ struct Field {
     len: usize,
 }
 
-/// A layout for data records.
+/// What the records laid out by a template contain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// Traffic.
+    Data,
+    /// The exporter's own configuration — which sampler runs at which interval.
+    Options,
+}
+
+/// A layout for records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Template {
     fields: Vec<Field>,
     /// Sum of the field lengths. Every record laid out by this template is this long.
     record_len: usize,
+    kind: Kind,
 }
 
 impl Template {
@@ -129,30 +162,61 @@ impl Template {
     pub fn record_len(&self) -> usize {
         self.record_len
     }
+
+    #[must_use]
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
 }
 
-/// The template cache.
+/// What an exporter said about its own sampling.
 ///
-/// Keyed as §2.2 requires. Held by the collector across datagrams and across exporters,
-/// and deliberately *not* persisted: the gap after a restart is inherent to the protocol
-/// and is reported rather than papered over.
+/// Learned from options records and held per source, because a sampler id means nothing
+/// outside the exporter that chose it.
+#[derive(Clone, Debug, Default)]
+struct Samplers {
+    /// `flowSamplerId` to interval.
+    by_id: HashMap<u32, u32>,
+    /// A rate declared with no sampler id, applying to everything the exporter sends.
+    everything: Option<u32>,
+}
+
+impl Samplers {
+    /// The rate for a record, which may or may not name a sampler.
+    fn rate(&self, sampler: Option<u32>) -> Option<u32> {
+        sampler
+            .and_then(|id| self.by_id.get(&id).copied())
+            .or(self.everything)
+    }
+}
+
+/// Everything this collector has learned from the exporters talking to it.
+///
+/// Templates, and the sampling rates that arrive in options records. Both are keyed as
+/// §2.2 requires — `(exporter, observation domain)` — because a template id and a sampler
+/// id are both numbers the exporter picked, and mean nothing outside it.
+///
+/// Held across datagrams and deliberately *not* persisted: the gap after a restart is
+/// inherent to the protocol, and it is reported rather than papered over.
 #[derive(Debug)]
-pub struct Templates {
+pub struct Learned {
     by_source: HashMap<(IpAddr, u32), HashMap<u16, Template>>,
+    samplers: HashMap<(IpAddr, u32), Samplers>,
     limits: Limits,
 }
 
-impl Default for Templates {
+impl Default for Learned {
     fn default() -> Self {
         Self::new(Limits::default())
     }
 }
 
-impl Templates {
+impl Learned {
     #[must_use]
     pub fn new(limits: Limits) -> Self {
         Self {
             by_source: HashMap::new(),
+            samplers: HashMap::new(),
             limits,
         }
     }
@@ -170,6 +234,29 @@ impl Templates {
 
     fn get(&self, source: (IpAddr, u32), id: u16) -> Option<&Template> {
         self.by_source.get(&source)?.get(&id)
+    }
+
+    /// Remember what an options record said.
+    ///
+    /// Bounded like the templates are. A sampler already known is updated, which does not
+    /// count against the limit — an exporter re-announcing its configuration is the
+    /// normal case.
+    fn learn_sampler(&mut self, source: (IpAddr, u32), sampler: Option<u32>, interval: u32) {
+        if !self.samplers.contains_key(&source) && self.samplers.len() >= self.limits.max_sources {
+            return;
+        }
+        let slot = self.samplers.entry(source).or_default();
+        match sampler {
+            Some(id) => {
+                if !slot.by_id.contains_key(&id)
+                    && slot.by_id.len() >= self.limits.max_samplers_per_source
+                {
+                    return;
+                }
+                slot.by_id.insert(id, interval);
+            }
+            None => slot.everything = Some(interval),
+        }
     }
 
     /// Learn a template. `false` when a limit refused it.
@@ -229,8 +316,16 @@ pub struct Decoded {
     /// rather than silently ignored, because a template this decoder cannot use is
     /// something an operator may need to hear about.
     pub not_a_flow: usize,
-    /// Options template `FlowSet`s skipped. See the module documentation.
-    pub options_skipped: usize,
+    /// Options templates learned.
+    pub options_learned: usize,
+    /// Options records read, each one telling us about a sampler.
+    pub options_applied: usize,
+    /// Flows whose sampling rate could not be established.
+    ///
+    /// Not necessarily a problem — an exporter that is not sampling says nothing about
+    /// sampling, and this counts those too. It is non-zero exactly when a rate of 1 is an
+    /// assumption rather than a statement, which is the distinction §2.4 cares about.
+    pub sampling_unknown: usize,
 }
 
 /// Decode one datagram, learning templates as they appear.
@@ -245,11 +340,7 @@ pub struct Decoded {
 /// whose declared length runs past the end of the packet. Anything recoverable — a
 /// missing template, a template that cannot be used — is counted in [`Decoded`] instead,
 /// because one unusable `FlowSet` must not discard the ones beside it.
-pub fn decode(
-    packet: &[u8],
-    exporter: IpAddr,
-    templates: &mut Templates,
-) -> Result<(Header, Decoded)> {
+pub fn decode(packet: &[u8], exporter: IpAddr, learned: &mut Learned) -> Result<(Header, Decoded)> {
     if packet.len() < HEADER {
         return Err(Error::TooShort {
             need: HEADER,
@@ -315,12 +406,27 @@ pub fn decode(
 
         let body = &packet[at + FLOWSET_HEADER..end];
         match set_id {
-            0 => read_templates(body, source, templates, &mut out),
-            1 => out.options_skipped += 1,
+            0 => read_templates(body, source, learned, &mut out),
+            1 => read_options_templates(body, source, learned, &mut out),
             // 2..=255 are reserved and have no defined meaning. Skipped by their length,
             // which is the forward-compatible reading.
             2..FIRST_DATA_ID => {}
-            id => read_data(body, id, source, templates, &header, &mut out),
+            id => {
+                // The kind decides what the records mean: traffic, or the exporter
+                // describing its own sampling. Copied out before dispatching so that
+                // reading an options record can take the mutable borrow it needs to
+                // record what it learned.
+                match learned.get(source, id).map(Template::kind) {
+                    None => out.awaiting_template += 1,
+                    Some(Kind::Data) => read_data(body, id, source, learned, &header, &mut out),
+                    Some(Kind::Options) => {
+                        let template = learned.get(source, id).cloned();
+                        if let Some(template) = template {
+                            read_options(body, &template, source, learned, &mut out);
+                        }
+                    }
+                }
+            }
         }
 
         at = end;
@@ -330,12 +436,7 @@ pub fn decode(
 }
 
 /// A template `FlowSet` holds one or more templates, back to back.
-fn read_templates(
-    body: &[u8],
-    source: (IpAddr, u32),
-    templates: &mut Templates,
-    out: &mut Decoded,
-) {
+fn read_templates(body: &[u8], source: (IpAddr, u32), learned: &mut Learned, out: &mut Decoded) {
     let mut at = 0;
     // Four bytes is the smallest possible template header; anything left below that is
     // the FlowSet's alignment padding.
@@ -345,7 +446,7 @@ fn read_templates(
             return;
         };
 
-        let Some(template) = parse_template(body, at + 4, field_count as usize) else {
+        let Some(template) = parse_template(body, at + 4, field_count as usize, Kind::Data) else {
             // A template this decoder cannot represent — no fields, or zero total width,
             // or a declaration running past the FlowSet. There is no way to resynchronise
             // within the set, because the next template's offset depended on this one.
@@ -354,8 +455,57 @@ fn read_templates(
 
         at += 4 + field_count as usize * 4;
 
-        if templates.learn(source, id, template) {
+        if learned.learn(source, id, template) {
             out.templates_learned += 1;
+        } else {
+            out.templates_refused += 1;
+        }
+    }
+}
+
+/// An options template `FlowSet`: `id`, then two *byte* lengths rather than field counts.
+///
+/// ```text
+///   template_id │ scope_length │ option_length │ scope fields… │ option fields…
+/// ```
+///
+/// The lengths are in bytes and each field specifier is four of them, which is the one
+/// thing that makes this shape different from an ordinary template. A length that is not
+/// a multiple of four is an exporter this decoder cannot follow, and there is no way to
+/// resynchronise inside the `FlowSet` — the next template's offset depended on this one.
+///
+/// Scope and option fields are kept in one list, in wire order, because a record lays
+/// them out that way and reading it only needs the widths.
+fn read_options_templates(
+    body: &[u8],
+    source: (IpAddr, u32),
+    learned: &mut Learned,
+    out: &mut Decoded,
+) {
+    let mut at = 0;
+    while at + 6 <= body.len() {
+        let Ok(id) = be16(body, at) else { return };
+        let Ok(scope_len) = be16(body, at + 2) else {
+            return;
+        };
+        let Ok(option_len) = be16(body, at + 4) else {
+            return;
+        };
+
+        let (scope_len, option_len) = (scope_len as usize, option_len as usize);
+        if scope_len % 4 != 0 || option_len % 4 != 0 || scope_len == 0 {
+            return;
+        }
+        let fields = (scope_len + option_len) / 4;
+
+        let Some(template) = parse_template(body, at + 6, fields, Kind::Options) else {
+            return;
+        };
+
+        at += 6 + scope_len + option_len;
+
+        if learned.learn(source, id, template) {
+            out.options_learned += 1;
         } else {
             out.templates_refused += 1;
         }
@@ -367,7 +517,7 @@ fn read_templates(
 /// `None` when the declaration is unusable. A zero `record_len` is the one that matters:
 /// the data reader divides by it, and a template of "one field, zero bytes wide" would
 /// otherwise mean a data `FlowSet` holds infinitely many records.
-fn parse_template(body: &[u8], at: usize, field_count: usize) -> Option<Template> {
+fn parse_template(body: &[u8], at: usize, field_count: usize, kind: Kind) -> Option<Template> {
     if field_count == 0 {
         return None;
     }
@@ -387,7 +537,56 @@ fn parse_template(body: &[u8], at: usize, field_count: usize) -> Option<Template
         return None;
     }
 
-    Some(Template { fields, record_len })
+    Some(Template {
+        fields,
+        record_len,
+        kind,
+    })
+}
+
+/// An options record: what the exporter says about its own sampling.
+///
+/// Every field is walked for its width, and only the three that matter are read — a
+/// sampler id and either of the two ways an interval is spelled. An options record about
+/// something else entirely, which exporters do send, simply teaches us nothing.
+fn read_options(
+    body: &[u8],
+    template: &Template,
+    source: (IpAddr, u32),
+    learned: &mut Learned,
+    out: &mut Decoded,
+) {
+    let mut at = 0;
+    while at + template.record_len <= body.len() {
+        let record = &body[at..at + template.record_len];
+        at += template.record_len;
+
+        let mut sampler = None;
+        let mut interval = None;
+        let mut offset = 0usize;
+
+        for field in &template.fields {
+            let Some(slice) = record.get(offset..offset + field.len) else {
+                break;
+            };
+            offset += field.len;
+
+            match field.kind {
+                FLOW_SAMPLER_ID => sampler = Some(narrow32(slice)),
+                SAMPLING_INTERVAL | FLOW_SAMPLER_RANDOM_INTERVAL => {
+                    interval = Some(narrow32(slice));
+                }
+                _ => {}
+            }
+        }
+
+        // An interval of 0 or 1 means "not sampling" and is not worth remembering — and
+        // recording 0 would be actively harmful, since every consumer multiplies by it.
+        if let Some(interval) = interval.filter(|i| *i > 1) {
+            learned.learn_sampler(source, sampler, interval);
+            out.options_applied += 1;
+        }
+    }
 }
 
 /// A data `FlowSet`: records packed back to back, laid out by `id`'s template.
@@ -395,32 +594,54 @@ fn read_data(
     body: &[u8],
     id: u16,
     source: (IpAddr, u32),
-    templates: &Templates,
+    learned: &Learned,
     header: &Header,
     out: &mut Decoded,
 ) {
-    let Some(template) = templates.get(source, id) else {
+    let Some(template) = learned.get(source, id) else {
         // §2.2: counted and dropped, never buffered. How many records were lost is not
         // knowable without the template — the record width is exactly what is missing —
         // so this counts the FlowSet.
         out.awaiting_template += 1;
         return;
     };
+    let samplers = learned.samplers.get(&source);
 
     // Trailing bytes shorter than one record are the FlowSet's padding to a 4-byte
     // boundary, and are not a short record.
     let mut at = 0;
     while at + template.record_len <= body.len() {
-        match record(&body[at..at + template.record_len], template, header) {
-            Some(flow) => out.flows.push(flow),
+        match record(
+            &body[at..at + template.record_len],
+            template,
+            header,
+            samplers,
+        ) {
+            Some(Read { flow, assumed }) => {
+                if assumed {
+                    out.sampling_unknown += 1;
+                }
+                out.flows.push(flow);
+            }
             None => out.not_a_flow += 1,
         }
         at += template.record_len;
     }
 }
 
+/// A flow, and whether its sampling rate was established or assumed.
+struct Read {
+    flow: Flow,
+    assumed: bool,
+}
+
 /// One record, walked field by field in the order the template declared.
-fn record(buf: &[u8], template: &Template, header: &Header) -> Option<Flow> {
+fn record(
+    buf: &[u8],
+    template: &Template,
+    header: &Header,
+    samplers: Option<&Samplers>,
+) -> Option<Read> {
     let mut src_address = None;
     let mut dst_address = None;
     let mut src_port = 0u16;
@@ -434,7 +655,8 @@ fn record(buf: &[u8], template: &Template, header: &Header) -> Option<Flow> {
     let mut output_if = None;
     let mut src_as = None;
     let mut dst_as = None;
-    let mut sampling_rate = 1u32;
+    let mut in_record_rate = None;
+    let mut sampler_id = None;
     let mut first_ms = None;
     let mut last_ms = None;
 
@@ -470,11 +692,12 @@ fn record(buf: &[u8], template: &Template, header: &Header) -> Option<Flow> {
             FIRST_SWITCHED => first_ms = Some(narrow32(slice)),
             LAST_SWITCHED => last_ms = Some(narrow32(slice)),
 
-            // §2.4. Clamped up to 1 for the same reason v5 clamps: every consumer
-            // multiplies by this, and a zero turns every byte count into nothing.
+            // §2.4, and the first of the three sources the module documents.
             SAMPLING_INTERVAL | FLOW_SAMPLER_RANDOM_INTERVAL => {
-                sampling_rate = narrow32(slice).max(1);
+                in_record_rate = Some(narrow32(slice));
             }
+            // The second: the record names a sampler an options record described.
+            FLOW_SAMPLER_ID => sampler_id = Some(narrow32(slice)),
 
             // Everything else is skipped by its declared length. A vendor's private
             // field is then harmless rather than fatal, which is the whole reason the
@@ -488,6 +711,13 @@ fn record(buf: &[u8], template: &Template, header: &Header) -> Option<Flow> {
     // table and no screen downstream could tell it from a real one.
     let (src_address, dst_address) = (src_address?, dst_address?);
 
+    // The precedence the module documents: what the record said, then what the sampler it
+    // named was told to do, then what the exporter declared for everything.
+    let established = in_record_rate.or_else(|| samplers.and_then(|s| s.rate(sampler_id)));
+    // Clamped up for the same reason v5 clamps: every consumer multiplies by this, and a
+    // zero turns every byte count into nothing.
+    let sampling_rate = established.unwrap_or(1).max(1);
+
     // An exporter that sends neither switched time dates the flow at the export instant,
     // which is the only honest answer available: it is when we know the flow existed.
     let observed_at = last_ms.map_or(header.exported_at, |ms| {
@@ -497,23 +727,26 @@ fn record(buf: &[u8], template: &Template, header: &Header) -> Option<Flow> {
         crate::absolute(header.exported_at, header.uptime_ms, ms)
     });
 
-    Some(Flow {
-        observed_at,
-        started_at,
-        src_address,
-        dst_address,
-        src_port,
-        dst_port,
-        protocol,
-        bytes,
-        packets,
-        sampling_rate,
-        tcp_flags,
-        tos,
-        input_if,
-        output_if,
-        src_as,
-        dst_as,
+    Some(Read {
+        flow: Flow {
+            observed_at,
+            started_at,
+            src_address,
+            dst_address,
+            src_port,
+            dst_port,
+            protocol,
+            bytes,
+            packets,
+            sampling_rate,
+            tcp_flags,
+            tos,
+            input_if,
+            output_if,
+            src_as,
+            dst_as,
+        },
+        assumed: established.is_none(),
     })
 }
 

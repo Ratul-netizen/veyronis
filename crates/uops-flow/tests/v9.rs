@@ -8,7 +8,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use chrono::{TimeZone, Utc};
 use uops_flow::Error;
-use uops_flow::v9::{self, Limits, Templates};
+use uops_flow::v9::{self, Learned, Limits};
 
 const EXPORT_SECS: u32 = 1_789_000_000;
 const UPTIME_MS: u32 = 10_000_000;
@@ -29,6 +29,12 @@ const FIRST_SWITCHED: u16 = 22;
 const IPV6_SRC_ADDR: u16 = 27;
 const IPV6_DST_ADDR: u16 = 28;
 const SAMPLING_INTERVAL: u16 = 34;
+const SAMPLING_ALGORITHM: u16 = 35;
+const FLOW_SAMPLER_ID: u16 = 48;
+const FLOW_SAMPLER_MODE: u16 = 49;
+const FLOW_SAMPLER_RANDOM_INTERVAL: u16 = 50;
+/// Options-template scope: the whole exporter.
+const SCOPE_SYSTEM: u16 = 1;
 
 fn header(source_id: u32) -> Vec<u8> {
     let mut p = Vec::new();
@@ -122,7 +128,7 @@ fn a_template_then_data_in_one_datagram_decodes() {
     p.extend_from_slice(&template_set(256, &standard_fields()));
     p.extend_from_slice(&flowset(256, &one_record()));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
 
     assert_eq!(out.templates_learned, 1);
@@ -147,7 +153,7 @@ fn a_template_then_data_in_one_datagram_decodes() {
 fn data_before_its_template_is_counted_and_dropped_and_the_next_datagram_decodes() {
     // The second acceptance criterion, and the normal state of affairs for the first
     // thirty seconds after anything restarts.
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
 
     let mut early = header(1);
     early.extend_from_slice(&flowset(256, &one_record()));
@@ -165,7 +171,7 @@ fn data_before_its_template_is_counted_and_dropped_and_the_next_datagram_decodes
 
 #[test]
 fn the_cache_survives_between_datagrams() {
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
 
     let mut first = header(1);
     first.extend_from_slice(&template_set(256, &standard_fields()));
@@ -187,7 +193,7 @@ fn two_exporters_both_using_template_256_do_not_decode_each_others_data() {
     // rather than a contrived one. Keyed on the id alone, the second exporter's records
     // would be read with the first's layout — and the failure is quiet, because the
     // fields are the right width and produce plausible addresses that are wrong.
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
 
     // Exporter ONE: the standard layout.
     let mut a = header(1);
@@ -234,7 +240,7 @@ fn two_exporters_both_using_template_256_do_not_decode_each_others_data() {
 fn one_exporters_two_observation_domains_are_separate() {
     // Same reasoning one level down: a chassis can export several domains, and each
     // numbers its templates from 256 independently.
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
 
     let mut a = header(1);
     a.extend_from_slice(&template_set(256, &standard_fields()));
@@ -252,9 +258,10 @@ fn one_exporters_two_observation_domains_are_separate() {
 
 #[test]
 fn a_redefined_template_replaces_the_old_one_without_counting_against_the_limit() {
-    let mut cache = Templates::new(Limits {
+    let mut cache = Learned::new(Limits {
         max_sources: 4,
         max_templates_per_source: 2,
+        ..Limits::default()
     });
 
     for _ in 0..10 {
@@ -270,9 +277,10 @@ fn a_redefined_template_replaces_the_old_one_without_counting_against_the_limit(
 fn the_template_cache_is_bounded_and_says_when_it_refuses() {
     // Unauthenticated UDP: without this, anything that can reach the port can make the
     // process allocate by inventing template ids.
-    let mut cache = Templates::new(Limits {
+    let mut cache = Learned::new(Limits {
         max_sources: 4,
         max_templates_per_source: 2,
+        ..Limits::default()
     });
 
     let mut p = header(1);
@@ -288,9 +296,10 @@ fn the_template_cache_is_bounded_and_says_when_it_refuses() {
 
 #[test]
 fn the_source_limit_bounds_exporters_as_well_as_templates() {
-    let mut cache = Templates::new(Limits {
+    let mut cache = Learned::new(Limits {
         max_sources: 2,
         max_templates_per_source: 8,
+        ..Limits::default()
     });
 
     for n in 0..5u8 {
@@ -316,7 +325,7 @@ fn a_sampling_interval_in_the_record_reaches_the_flow() {
     p.extend_from_slice(&template_set(256, &fields));
     p.extend_from_slice(&flowset(256, &record));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
 
     assert_eq!(out.flows[0].sampling_rate, 1000);
@@ -324,16 +333,248 @@ fn a_sampling_interval_in_the_record_reaches_the_flow() {
     assert_eq!(out.flows[0].bytes, 6000);
 }
 
-#[test]
-fn an_options_template_is_skipped_and_counted_rather_than_silently_ignored() {
-    // The known gap, made visible. An exporter that announces its sampling rate only
-    // this way is currently read as unsampled, and this counter is what says so.
-    let mut p = header(1);
-    p.extend_from_slice(&flowset(1, &[0u8; 12]));
+/// An options template `FlowSet`: id, then two byte lengths, then the specifiers.
+fn options_template_set(id: u16, scope: &[(u16, u16)], options: &[(u16, u16)]) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&id.to_be_bytes());
+    body.extend_from_slice(&u16::try_from(scope.len() * 4).unwrap().to_be_bytes());
+    body.extend_from_slice(&u16::try_from(options.len() * 4).unwrap().to_be_bytes());
+    for (kind, len) in scope.iter().chain(options) {
+        body.extend_from_slice(&kind.to_be_bytes());
+        body.extend_from_slice(&len.to_be_bytes());
+    }
+    flowset(1, &body)
+}
 
-    let mut cache = Templates::default();
+/// What Cisco sends: scope System, then a sampler id, mode and interval.
+fn cisco_sampler_template(id: u16) -> Vec<u8> {
+    options_template_set(
+        id,
+        &[(SCOPE_SYSTEM, 4)],
+        &[
+            (FLOW_SAMPLER_ID, 1),
+            (FLOW_SAMPLER_MODE, 1),
+            (FLOW_SAMPLER_RANDOM_INTERVAL, 4),
+        ],
+    )
+}
+
+fn cisco_sampler_record(sampler: u8, interval: u32) -> Vec<u8> {
+    let mut r = Vec::new();
+    r.extend_from_slice(&0u32.to_be_bytes()); // scope: system
+    r.push(sampler);
+    r.push(2); // mode: random
+    r.extend_from_slice(&interval.to_be_bytes());
+    r
+}
+
+#[test]
+fn a_sampler_announced_in_an_options_record_reaches_the_flows_that_name_it() {
+    // The path that matters: an exporter sampling 1-in-1000 and saying so only in an
+    // options record. Read as unsampled, every byte count it reports is out by three
+    // orders of magnitude — §2.4's factor of a thousand, exactly.
+    let mut cache = Learned::default();
+
+    let mut announce = header(1);
+    announce.extend_from_slice(&cisco_sampler_template(300));
+    announce.extend_from_slice(&flowset(300, &cisco_sampler_record(1, 1000)));
+    let (_, out) = v9::decode(&announce, ONE, &mut cache).unwrap();
+    assert_eq!(out.options_learned, 1);
+    assert_eq!(out.options_applied, 1);
+    assert!(out.flows.is_empty(), "an options record is not traffic");
+
+    // Now traffic from a template whose records name that sampler.
+    let mut fields = standard_fields();
+    fields.push((FLOW_SAMPLER_ID, 1));
+    let mut record = one_record();
+    record.push(1);
+
+    let mut traffic = header(1);
+    traffic.extend_from_slice(&template_set(256, &fields));
+    traffic.extend_from_slice(&flowset(256, &record));
+    let (_, out) = v9::decode(&traffic, ONE, &mut cache).unwrap();
+
+    assert_eq!(out.flows.len(), 1);
+    assert_eq!(out.flows[0].sampling_rate, 1000);
+    assert_eq!(
+        out.sampling_unknown, 0,
+        "the rate was established, not assumed"
+    );
+    // Still as observed. The multiplication belongs to the reader.
+    assert_eq!(out.flows[0].bytes, 6000);
+}
+
+#[test]
+fn a_rate_declared_with_no_sampler_id_applies_to_everything_the_exporter_sends() {
+    let mut cache = Learned::default();
+
+    let mut announce = header(1);
+    announce.extend_from_slice(&options_template_set(
+        300,
+        &[(SCOPE_SYSTEM, 4)],
+        &[(SAMPLING_INTERVAL, 4), (SAMPLING_ALGORITHM, 1)],
+    ));
+    let mut rec = Vec::new();
+    rec.extend_from_slice(&0u32.to_be_bytes());
+    rec.extend_from_slice(&100u32.to_be_bytes());
+    rec.push(2);
+    announce.extend_from_slice(&flowset(300, &rec));
+    v9::decode(&announce, ONE, &mut cache).unwrap();
+
+    // Ordinary traffic, naming no sampler at all.
+    let mut traffic = header(1);
+    traffic.extend_from_slice(&template_set(256, &standard_fields()));
+    traffic.extend_from_slice(&flowset(256, &one_record()));
+    let (_, out) = v9::decode(&traffic, ONE, &mut cache).unwrap();
+
+    assert_eq!(out.flows[0].sampling_rate, 100);
+    assert_eq!(out.sampling_unknown, 0);
+}
+
+#[test]
+fn a_rate_in_the_record_beats_one_learned_from_an_options_record() {
+    // The precedence the module documents. A record that states its own rate is
+    // unambiguous; a sampler table is a thing we were told earlier and may be stale.
+    let mut cache = Learned::default();
+
+    let mut announce = header(1);
+    announce.extend_from_slice(&cisco_sampler_template(300));
+    announce.extend_from_slice(&flowset(300, &cisco_sampler_record(1, 1000)));
+    v9::decode(&announce, ONE, &mut cache).unwrap();
+
+    let mut fields = standard_fields();
+    fields.push((FLOW_SAMPLER_ID, 1));
+    fields.push((SAMPLING_INTERVAL, 4));
+    let mut record = one_record();
+    record.push(1);
+    record.extend_from_slice(&7u32.to_be_bytes());
+
+    let mut traffic = header(1);
+    traffic.extend_from_slice(&template_set(256, &fields));
+    traffic.extend_from_slice(&flowset(256, &record));
+    let (_, out) = v9::decode(&traffic, ONE, &mut cache).unwrap();
+
+    assert_eq!(out.flows[0].sampling_rate, 7);
+}
+
+#[test]
+fn one_exporters_sampler_table_is_not_another_exporters() {
+    // A sampler id is a number the exporter chose. Sampler 1 on one router has nothing
+    // to do with sampler 1 on the next.
+    let mut cache = Learned::default();
+
+    let mut announce = header(1);
+    announce.extend_from_slice(&cisco_sampler_template(300));
+    announce.extend_from_slice(&flowset(300, &cisco_sampler_record(1, 1000)));
+    v9::decode(&announce, ONE, &mut cache).unwrap();
+
+    let mut fields = standard_fields();
+    fields.push((FLOW_SAMPLER_ID, 1));
+    let mut record = one_record();
+    record.push(1);
+
+    let mut traffic = header(1);
+    traffic.extend_from_slice(&template_set(256, &fields));
+    traffic.extend_from_slice(&flowset(256, &record));
+    let (_, out) = v9::decode(&traffic, TWO, &mut cache).unwrap();
+
+    assert_eq!(out.flows[0].sampling_rate, 1, "TWO inherited ONE's sampler");
+    assert_eq!(
+        out.sampling_unknown, 1,
+        "and it must say the rate was assumed"
+    );
+}
+
+#[test]
+fn an_unsampled_exporter_reports_a_rate_of_one_and_says_it_was_assumed() {
+    // Not a fault: an exporter that is not sampling says nothing about sampling. The
+    // counter is what distinguishes "rate is 1" from "we do not know the rate", which is
+    // the distinction §2.4 turns on.
+    let mut p = header(1);
+    p.extend_from_slice(&template_set(256, &standard_fields()));
+    p.extend_from_slice(&flowset(256, &one_record()));
+
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
-    assert_eq!(out.options_skipped, 1);
+
+    assert_eq!(out.flows[0].sampling_rate, 1);
+    assert_eq!(out.sampling_unknown, 1);
+}
+
+#[test]
+fn an_options_record_claiming_an_interval_of_zero_is_not_remembered() {
+    // Every consumer multiplies by the rate. Remembering a zero would turn every byte
+    // count the exporter sends into nothing.
+    let mut cache = Learned::default();
+
+    let mut announce = header(1);
+    announce.extend_from_slice(&cisco_sampler_template(300));
+    announce.extend_from_slice(&flowset(300, &cisco_sampler_record(1, 0)));
+    let (_, out) = v9::decode(&announce, ONE, &mut cache).unwrap();
+    assert_eq!(out.options_applied, 0);
+
+    let mut fields = standard_fields();
+    fields.push((FLOW_SAMPLER_ID, 1));
+    let mut record = one_record();
+    record.push(1);
+
+    let mut traffic = header(1);
+    traffic.extend_from_slice(&template_set(256, &fields));
+    traffic.extend_from_slice(&flowset(256, &record));
+    let (_, out) = v9::decode(&traffic, ONE, &mut cache).unwrap();
+    assert_eq!(out.flows[0].sampling_rate, 1);
+}
+
+#[test]
+fn an_options_template_with_a_length_that_is_not_a_multiple_of_four_is_refused() {
+    // Each field specifier is four bytes, so a length that is not a multiple of four
+    // cannot be resynchronised from — the next template's offset depended on this one.
+    let mut body = Vec::new();
+    body.extend_from_slice(&300u16.to_be_bytes());
+    body.extend_from_slice(&5u16.to_be_bytes()); // scope length, not a multiple of 4
+    body.extend_from_slice(&4u16.to_be_bytes());
+    body.extend_from_slice(&[0u8; 9]);
+
+    let mut p = header(1);
+    p.extend_from_slice(&flowset(1, &body));
+
+    let mut cache = Learned::default();
+    let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
+    assert_eq!(out.options_learned, 0);
+    assert!(cache.is_empty());
+}
+
+#[test]
+fn the_sampler_table_is_bounded() {
+    let mut cache = Learned::new(Limits {
+        max_samplers_per_source: 2,
+        ..Limits::default()
+    });
+
+    let mut p = header(1);
+    p.extend_from_slice(&cisco_sampler_template(300));
+    for id in 1..=6u8 {
+        p.extend_from_slice(&flowset(300, &cisco_sampler_record(id, 1000)));
+    }
+    let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
+
+    // Every record was read; only the first two could be remembered.
+    assert_eq!(out.options_applied, 6);
+
+    let mut fields = standard_fields();
+    fields.push((FLOW_SAMPLER_ID, 1));
+    for (sampler, expected) in [(1u8, 1000u32), (2, 1000), (6, 1)] {
+        let mut record = one_record();
+        record.push(sampler);
+        let mut traffic = header(1);
+        traffic.extend_from_slice(&template_set(256, &fields));
+        traffic.extend_from_slice(&flowset(256, &record));
+        let (_, out) = v9::decode(&traffic, ONE, &mut cache).unwrap();
+        assert_eq!(
+            out.flows[0].sampling_rate, expected,
+            "sampler {sampler} resolved wrongly"
+        );
+    }
 }
 
 #[test]
@@ -349,7 +590,7 @@ fn a_template_with_no_addresses_produces_a_count_rather_than_a_row_of_zeroes() {
     p.extend_from_slice(&template_set(256, &fields));
     p.extend_from_slice(&flowset(256, &record));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
 
     assert!(out.flows.is_empty());
@@ -379,7 +620,7 @@ fn a_vendors_unknown_field_is_skipped_by_its_length_and_the_rest_still_decodes()
     p.extend_from_slice(&template_set(256, &fields));
     p.extend_from_slice(&flowset(256, &record));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
 
     assert_eq!(out.flows.len(), 1);
@@ -402,7 +643,7 @@ fn several_records_in_one_data_flowset_all_decode_and_padding_is_not_a_short_rec
     p.extend_from_slice(&template_set(256, &standard_fields()));
     p.extend_from_slice(&flowset(256, &body));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
     assert_eq!(out.flows.len(), 3);
     assert_eq!(out.not_a_flow, 0, "padding was read as a record");
@@ -416,7 +657,7 @@ fn a_template_whose_fields_are_all_zero_width_is_refused_rather_than_looped_on()
     p.extend_from_slice(&template_set(256, &[(IN_BYTES, 0), (IN_PKTS, 0)]));
     p.extend_from_slice(&flowset(256, &[0u8; 8]));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
 
     assert_eq!(out.templates_learned, 0);
@@ -435,7 +676,7 @@ fn a_flowset_length_that_does_not_cover_its_own_header_is_refused_and_does_not_s
     p.extend_from_slice(&256u16.to_be_bytes());
     p.extend_from_slice(&0u16.to_be_bytes());
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     assert!(matches!(
         v9::decode(&p, ONE, &mut cache),
         Err(Error::Invalid { .. })
@@ -449,7 +690,7 @@ fn a_flowset_running_past_the_packet_is_refused() {
     p.extend_from_slice(&4000u16.to_be_bytes());
     p.extend_from_slice(&[0u8; 8]);
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     assert!(matches!(
         v9::decode(&p, ONE, &mut cache),
         Err(Error::CountExceedsPacket { .. })
@@ -476,7 +717,7 @@ fn a_flow_that_began_before_the_uptime_wrap_is_not_dated_in_the_future() {
     p.extend_from_slice(&template_set(256, &standard_fields()));
     p.extend_from_slice(&flowset(256, &record));
 
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     let (_, out) = v9::decode(&p, ONE, &mut cache).unwrap();
 
     let exported = Utc.timestamp_opt(i64::from(EXPORT_SECS), 0).unwrap();
@@ -493,13 +734,13 @@ fn every_truncation_of_a_valid_packet_is_an_error_or_a_count_and_never_a_panic()
     full.extend_from_slice(&flowset(256, &one_record()));
 
     for cut in 0..full.len() {
-        let mut cache = Templates::default();
+        let mut cache = Learned::default();
         // Either outcome is acceptable; a panic is not. A truncated template FlowSet is
         // recoverable — the templates before it were learned — so unlike v5 this is not
         // required to be an error.
         let _ = v9::decode(&full[..cut], ONE, &mut cache);
     }
-    let mut cache = Templates::default();
+    let mut cache = Learned::default();
     assert!(v9::decode(&full, ONE, &mut cache).is_ok());
 }
 
@@ -517,7 +758,7 @@ fn arbitrary_bytes_never_panic() {
         if len >= 2 {
             buf[0..2].copy_from_slice(&9u16.to_be_bytes());
         }
-        let mut cache = Templates::default();
+        let mut cache = Learned::default();
         let _ = v9::decode(&buf, ONE, &mut cache);
     }
 }
