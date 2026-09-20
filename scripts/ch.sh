@@ -63,9 +63,38 @@ cmd_verify() {
     while read -r n v; do
       [ -z "$n" ] && continue
       args="${args}&param_${n}=$(printf '%s' "$v" | sed 's/ /%20/g; s/:/%3A/g')"
-    done < <(sed -n 's/^--   \([a-z0-9_]*\) [A-Za-z0-9()]* = \(.*\)$/\1 \2/p' "$f")
+    # The type may contain a space, a comma and quotes -- DateTime64(3, 'UTC') -- so
+    # the class has to admit them. It did not, and the parameters silently stopped
+    # being extracted the day the compiler started naming the timezone: every
+    # statement then went to ClickHouse with its substitutions missing, and came back
+    # 500 rather than wrong, which is the one mercy in it.
+    done < <(sed -n 's/^--   \([a-z0-9_]*\) [A-Za-z0-9(),'"'"' ]* = \(.*\)$/\1 \2/p' "$f")
 
     checked=$((checked + 1))
+
+    # Every placeholder in the statement must have been read out of the -- params
+    # block. When one has not, the reader above has stopped understanding the file and
+    # the SQL is fine -- so say that, rather than sending a doomed query and reporting
+    # ClickHouse's 500 as though the schema were wrong.
+    #
+    # Checked per placeholder rather than "did we read any", because that is the shape
+    # the failure actually took: a narrower type class still matched `p0 UUID` and only
+    # lost the two timestamps, so the parameter list was short rather than empty.
+    local missing=""
+    for ph in $(printf '%s' "$query" | grep -o '{p[0-9]*:' | tr -d '{:' | sort -u); do
+      case "$args" in
+        *"param_${ph}="*) ;;
+        *) missing="${missing} ${ph}" ;;
+      esac
+    done
+    if [ -n "$missing" ]; then
+      echo "  FAIL $name"
+      echo "       no value was read for:${missing}"
+      echo "       the extractor in this script is out of date with the golden files"
+      FAILURES=$((FAILURES + 1))
+      continue
+    fi
+
     if printf '%s' "$query" | ch "$args" > /dev/null 2>/tmp/ch_err; then
       echo "  ok   $name"
     else
