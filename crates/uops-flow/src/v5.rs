@@ -192,26 +192,12 @@ fn sampling(field: u16) -> u32 {
     u32::from(field & 0x3fff).max(1)
 }
 
-/// Recover an absolute instant from a device uptime.
+/// Recover an absolute instant from this datagram's uptime base.
 ///
-/// A record says "this flow ended 4 261 003 ms after the device booted". The header says
-/// "at export, the clock read T and the device had been up for U ms". So the flow ended
-/// at `T - (U - uptime)`.
-///
-/// # The wrap is real
-///
-/// `sys_uptime` is milliseconds in a `u32`, which runs out after **49.7 days** and wraps
-/// to zero. A device up for longer will report a record uptime *greater* than the
-/// header's for any flow that began before the wrap, and `U - uptime` computed as signed
-/// arithmetic lands the flow weeks in the future.
-///
-/// `wrapping_sub` is the fix and it is not a trick: the two values are samples of the
-/// same wrapping counter, so their difference in the ring is the elapsed time whenever
-/// that is under 49.7 days — which it always is, since a flow does not last seven weeks.
-/// It is the same reason the SNMP counter handling in `uops-poll` treats a decrease as a
-/// wrap rather than as a negative rate.
+/// A record says "this flow ended 4 261 003 ms after the device booted"; the header says
+/// what the clock read at export and how long the device had been up. The arithmetic,
+/// and the 49.7-day wrap it has to survive, is [`crate::absolute`].
 #[must_use]
 pub fn when(header: &Header, uptime_ms: u32) -> DateTime<Utc> {
-    let ago = header.uptime_ms.wrapping_sub(uptime_ms);
-    header.exported_at - chrono::Duration::milliseconds(i64::from(ago))
+    crate::absolute(header.exported_at, header.uptime_ms, uptime_ms)
 }

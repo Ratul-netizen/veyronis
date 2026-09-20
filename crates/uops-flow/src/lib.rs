@@ -29,6 +29,7 @@
 //! code got wrong is a caught error rather than a read out of bounds.
 
 pub mod v5;
+pub mod v9;
 
 use std::net::IpAddr;
 
@@ -126,6 +127,34 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Recover an absolute instant from a device uptime.
+///
+/// `NetFlow` v5 and v9 both date a flow by *uptime*: milliseconds since the exporter
+/// booted. The header carries the wall clock and the uptime at the moment of export, so
+/// the flow ended at `exported_at - (header_uptime - uptime)`.
+///
+/// # The wrap is real
+///
+/// Uptime is milliseconds in a `u32`, which runs out after **49.7 days** and wraps to
+/// zero. A device up for longer reports a record uptime *greater* than the header's for
+/// any flow that began before the wrap, and a signed subtraction lands that flow weeks in
+/// the future. The row is then outside every query window, so the symptom is not a wrong
+/// timestamp on a screen — it is traffic that silently vanishes.
+///
+/// `wrapping_sub` is the fix and it is not a trick: the two values are samples of the
+/// same wrapping counter, so their difference in the ring is the elapsed time whenever
+/// that is under 49.7 days — which it always is, because a flow does not last seven
+/// weeks. It is the same reasoning `uops-poll` applies to a decreasing SNMP counter.
+#[must_use]
+pub fn absolute(
+    exported_at: DateTime<Utc>,
+    header_uptime_ms: u32,
+    uptime_ms: u32,
+) -> DateTime<Utc> {
+    let ago = header_uptime_ms.wrapping_sub(uptime_ms);
+    exported_at - chrono::Duration::milliseconds(i64::from(ago))
+}
 
 /// Read a big-endian `u16` at `at`, or say the packet was too short.
 ///
