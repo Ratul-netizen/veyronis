@@ -47,21 +47,22 @@
 //! 3. **A rate the exporter declared with no sampler id**, which applies to everything
 //!    it sends.
 //!
-//! Two and three arrive in *options* records, which is why [`Learned`] holds more than
-//! templates: an options template registers an id like any other, and its data records
-//! turn up in an ordinary data `FlowSet` carrying the exporter's own configuration rather
-//! than traffic.
+//! Two and three arrive in *options* records: an options template registers an id like
+//! any other, and its data records turn up in an ordinary data `FlowSet` carrying the
+//! exporter's own configuration rather than traffic. The cache that holds both is
+//! [`crate::templates::Learned`], shared with IPFIX because what is remembered is the
+//! same even though the wire shapes are not.
 //!
 //! An exporter that samples and says so in none of these ways is indistinguishable from
 //! one that does not sample. That is a limit of the protocol rather than of this decoder,
 //! and [`Decoded::sampling_unknown`] counts the records it applies to.
 
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 
 use chrono::{DateTime, TimeZone, Utc};
 
-use crate::{Error, Flow, Result, be16, be32};
+use crate::templates::{Field, Kind, Learned, Protocol, Samplers, Source, Template};
+use crate::{Error, Flow, Result, be16, be32, ipv4, ipv6, narrow8, narrow16, narrow32, truncating};
 
 /// Bytes before the first `FlowSet`.
 const HEADER: usize = 20;
@@ -97,191 +98,6 @@ const IPV6_DST_ADDR: u16 = 28;
 const SAMPLING_INTERVAL: u16 = 34;
 const FLOW_SAMPLER_ID: u16 = 48;
 const FLOW_SAMPLER_RANDOM_INTERVAL: u16 = 50;
-
-/// How much template state one collector will hold.
-///
-/// Bounded because the input is unauthenticated UDP: without a limit, anything that can
-/// reach the port can make this process allocate by inventing exporters or template ids.
-#[derive(Clone, Copy, Debug)]
-pub struct Limits {
-    /// Distinct `(exporter, observation domain)` pairs.
-    ///
-    /// A pair rather than an exporter, because one chassis can export several
-    /// observation domains and each numbers its templates independently.
-    pub max_sources: usize,
-    /// Templates held for any one source.
-    pub max_templates_per_source: usize,
-    /// Distinct samplers remembered for any one source.
-    ///
-    /// Bounded for the same reason as the templates: the sampler id is a number the
-    /// exporter chooses, and the exporter is unauthenticated.
-    pub max_samplers_per_source: usize,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        // Room for a large estate — a thousand exporters, each with a handful of
-        // templates and headroom for re-registration — and still a bound a hostile
-        // sender cannot walk past.
-        Self {
-            max_sources: 1024,
-            max_templates_per_source: 64,
-            max_samplers_per_source: 32,
-        }
-    }
-}
-
-/// One field, as a template declares it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Field {
-    kind: u16,
-    len: usize,
-}
-
-/// What the records laid out by a template contain.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    /// Traffic.
-    Data,
-    /// The exporter's own configuration — which sampler runs at which interval.
-    Options,
-}
-
-/// A layout for records.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Template {
-    fields: Vec<Field>,
-    /// Sum of the field lengths. Every record laid out by this template is this long.
-    record_len: usize,
-    kind: Kind,
-}
-
-impl Template {
-    /// How long one record is. Never zero — see [`parse_template`].
-    #[must_use]
-    pub fn record_len(&self) -> usize {
-        self.record_len
-    }
-
-    #[must_use]
-    pub fn kind(&self) -> Kind {
-        self.kind
-    }
-}
-
-/// What an exporter said about its own sampling.
-///
-/// Learned from options records and held per source, because a sampler id means nothing
-/// outside the exporter that chose it.
-#[derive(Clone, Debug, Default)]
-struct Samplers {
-    /// `flowSamplerId` to interval.
-    by_id: HashMap<u32, u32>,
-    /// A rate declared with no sampler id, applying to everything the exporter sends.
-    everything: Option<u32>,
-}
-
-impl Samplers {
-    /// The rate for a record, which may or may not name a sampler.
-    fn rate(&self, sampler: Option<u32>) -> Option<u32> {
-        sampler
-            .and_then(|id| self.by_id.get(&id).copied())
-            .or(self.everything)
-    }
-}
-
-/// Everything this collector has learned from the exporters talking to it.
-///
-/// Templates, and the sampling rates that arrive in options records. Both are keyed as
-/// §2.2 requires — `(exporter, observation domain)` — because a template id and a sampler
-/// id are both numbers the exporter picked, and mean nothing outside it.
-///
-/// Held across datagrams and deliberately *not* persisted: the gap after a restart is
-/// inherent to the protocol, and it is reported rather than papered over.
-#[derive(Debug)]
-pub struct Learned {
-    by_source: HashMap<(IpAddr, u32), HashMap<u16, Template>>,
-    samplers: HashMap<(IpAddr, u32), Samplers>,
-    limits: Limits,
-}
-
-impl Default for Learned {
-    fn default() -> Self {
-        Self::new(Limits::default())
-    }
-}
-
-impl Learned {
-    #[must_use]
-    pub fn new(limits: Limits) -> Self {
-        Self {
-            by_source: HashMap::new(),
-            samplers: HashMap::new(),
-            limits,
-        }
-    }
-
-    /// How many templates are held, across every source.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.by_source.values().map(HashMap::len).sum()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn get(&self, source: (IpAddr, u32), id: u16) -> Option<&Template> {
-        self.by_source.get(&source)?.get(&id)
-    }
-
-    /// Remember what an options record said.
-    ///
-    /// Bounded like the templates are. A sampler already known is updated, which does not
-    /// count against the limit — an exporter re-announcing its configuration is the
-    /// normal case.
-    fn learn_sampler(&mut self, source: (IpAddr, u32), sampler: Option<u32>, interval: u32) {
-        if !self.samplers.contains_key(&source) && self.samplers.len() >= self.limits.max_sources {
-            return;
-        }
-        let slot = self.samplers.entry(source).or_default();
-        match sampler {
-            Some(id) => {
-                if !slot.by_id.contains_key(&id)
-                    && slot.by_id.len() >= self.limits.max_samplers_per_source
-                {
-                    return;
-                }
-                slot.by_id.insert(id, interval);
-            }
-            None => slot.everything = Some(interval),
-        }
-    }
-
-    /// Learn a template. `false` when a limit refused it.
-    ///
-    /// A template that is already held is *replaced*, and replacing never counts against
-    /// the limit — an exporter re-registering the same id is the normal case, not
-    /// growth. A redefinition is accepted because the protocol offers no way to reject
-    /// one; §2.2 records why the data records racing it cannot be rescued.
-    fn learn(&mut self, source: (IpAddr, u32), id: u16, template: Template) -> bool {
-        let known = self.by_source.contains_key(&source);
-        if !known && self.by_source.len() >= self.limits.max_sources {
-            return false;
-        }
-
-        let slot = self.by_source.entry(source).or_default();
-        if !slot.contains_key(&id) && slot.len() >= self.limits.max_templates_per_source {
-            // Refused rather than evicted. Evicting to make room means dropping whichever
-            // exporter is quietest, which is the one nobody notices has gone missing.
-            return false;
-        }
-
-        slot.insert(id, template);
-        true
-    }
-}
 
 /// What the header said.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -374,7 +190,11 @@ pub fn decode(packet: &[u8], exporter: IpAddr, learned: &mut Learned) -> Result<
         exported_at,
         uptime_ms,
     };
-    let source = (exporter, source_id);
+    let source = Source {
+        exporter,
+        protocol: Protocol::NetFlow9,
+        domain: source_id,
+    };
 
     let mut out = Decoded::default();
     let mut at = HEADER;
@@ -416,7 +236,7 @@ pub fn decode(packet: &[u8], exporter: IpAddr, learned: &mut Learned) -> Result<
                 // describing its own sampling. Copied out before dispatching so that
                 // reading an options record can take the mutable borrow it needs to
                 // record what it learned.
-                match learned.get(source, id).map(Template::kind) {
+                match learned.get(source, id).map(|t| t.kind) {
                     None => out.awaiting_template += 1,
                     Some(Kind::Data) => read_data(body, id, source, learned, &header, &mut out),
                     Some(Kind::Options) => {
@@ -436,7 +256,7 @@ pub fn decode(packet: &[u8], exporter: IpAddr, learned: &mut Learned) -> Result<
 }
 
 /// A template `FlowSet` holds one or more templates, back to back.
-fn read_templates(body: &[u8], source: (IpAddr, u32), learned: &mut Learned, out: &mut Decoded) {
+fn read_templates(body: &[u8], source: Source, learned: &mut Learned, out: &mut Decoded) {
     let mut at = 0;
     // Four bytes is the smallest possible template header; anything left below that is
     // the FlowSet's alignment padding.
@@ -476,12 +296,7 @@ fn read_templates(body: &[u8], source: (IpAddr, u32), learned: &mut Learned, out
 ///
 /// Scope and option fields are kept in one list, in wire order, because a record lays
 /// them out that way and reading it only needs the widths.
-fn read_options_templates(
-    body: &[u8],
-    source: (IpAddr, u32),
-    learned: &mut Learned,
-    out: &mut Decoded,
-) {
+fn read_options_templates(body: &[u8], source: Source, learned: &mut Learned, out: &mut Decoded) {
     let mut at = 0;
     while at + 6 <= body.len() {
         let Ok(id) = be16(body, at) else { return };
@@ -514,34 +329,30 @@ fn read_options_templates(
 
 /// `field_count` pairs of `(type, length)`, starting at `at`.
 ///
-/// `None` when the declaration is unusable. A zero `record_len` is the one that matters:
-/// the data reader divides by it, and a template of "one field, zero bytes wide" would
-/// otherwise mean a data `FlowSet` holds infinitely many records.
+/// `None` when the declaration is unusable — see [`Template::new`] for which cases those
+/// are and why a zero-width template is the one that matters.
 fn parse_template(body: &[u8], at: usize, field_count: usize, kind: Kind) -> Option<Template> {
     if field_count == 0 {
         return None;
     }
 
     let mut fields = Vec::with_capacity(field_count);
-    let mut record_len = 0usize;
 
     for n in 0..field_count {
         let base = at.checked_add(n.checked_mul(4)?)?;
         let kind = be16(body, base).ok()?;
         let len = be16(body, base + 2).ok()? as usize;
-        record_len = record_len.checked_add(len)?;
-        fields.push(Field { kind, len });
+        // v9 has no variable-length fields: a length is always a width.
+        fields.push(Field {
+            kind,
+            len,
+            variable: false,
+            // v9 has no enterprise elements: every identifier is IANA's.
+            enterprise: false,
+        });
     }
 
-    if record_len == 0 {
-        return None;
-    }
-
-    Some(Template {
-        fields,
-        record_len,
-        kind,
-    })
+    Template::new(fields, kind)
 }
 
 /// An options record: what the exporter says about its own sampling.
@@ -552,33 +363,26 @@ fn parse_template(body: &[u8], at: usize, field_count: usize, kind: Kind) -> Opt
 fn read_options(
     body: &[u8],
     template: &Template,
-    source: (IpAddr, u32),
+    source: Source,
     learned: &mut Learned,
     out: &mut Decoded,
 ) {
-    let mut at = 0;
-    while at + template.record_len <= body.len() {
-        let record = &body[at..at + template.record_len];
-        at += template.record_len;
+    // v9 has no variable-length fields, so every options record is the same width.
+    let Some(width) = template.fixed_len else {
+        return;
+    };
 
+    let mut at = 0;
+    while at + width <= body.len() {
         let mut sampler = None;
         let mut interval = None;
-        let mut offset = 0usize;
 
-        for field in &template.fields {
-            let Some(slice) = record.get(offset..offset + field.len) else {
-                break;
-            };
-            offset += field.len;
-
-            match field.kind {
-                FLOW_SAMPLER_ID => sampler = Some(narrow32(slice)),
-                SAMPLING_INTERVAL | FLOW_SAMPLER_RANDOM_INTERVAL => {
-                    interval = Some(narrow32(slice));
-                }
-                _ => {}
-            }
-        }
+        template.walk(&body[at..at + width], |field, slice| match field.kind {
+            FLOW_SAMPLER_ID => sampler = Some(narrow32(slice)),
+            SAMPLING_INTERVAL | FLOW_SAMPLER_RANDOM_INTERVAL => interval = Some(narrow32(slice)),
+            _ => {}
+        });
+        at += width;
 
         // An interval of 0 or 1 means "not sampling" and is not worth remembering — and
         // recording 0 would be actively harmful, since every consumer multiplies by it.
@@ -593,7 +397,7 @@ fn read_options(
 fn read_data(
     body: &[u8],
     id: u16,
-    source: (IpAddr, u32),
+    source: Source,
     learned: &Learned,
     header: &Header,
     out: &mut Decoded,
@@ -605,18 +409,19 @@ fn read_data(
         out.awaiting_template += 1;
         return;
     };
-    let samplers = learned.samplers.get(&source);
+    let samplers = learned.samplers(source);
 
     // Trailing bytes shorter than one record are the FlowSet's padding to a 4-byte
     // boundary, and are not a short record.
+    // Trailing bytes shorter than one record are the FlowSet's padding to a 4-byte
+    // boundary, and are not a short record.
+    let Some(width) = template.fixed_len else {
+        return;
+    };
+
     let mut at = 0;
-    while at + template.record_len <= body.len() {
-        match record(
-            &body[at..at + template.record_len],
-            template,
-            header,
-            samplers,
-        ) {
+    while at + width <= body.len() {
+        match record(&body[at..at + width], template, header, samplers) {
             Some(Read { flow, assumed }) => {
                 if assumed {
                     out.sampling_unknown += 1;
@@ -625,7 +430,7 @@ fn read_data(
             }
             None => out.not_a_flow += 1,
         }
-        at += template.record_len;
+        at += width;
     }
 }
 
@@ -660,11 +465,7 @@ fn record(
     let mut first_ms = None;
     let mut last_ms = None;
 
-    let mut at = 0usize;
-    for field in &template.fields {
-        let slice = buf.get(at..at + field.len)?;
-        at += field.len;
-
+    template.walk(buf, |field, slice| {
         match field.kind {
             IPV4_SRC_ADDR => src_address = ipv4(slice),
             IPV4_DST_ADDR => dst_address = ipv4(slice),
@@ -704,7 +505,7 @@ fn record(
             // template carries lengths.
             _ => {}
         }
-    }
+    })?;
 
     // No addresses means this template is not describing an IP conversation. Returning
     // None puts it on a counter; inventing 0.0.0.0 would put a meaningless row in the
@@ -748,49 +549,4 @@ fn record(
         },
         assumed: established.is_none(),
     })
-}
-
-/// A numeric field of whatever width the template declared.
-///
-/// RFC 3954 lets an exporter choose the width of a numeric field — `IN_BYTES` is
-/// commonly 4 bytes and legitimately 8 — so nothing here may assume a size. Widths above
-/// 8 take the low-order 8 bytes, which is what a big-endian value zero-padded on the left
-/// means; a field wider than that carrying a number this decoder understands does not
-/// occur, and guessing is better than refusing the whole record over it.
-fn truncating(slice: &[u8]) -> u64 {
-    let take = slice.len().min(8);
-    let start = slice.len() - take;
-    let mut value = 0u64;
-    for &b in &slice[start..] {
-        value = (value << 8) | u64::from(b);
-    }
-    value
-}
-
-/// The same value, narrowed to the width the field actually means.
-///
-/// A template may declare a port four bytes wide, and some do; the value in it is still a
-/// port. Keeping the low-order bits is what a big-endian number zero-padded on the left
-/// means, so this is the reading rather than a lossy shortcut — and it is named, because
-/// a bare `as` at each of these call sites says nothing about which of the two it is.
-fn narrow32(slice: &[u8]) -> u32 {
-    u32::try_from(truncating(slice) & u64::from(u32::MAX)).unwrap_or(u32::MAX)
-}
-
-fn narrow16(slice: &[u8]) -> u16 {
-    u16::try_from(truncating(slice) & u64::from(u16::MAX)).unwrap_or(u16::MAX)
-}
-
-fn narrow8(slice: &[u8]) -> u8 {
-    u8::try_from(truncating(slice) & u64::from(u8::MAX)).unwrap_or(u8::MAX)
-}
-
-fn ipv4(slice: &[u8]) -> Option<IpAddr> {
-    let octets: [u8; 4] = slice.try_into().ok()?;
-    Some(IpAddr::V4(Ipv4Addr::from(octets)))
-}
-
-fn ipv6(slice: &[u8]) -> Option<IpAddr> {
-    let octets: [u8; 16] = slice.try_into().ok()?;
-    Some(IpAddr::V6(Ipv6Addr::from(octets)))
 }

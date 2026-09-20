@@ -8,7 +8,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use chrono::{TimeZone, Utc};
 use uops_flow::Error;
-use uops_flow::v9::{self, Learned, Limits};
+use uops_flow::templates::{Learned, Limits};
+use uops_flow::v9;
 
 const EXPORT_SECS: u32 = 1_789_000_000;
 const UPTIME_MS: u32 = 10_000_000;

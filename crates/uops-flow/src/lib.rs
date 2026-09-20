@@ -28,10 +28,12 @@
 //! checking, and the workspace forbids `unsafe`, so the failure mode of a length this
 //! code got wrong is a caught error rather than a read out of bounds.
 
+pub mod ipfix;
+pub mod templates;
 pub mod v5;
 pub mod v9;
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use chrono::{DateTime, Utc};
 
@@ -190,4 +192,51 @@ pub(crate) fn u8_at(buf: &[u8], at: usize) -> Result<u8> {
         need: at + 1,
         got: buf.len(),
     })
+}
+
+/// A numeric field of whatever width the template declared.
+///
+/// Shared by `v9` and `ipfix`, which both let the exporter choose a field's width.
+///
+/// RFC 3954 lets an exporter choose the width of a numeric field — `IN_BYTES` is
+/// commonly 4 bytes and legitimately 8 — so nothing here may assume a size. Widths above
+/// 8 take the low-order 8 bytes, which is what a big-endian value zero-padded on the left
+/// means; a field wider than that carrying a number this decoder understands does not
+/// occur, and guessing is better than refusing the whole record over it.
+pub(crate) fn truncating(slice: &[u8]) -> u64 {
+    let take = slice.len().min(8);
+    let start = slice.len() - take;
+    let mut value = 0u64;
+    for &b in &slice[start..] {
+        value = (value << 8) | u64::from(b);
+    }
+    value
+}
+
+/// The same value, narrowed to the width the field actually means.
+///
+/// A template may declare a port four bytes wide, and some do; the value in it is still a
+/// port. Keeping the low-order bits is what a big-endian number zero-padded on the left
+/// means, so this is the reading rather than a lossy shortcut — and it is named, because
+/// a bare `as` at each of these call sites says nothing about which of the two it is.
+pub(crate) fn narrow32(slice: &[u8]) -> u32 {
+    u32::try_from(truncating(slice) & u64::from(u32::MAX)).unwrap_or(u32::MAX)
+}
+
+pub(crate) fn narrow16(slice: &[u8]) -> u16 {
+    u16::try_from(truncating(slice) & u64::from(u16::MAX)).unwrap_or(u16::MAX)
+}
+
+pub(crate) fn narrow8(slice: &[u8]) -> u8 {
+    u8::try_from(truncating(slice) & u64::from(u8::MAX)).unwrap_or(u8::MAX)
+}
+
+pub(crate) fn ipv4(slice: &[u8]) -> Option<IpAddr> {
+    let octets: [u8; 4] = slice.try_into().ok()?;
+    Some(IpAddr::V4(Ipv4Addr::from(octets)))
+}
+
+pub(crate) fn ipv6(slice: &[u8]) -> Option<IpAddr> {
+    let octets: [u8; 16] = slice.try_into().ok()?;
+    Some(IpAddr::V6(Ipv6Addr::from(octets)))
 }
