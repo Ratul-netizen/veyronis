@@ -2015,3 +2015,50 @@ button.following {
   padding: calc(var(--space)) 0;
   border-bottom: 1px solid var(--border);
 }
+
+/* The 3D scene shares the canvas's box exactly, so switching modes does not move the
+   panel beside it or change the page's height. */
+.scene3d {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-height: 72vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  overflow: hidden;
+  cursor: grab;
+}
+
+.scene3d:active {
+  cursor: grabbing;
+}
+
+.scene3d canvas {
+  display: block;
+}
+
+/* What is under the pointer. Names are not drawn in the scene — see scene3d.tsx. */
+.scene3d-readout {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: var(--t-label);
+  pointer-events: none;
+}
+
+.topo-loading {
+  aspect-ratio: 1;
+  max-height: 72vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  margin: 0;
+}

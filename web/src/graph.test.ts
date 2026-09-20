@@ -7,7 +7,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import { NODE_BUDGET, layout, neighboursOf, type GraphEdge, type GraphNode } from "./graph";
+import {
+  NODE_BUDGET,
+  depths,
+  layout,
+  neighboursOf,
+  type GraphEdge,
+  type GraphNode,
+} from "./graph";
 
 function device(n: number): GraphNode {
   return { id: `r${n}`, name: `sw-${n}`, kind: "device", status: "up" };
@@ -146,5 +153,67 @@ describe("neighboursOf", () => {
   it("treats an edge as undirected, whichever end it was written from", () => {
     const edges: GraphEdge[] = [{ source: "a", target: "b", discovered_by: "lldp" }];
     expect(neighboursOf("b", edges)).toEqual(new Set(["b", "a"]));
+  });
+});
+
+describe("depths", () => {
+  it("roots at the most connected device and counts hops from it", () => {
+    // A star: r0 in the middle. It is what everything is cabled to, so it is the root and
+    // everything else is one hop away.
+    const nodes = [device(0), device(1), device(2), device(3)];
+    const edges: GraphEdge[] = [
+      { source: "r0", target: "r1", discovered_by: "lldp" },
+      { source: "r0", target: "r2", discovered_by: "lldp" },
+      { source: "r0", target: "r3", discovered_by: "lldp" },
+    ];
+    const d = depths(nodes, edges);
+    expect(d.get("r0")).toBe(0);
+    expect(d.get("r1")).toBe(1);
+    expect(d.get("r2")).toBe(1);
+    expect(d.get("r3")).toBe(1);
+  });
+
+  it("layers a chain by hop distance from whichever node it rooted at", () => {
+    // In a chain every interior node has degree two, so "the middle" is not uniquely the
+    // most connected and the id tie-break decides. That is fine and it is the point of
+    // the tie-break — so the property to assert is the *distance*, not which node won.
+    const { nodes, edges } = chain(5);
+    const d = depths(nodes, edges);
+
+    const roots = [...d.entries()].filter(([, depth]) => depth === 0);
+    expect(roots).toHaveLength(1);
+    const root = Number((roots[0] as [string, number])[0].slice(1));
+
+    // r0—r1—r2—r3—r4, so hop distance along the chain is the difference in index.
+    for (const [id, depth] of d) {
+      expect(depth).toBe(Math.abs(Number(id.slice(1)) - root));
+    }
+  });
+
+  it("gives every component its own root", () => {
+    // An isolated pair must not be pushed to the bottom of the world because it happens
+    // to be far from another component's root — there is no path between them at all.
+    const nodes = [device(0), device(1), device(2), device(3)];
+    const edges: GraphEdge[] = [
+      { source: "r0", target: "r1", discovered_by: "lldp" },
+      { source: "r2", target: "r3", discovered_by: "lldp" },
+    ];
+    const d = depths(nodes, edges);
+    expect(Math.max(...d.values())).toBe(1);
+    expect([...d.values()].filter((n) => n === 0)).toHaveLength(2);
+  });
+
+  it("is the same every time, including which node it roots at", () => {
+    // Two nodes of equal degree must not swap roots between loads: the root moving moves
+    // every node beneath it.
+    const { nodes, edges } = chain(6);
+    const a = depths(nodes, edges);
+    const b = depths([...nodes].reverse(), edges);
+    expect([...a.entries()].sort()).toEqual([...b.entries()].sort());
+  });
+
+  it("places a node with no links at all at the top of its own layer", () => {
+    const d = depths([device(0)], []);
+    expect(d.get("r0")).toBe(0);
   });
 });

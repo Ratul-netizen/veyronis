@@ -24,12 +24,20 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useMemo, useState } from "react";
 
 import { listTopology, type TopologyEdge } from "./discovery";
-import { layout, neighboursOf, type Placed } from "./graph";
+import { depths, layout, neighboursOf, type Placed } from "./graph";
 import { message } from "./query";
 import { useShell } from "./shell";
+
+/**
+ * The 3D scene, on demand.
+ *
+ * `three` is about half the size of the rest of this application, and an operator who
+ * never opens the 3D mode should never download it. Nothing in the 2D path imports it.
+ */
+const Scene3d = lazy(() => import("./scene3d"));
 
 /** The box the graph is laid out in. Scaled to the viewport by the SVG's viewBox. */
 const SIZE = 1000;
@@ -67,6 +75,7 @@ export function TopologyPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [onlyUnhealthy, setOnlyUnhealthy] = useState(false);
   const [find, setFind] = useState("");
+  const [solid, setSolid] = useState(false);
 
   const graph = useQuery({
     queryKey: ["topology", tenant.tenant_id],
@@ -89,6 +98,15 @@ export function TopologyPage() {
       SIZE,
     );
   }, [graph.data, onlyUnhealthy]);
+
+  // Computed for both modes, because the caption under the 2D view explains what the 3D
+  // one would stack by — and the number of layers is worth knowing before switching.
+  const layers = useMemo(
+    () => depths(placed.nodes, placed.edges),
+    [placed.nodes, placed.edges],
+  );
+
+  const pick = useCallback((id: string | null) => setSelected(id), []);
 
   const near = useMemo(
     () => (selected ? neighboursOf(selected, placed.edges) : null),
@@ -116,6 +134,7 @@ export function TopologyPage() {
       <h1>Topology</h1>
       <p className="dim">
         What the estate reports about itself. Links come from LLDP, CDP and ARP.
+        {solid && " Height is hops from the most connected device."}
       </p>
 
       {/* Controls belong to the screen, not to global settings — §14.5. */}
@@ -134,6 +153,17 @@ export function TopologyPage() {
         >
           Only what is not up
         </button>
+        {/* There is a 2D/3D switch now because there is a 3D mode. §14.5's rule is that a
+            control which is present and does nothing is the dead-navigation problem in
+            miniature — so this arrived with the thing it switches to, not before it. */}
+        <span className="presets">
+          <button type="button" aria-pressed={!solid} onClick={() => setSolid(false)}>
+            2D
+          </button>
+          <button type="button" aria-pressed={solid} onClick={() => setSolid(true)}>
+            3D
+          </button>
+        </span>
         {selected && (
           <button type="button" className="quiet" onClick={() => setSelected(null)}>
             Clear selection
@@ -159,6 +189,17 @@ export function TopologyPage() {
         </p>
       ) : (
         <div className="topo">
+          {solid ? (
+            <Suspense fallback={<p className="dim topo-loading">Loading the 3D view…</p>}>
+              <Scene3d
+                nodes={placed.nodes}
+                edges={placed.edges}
+                depths={layers}
+                selected={selected}
+                onSelect={pick}
+              />
+            </Suspense>
+          ) : (
           <svg
             className="topo-canvas"
             viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -197,6 +238,7 @@ export function TopologyPage() {
               />
             ))}
           </svg>
+          )}
 
           {chosen && <Detail node={chosen} edges={placed.edges} nodes={placed.nodes} />}
         </div>

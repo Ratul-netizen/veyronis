@@ -252,3 +252,60 @@ export function neighboursOf(id: string, edges: GraphEdge[]): Set<string> {
   }
   return out;
 }
+
+/**
+ * How far each node is from the most connected one — UI-SPEC §14.7.
+ *
+ * This is what the third dimension carries in the 3D mode. It is a fact about the
+ * *graph*, not a claim about the network: "distance in hops from the most connected
+ * device" is measurable, whereas "this is the core layer" would be an inference the
+ * backend has not made and §14.0 forbids the UI from inventing.
+ *
+ * In practice the two usually coincide — the box everything else is cabled to is the box
+ * with the most cables — which is why the view is useful. The wording on screen says what
+ * is actually measured, so an operator whose estate does not follow that pattern is not
+ * being told something false.
+ *
+ * Each connected component is rooted independently, so an isolated pair does not get
+ * pushed to the bottom of the world because it happens to be far from another
+ * component's root.
+ */
+export function depths(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
+  const near = new Map<string, string[]>();
+  for (const n of nodes) near.set(n.id, []);
+  for (const e of edges) {
+    near.get(e.source)?.push(e.target);
+    near.get(e.target)?.push(e.source);
+  }
+
+  const out = new Map<string, number>();
+  // Sorted by degree, then by id: the tie-break is what keeps this deterministic, and a
+  // root that moves between loads would move every node under it.
+  const byDegree = [...nodes].sort(
+    (a, b) =>
+      (near.get(b.id)?.length ?? 0) - (near.get(a.id)?.length ?? 0) ||
+      a.id.localeCompare(b.id),
+  );
+
+  for (const root of byDegree) {
+    if (out.has(root.id)) continue;
+    out.set(root.id, 0);
+    let front = [root.id];
+    let depth = 0;
+    while (front.length > 0) {
+      depth += 1;
+      const next: string[] = [];
+      for (const id of front) {
+        for (const other of (near.get(id) ?? []).sort()) {
+          if (!out.has(other)) {
+            out.set(other, depth);
+            next.push(other);
+          }
+        }
+      }
+      front = next;
+    }
+  }
+
+  return out;
+}

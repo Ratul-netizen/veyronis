@@ -748,3 +748,65 @@ than by reading. A second click, or `Esc`, clears it.
 Selection is not navigation. The panel that opens offers the ways on — the resource, its
 alerts, its logs — and going to one of them is a deliberate act, because losing the
 topology you just oriented yourself in is expensive during an incident.
+
+## 14.7 Topology, 3D
+
+A mode on the topology screen, not a screen of its own, and not the default.
+
+### 14.7.1 What the third dimension carries
+
+**Height is hop distance from the most connected device**, computed per connected
+component.
+
+That sentence is chosen carefully. It is a fact about the *graph* — a count of hops from a
+node with a countable property — and not a claim about the network. "This is the core
+layer" would be an inference nobody has made, and §14.0 forbids the UI from making one.
+In practice the two usually agree, because the box everything is cabled to is the box with
+the most cables, which is why the view is worth having at all. The caption on screen says
+what is actually measured, so an operator whose estate does not follow that pattern is not
+being told something false about it.
+
+`x` and `z` are the 2D layout's own coordinates, unchanged. Switching modes therefore
+**lifts the picture you were already looking at** rather than rearranging it. Two views
+that scramble the graph between them are two pictures to learn; one that lifts it is a
+second reading of the same one.
+
+### 14.7.2 Why this is a mode and not the product
+
+Rule 1 of this document: *2D carries information; 3D carries spatial relationships.* A flat
+adjacency graph of nine devices has no spatial relationship to carry, and 3D would cost
+occlusion, a camera to operate and a canvas no screen reader can read, in exchange for
+nothing.
+
+It earns its place when the graph has depth — tiers, many nodes, a shape that a plane
+flattens into a hairball. So 2D is the default, 3D is deliberate, and the switch only
+exists now that there is something to switch to. §14.5's rule about controls that do
+nothing applied to this one until the day it worked.
+
+### 14.7.3 Accessibility
+
+A WebGL canvas is not reachable by a keyboard and not readable by a screen reader, and
+pretending otherwise with a fake focus ring would be worse than admitting it.
+
+The mitigation is that **2D is the default and is complete**: every node is a focusable
+element with a name and a state, every link is in the detail panel as text, and nothing in
+3D is reachable only in 3D. The modes show the same graph; one of them is accessible, and
+it is the one the product opens with.
+
+### 14.7.4 Motion
+
+Nothing in the scene moves unless somebody moves it, and the renderer draws on demand
+rather than in a loop. `prefers-reduced-motion` therefore needs no special case — there is
+no ambient animation to reduce — and a wall display left on this screen is not a machine
+spinning a GPU all night.
+
+### 14.7.5 The dependency
+
+`three`, and nothing else. The rule stated in part 2 is that a dependency must solve a
+problem that is materially expensive or unsafe to solve ourselves: WebGL qualifies, and
+React *bindings* for WebGL do not, because this scene has no per-frame React state — it is
+spheres and lines. `@react-three/fiber` also pins a React older than this application's,
+which is the kind of constraint a convenience dependency has no right to impose.
+
+It is loaded with `React.lazy` and lives in its own chunk. An operator who never opens 3D
+never downloads it, and the 2D path's bundle is unchanged by its existence.
