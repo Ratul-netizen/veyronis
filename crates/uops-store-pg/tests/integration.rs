@@ -17,7 +17,7 @@
 
 use uops_core::{ResourceKind, ResourceStatus, TenantId, TenantScope};
 use uops_query::{ResourceSelector, compile, resolve};
-use uops_store_pg::{Config, NewResource, PgCatalog, PgStore, ResourceFilter};
+use uops_store_pg::{Config, NewGroup, NewResource, PgCatalog, PgStore, ResourceFilter};
 
 async fn store() -> PgStore {
     let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -258,6 +258,116 @@ async fn filters_narrow_the_listing() {
         .await
         .unwrap();
     assert!(literal.is_empty(), "a literal % matched as a wildcard");
+}
+
+#[tokio::test]
+async fn a_group_and_a_single_resource_narrow_the_listing() {
+    // The two filters the shell's context needs and the site filter did not cover. A
+    // context that narrows to a group or to one device has to narrow the same list every
+    // screen already reads, rather than each screen growing its own query.
+    let store = store().await;
+    let scope = tenant(&store, "context").await;
+
+    let core = store
+        .create_resource(
+            &scope,
+            &NewResource::new(ResourceKind::Device, "rtr-core-01"),
+        )
+        .await
+        .unwrap();
+    let edge = store
+        .create_resource(
+            &scope,
+            &NewResource::new(ResourceKind::Device, "rtr-edge-01"),
+        )
+        .await
+        .unwrap();
+    store
+        .create_resource(
+            &scope,
+            &NewResource::new(ResourceKind::Host, "app-server-1"),
+        )
+        .await
+        .unwrap();
+
+    let routers = store
+        .create_group(&scope, &NewGroup::new("Routers"))
+        .await
+        .unwrap();
+    store
+        .add_to_group(&scope, routers.id, &[core.id, edge.id])
+        .await
+        .unwrap();
+
+    let by_group = store
+        .resources(
+            &scope,
+            &ResourceFilter {
+                group_id: Some(routers.id),
+                ..ResourceFilter::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        by_group.len(),
+        2,
+        "the group's two members and nothing else"
+    );
+
+    // Membership is many-to-many, and an EXISTS is what stops a resource in two groups
+    // being returned twice by an unfiltered listing — a page of three that is really a
+    // page of two, with a cursor that skips the difference.
+    let spares = store
+        .create_group(&scope, &NewGroup::new("Spares"))
+        .await
+        .unwrap();
+    store
+        .add_to_group(&scope, spares.id, &[core.id])
+        .await
+        .unwrap();
+    let still_two = store
+        .resources(
+            &scope,
+            &ResourceFilter {
+                group_id: Some(routers.id),
+                ..ResourceFilter::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        still_two.len(),
+        2,
+        "a resource in two groups was listed twice"
+    );
+
+    let one = store
+        .resources(
+            &scope,
+            &ResourceFilter {
+                only: Some(core.id),
+                ..ResourceFilter::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(one.len(), 1);
+    assert_eq!(one.items[0].id, core.id);
+
+    // The two compose, and disagreeing narrows to nothing rather than to either.
+    let contradiction = store
+        .resources(
+            &scope,
+            &ResourceFilter {
+                group_id: Some(spares.id),
+                only: Some(edge.id),
+                ..ResourceFilter::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(contradiction.is_empty());
 }
 
 #[tokio::test]

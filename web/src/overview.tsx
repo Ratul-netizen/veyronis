@@ -31,6 +31,7 @@ import { useMemo } from "react";
 
 import { ago, listAlerts, order, type Alert } from "./alerting";
 import { api } from "./api";
+import { contextParams } from "./context";
 import { message, runQuery, type Query, type ResultSet } from "./query";
 import { describeRange, resolveRange, useShell } from "./shell";
 
@@ -56,7 +57,7 @@ const STACK: { severity: string; colour: string }[] = [
 ];
 
 export function OverviewPage() {
-  const { tenant, range } = useShell();
+  const { tenant, range, context } = useShell();
 
   // Memoised on the *descriptor* rather than computed inline, and this is not a tidying:
   // `resolveRange` turns "last 1 hour" into two instants ending at `now`, so calling it
@@ -75,9 +76,10 @@ export function OverviewPage() {
   }, [range.from, range.to]);
 
   // ---- what exists, and what is wrong with it -------------------------------
+  const narrow = contextParams(context);
   const resources = useQuery({
-    queryKey: ["overview-resources", tenant.tenant_id],
-    queryFn: () => api.resources(tenant.tenant_id),
+    queryKey: ["overview-resources", tenant.tenant_id, narrow],
+    queryFn: () => api.resources(tenant.tenant_id, narrow),
     retry: false,
   });
 

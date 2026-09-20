@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id            AS \"id: ResourceId\",\n                tenant_id     AS \"tenant_id: uops_core::TenantId\",\n                site_id       AS \"site_id: SiteId\",\n                parent_id     AS \"parent_id: ResourceId\",\n                kind          AS \"kind: ResourceKind\",\n                name,\n                display_name,\n                vendor, model, os, os_version,\n                status        AS \"status: ResourceStatus\",\n                profile_id,\n                credential_ref AS \"credential_ref: CredentialRef\",\n                attributes    AS \"attributes: Json<AttrMap>\",\n                tags          AS \"tags: Json<Tags>\",\n                first_seen, last_seen\n            FROM resource\n            WHERE tenant_id = $1\n              AND ($2::uuid IS NULL OR id > $2)\n              AND ($3::resource_kind IS NULL OR kind = $3)\n              AND ($4::uuid IS NULL OR site_id = $4)\n              AND ($5::resource_status IS NULL OR status = $5)\n              AND ($6::text IS NULL\n                   OR name ILIKE $6\n                   OR display_name ILIKE $6)\n            ORDER BY id\n            LIMIT $7\n            ",
+  "query": "\n            SELECT\n                id            AS \"id: ResourceId\",\n                tenant_id     AS \"tenant_id: uops_core::TenantId\",\n                site_id       AS \"site_id: SiteId\",\n                parent_id     AS \"parent_id: ResourceId\",\n                kind          AS \"kind: ResourceKind\",\n                name,\n                display_name,\n                vendor, model, os, os_version,\n                status        AS \"status: ResourceStatus\",\n                profile_id,\n                credential_ref AS \"credential_ref: CredentialRef\",\n                attributes    AS \"attributes: Json<AttrMap>\",\n                tags          AS \"tags: Json<Tags>\",\n                first_seen, last_seen\n            FROM resource\n            WHERE tenant_id = $1\n              AND ($2::uuid IS NULL OR id > $2)\n              AND ($3::resource_kind IS NULL OR kind = $3)\n              AND ($4::uuid IS NULL OR site_id = $4)\n              AND ($5::resource_status IS NULL OR status = $5)\n              AND ($6::text IS NULL\n                   OR name ILIKE $6\n                   OR display_name ILIKE $6)\n              AND ($7::uuid IS NULL OR EXISTS (\n                     SELECT 1\n                       FROM resource_group_member m\n                      WHERE m.tenant_id  = resource.tenant_id\n                        AND m.group_id   = $7\n                        AND m.resource_id = resource.id))\n              AND ($8::uuid IS NULL OR id = $8)\n            ORDER BY id\n            LIMIT $9\n            ",
   "describe": {
     "columns": [
       {
@@ -166,6 +166,8 @@
           }
         },
         "Text",
+        "Uuid",
+        "Uuid",
         "Int8"
       ]
     },
@@ -190,5 +192,5 @@
       false
     ]
   },
-  "hash": "2fb5473a99a484773da43128d6a1f53a6bfa412f34e3923d8b979759cccbe98c"
+  "hash": "5f5bb86ef0941cb7c1f120aa02a5d7ec969752eed0b888d2b93ccfa554af4982"
 }

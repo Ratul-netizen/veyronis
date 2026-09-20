@@ -1,8 +1,9 @@
 /**
- * The two pieces of state every view shares: which tenant, and what time range.
+ * The three pieces of state every view shares: which tenant, what time range, and what
+ * the view is currently about.
  *
- * Both live in the URL, not in React state and not in storage. That is the decision this
- * file exists to make, and it has consequences everywhere:
+ * All three live in the URL, not in React state and not in storage. That is the decision
+ * this file exists to make, and it has consequences everywhere:
  *
  * * A link reproduces a view. "Look at this" in a chat window is the most common thing
  *   an operator does during an incident, and a URL that does not carry the time range is
@@ -12,6 +13,8 @@
  * * Reloading during an incident does not reset you to "last 15 minutes".
  * * Two tabs can be two tenants. An MSP engineer comparing two customers is not an edge
  *   case, and a tenant kept in module state or storage makes it impossible.
+ * * A context survives a reload — which is the moment somebody under pressure reaches
+ *   for, and the worst moment to silently widen what they are looking at.
  *
  * The cost is that every navigation must carry the search params forward, which
  * TanStack Router does for us, and that the range is parsed from strings on every read.
@@ -21,6 +24,7 @@ import { createContext, useCallback, useContext, useMemo } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 
 import type { Me, TenantMembership } from "./api";
+import { formatContext, parseContext, type Context } from "./context";
 
 /**
  * A time range, as it appears in the URL.
@@ -114,6 +118,8 @@ export interface ShellSearch {
   tenant?: string;
   from?: string;
   to?: string;
+  /** The context, as `site:<id>` / `group:<id>` / `resource:<id>` — see `./context`. */
+  ctx?: string;
 }
 
 /**
@@ -129,7 +135,25 @@ export function validateShellSearch(search: Record<string, unknown>): ShellSearc
   if (typeof search.tenant === "string" && search.tenant) out.tenant = search.tenant;
   if (typeof search.from === "string" && search.from) out.from = search.from;
   if (typeof search.to === "string" && search.to) out.to = search.to;
+  // Kept as written rather than normalised here: `parseContext` is where an unreadable
+  // one becomes "everything", and dropping it at this layer would make the address bar
+  // disagree with the bar that is telling the operator what they are looking at.
+  if (typeof search.ctx === "string" && search.ctx) out.ctx = search.ctx;
   return out;
+}
+
+/**
+ * Set or remove `ctx`, without ever writing `ctx: undefined`.
+ *
+ * `exactOptionalPropertyTypes` is on, and it is on for a reason that shows up here: an
+ * explicit `undefined` and an absent key are different things, and a router that
+ * serialised the first would put `?ctx=` in the address bar — a context that is not a
+ * context, on every link anybody copies.
+ */
+function withContext(search: ShellSearch, ctx: string | undefined): ShellSearch {
+  const next: ShellSearch = { ...search };
+  delete next.ctx;
+  return ctx ? { ...next, ctx } : next;
 }
 
 interface ShellValue {
@@ -138,6 +162,8 @@ interface ShellValue {
   setTenant: (tenantId: string) => void;
   range: TimeRange;
   setRange: (range: TimeRange) => void;
+  context: Context;
+  setContext: (context: Context) => void;
 }
 
 const ShellContext = createContext<ShellValue | null>(null);
@@ -159,12 +185,28 @@ export function ShellProvider({ me, children }: { me: Me; children: React.ReactN
     return resolveRange(candidate) ? candidate : DEFAULT_RANGE;
   }, [search.from, search.to]);
 
+  const context = useMemo(() => parseContext(search.ctx), [search.ctx]);
+
   const setTenant = useCallback(
     (tenantId: string) => {
       // The range is deliberately kept across a tenant switch. An MSP engineer
       // comparing the same incident window across two customers is the reason the
       // switcher exists at all.
-      void navigate({ to: ".", search: (old: ShellSearch) => ({ ...old, tenant: tenantId }) });
+      //
+      // The context is deliberately *not* kept: a site id belongs to one customer, and
+      // carrying it across would scope the new tenant to something that does not exist
+      // there — a screen showing nothing, for a reason the operator cannot see.
+      void navigate({
+        to: ".",
+        search: (old: ShellSearch) => withContext({ ...old, tenant: tenantId }, undefined),
+      });
+    },
+    [navigate],
+  );
+
+  const setContext = useCallback(
+    (next: Context) => {
+      void navigate({ to: ".", search: (old) => withContext(old, formatContext(next)) });
     },
     [navigate],
   );
@@ -190,7 +232,7 @@ export function ShellProvider({ me, children }: { me: Me; children: React.ReactN
     );
   }
 
-  const value: ShellValue = { me, tenant, setTenant, range, setRange };
+  const value: ShellValue = { me, tenant, setTenant, range, setRange, context, setContext };
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;
 }
 

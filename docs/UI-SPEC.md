@@ -610,10 +610,10 @@ rather than a destination, it offers to open the Explorer with it.
 
 ## 13. Context
 
-> **Specified, not built.** §11 and §12 ship; this does not yet. It is written down
-> because it is the next thing, and because the two decisions in §13.1 and §13.2 — what
-> may be a context, and that it lives in the URL — are the ones that would otherwise get
-> made accidentally by whichever screen implemented it first.
+> **Built.** `web/src/context.ts` is the model and `web/src/contextbar.tsx` the bar. The
+> two decisions below — what may be a context, and that it lives in the URL — were
+> written down first precisely so they would not be made accidentally by whichever screen
+> implemented it first, and they survived contact with the implementation unchanged.
 
 A bar under the header naming what the whole application is currently about.
 
@@ -652,6 +652,42 @@ reloading is exactly what somebody under pressure will do.
 and offers the way out. An operator who cannot find a device because a context they forgot
 about is filtering it out will conclude the product has lost the device — and they will be
 right to distrust it afterwards.
+
+Three things came out of building it, and all three are this rule read from another side.
+
+**A screen the context does not reach must say so.** The other half of the promise: a
+context that is not being applied must not look as if it were. A narrowed bar above a
+full-tenant list of discovery runs is a lie of exactly the shape §13.3 forbids.
+`unscopedBecause` holds every screen the context does not reach and the sentence saying
+why, and the bar prints it. A screen added tomorrow is unscoped and says so, rather than
+inheriting a promise nobody checked.
+
+**"Not yet" is one of those reasons, and it is not hidden.** Topology and Alerts are in
+that list today because they are not wired, not because they are meant to be estate-wide.
+A narrowed bar over a whole-tenant screen is the same lie whether the cause is design or
+unfinished work, so it is said out loud either way. Deleting one of those entries is the
+*last* step of scoping that screen.
+
+**The way out is a control, not a fact.** "Show everything" sits beside the label, on
+every screen, whenever there is something to leave — and is absent when there is not,
+because a control that is permanently present and does nothing four times in five teaches
+people to stop seeing it.
+
+**A context naming something deleted shows the id.** Ugly, and true. Falling back to "All
+resources" would report the view as unscoped at the exact moment it is scoped to nothing,
+and the screen underneath says the context is what emptied it.
+
+### 13.4 What is scoped, today
+
+| Screen | |
+|---|---|
+| Overview, Resources | scoped, through the one resource list both read |
+| Topology, Alerts | not yet — the bar says so on both |
+| Explore, Dashboards, Rules, Channels, Discovery, Map | never: each carries its own selector, or is the thing you use to *find* a context |
+
+The middle row is the outstanding work, and it is outstanding rather than forgotten. The
+command palette is deliberately in the third: a finder that only searches what you have
+already narrowed to cannot get you out of a context you forgot you set.
 
 ## 14. Topology, 2D
 

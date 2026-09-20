@@ -17,6 +17,7 @@ import {
   type ResourceStatus,
   type Role,
 } from "./api";
+import { contextParams } from "./context";
 import type { ShellSearch } from "./shell";
 import { useShell } from "./shell";
 
@@ -46,13 +47,16 @@ function keepSearch(old: ShellSearch): ShellSearch {
 }
 
 export function ResourcesPage() {
-  const { tenant } = useShell();
+  const { tenant, context } = useShell();
+  const narrow = contextParams(context);
 
-  // Keyed by tenant, so switching tenants is a different cache entry rather than a
-  // refetch drawn over the previous customer's rows.
+  // Keyed by tenant *and* by the context, so switching either is a different cache entry
+  // rather than a refetch drawn over the previous customer's — or the previous site's —
+  // rows.
   const resources = useInfiniteQuery({
-    queryKey: ["resources", tenant.tenant_id],
-    queryFn: ({ pageParam }) => api.resources(tenant.tenant_id, pageParam),
+    queryKey: ["resources", tenant.tenant_id, narrow],
+    queryFn: ({ pageParam }) =>
+      api.resources(tenant.tenant_id, { ...narrow, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     // The cursor is opaque and the server decides when there are no more pages. A
     // client that computed "is there more" from the page size would be wrong exactly
@@ -77,11 +81,21 @@ export function ResourcesPage() {
   if (items.length === 0) {
     return (
       <div className="empty-state">
-        <h1>No resources yet</h1>
-        <p>
-          Nothing has been discovered or created in {tenant.name}. Resources appear here
-          as collectors report them, or when one is created through the API.
-        </p>
+        <h1>{context.kind === "all" ? "No resources yet" : "Nothing in this context"}</h1>
+        {context.kind === "all" ? (
+          <p>
+            Nothing has been discovered or created in {tenant.name}. Resources appear here
+            as collectors report them, or when one is created through the API.
+          </p>
+        ) : (
+          // §13.3. An operator who cannot find a device because of a context they forgot
+          // about will conclude the product lost it. The bar above says what the context
+          // is and offers the way out; this says the emptiness is its doing.
+          <p>
+            The context above is what narrowed this to nothing. Widening it shows the rest
+            of the estate.
+          </p>
+        )}
       </div>
     );
   }
@@ -91,6 +105,7 @@ export function ResourcesPage() {
       <h1>Resources</h1>
       <p className="dim">
         {items.length} loaded in {tenant.name}
+        {context.kind !== "all" && ", in the current context"}
         {resources.hasNextPage && ", more available"}
       </p>
 

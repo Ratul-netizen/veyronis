@@ -95,9 +95,17 @@ export function CommandPalette() {
     else if (opener.current instanceof HTMLElement) opener.current.focus();
   }, [open]);
 
-  // The same cache the rest of the app uses; opening the palette costs no request.
+  // Deliberately unscoped, and deliberately its own cache entry.
+  //
+  // Unscoped because the palette is how you *find* something, and a finder that only
+  // searches what you have already narrowed to cannot get you out of a context you
+  // forgot you set — exactly the failure UI-SPEC §13.3 names.
+  //
+  // Its own key because the resource list is an infinite query under `["resources", …]`
+  // and this is not; one key holding two differently shaped caches means whichever
+  // fetched last decides what the other reads.
   const resources = useQuery({
-    queryKey: ["resources", tenant.tenant_id],
+    queryKey: ["palette-resources", tenant.tenant_id],
     queryFn: () => api.resources(tenant.tenant_id),
     enabled: open,
     retry: false,

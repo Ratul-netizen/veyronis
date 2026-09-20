@@ -58,6 +58,18 @@ impl NewResource {
 pub struct ResourceFilter {
     pub kind: Option<ResourceKind>,
     pub site_id: Option<SiteId>,
+    /// Members of one resource group.
+    ///
+    /// An `EXISTS` rather than a join, because a resource may be in several groups and a
+    /// join would return it once per group — a page of twenty that is really a page of
+    /// six, with a cursor that skips the rest.
+    pub group_id: Option<uops_core::ResourceGroupId>,
+    /// One resource, by id.
+    ///
+    /// A list of one looks like a pointless query until you remember what it is for: the
+    /// shell's context can narrow to a single device, and every screen that reads this
+    /// list then narrows with it rather than each growing its own special case.
+    pub only: Option<ResourceId>,
     pub status: Option<ResourceStatus>,
     /// Case-insensitive substring of the name or display name.
     pub name_contains: Option<String>,
@@ -301,8 +313,15 @@ impl PgStore {
               AND ($6::text IS NULL
                    OR name ILIKE $6
                    OR display_name ILIKE $6)
+              AND ($7::uuid IS NULL OR EXISTS (
+                     SELECT 1
+                       FROM resource_group_member m
+                      WHERE m.tenant_id  = resource.tenant_id
+                        AND m.group_id   = $7
+                        AND m.resource_id = resource.id))
+              AND ($8::uuid IS NULL OR id = $8)
             ORDER BY id
-            LIMIT $7
+            LIMIT $9
             "#,
             scope.tenant_id() as uops_core::TenantId,
             after as Option<ResourceId>,
@@ -310,6 +329,8 @@ impl PgStore {
             filter.site_id as Option<SiteId>,
             filter.status as Option<ResourceStatus>,
             name,
+            filter.group_id as Option<uops_core::ResourceGroupId>,
+            filter.only as Option<ResourceId>,
             // One more than asked for, to learn whether a next page exists without a
             // second COUNT over the filtered set.
             limit + 1,

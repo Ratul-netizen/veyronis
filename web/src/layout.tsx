@@ -2,7 +2,8 @@
  * The one layout: left nav, header, content.
  *
  * The header holds the two controls that are not about any particular view — the tenant
- * switcher and the time range. SPEC calls the range "the single most-used control in the
+ * switcher and the time range — and the context bar sits under it, naming what the whole
+ * application is currently about. SPEC calls the range "the single most-used control in the
  * product", which is why it is in the chrome rather than repeated per page: a range that
  * lives on a page is a range that resets when you leave it.
  */
@@ -12,6 +13,7 @@ import { Fragment, useState } from "react";
 
 import { api } from "./api";
 import { Wordmark } from "./brand";
+import { ContextBar } from "./contextbar";
 import { CommandPalette } from "./palette";
 import { PRESETS, describeRange, useShell, type ShellSearch, type TimeRange } from "./shell";
 
@@ -173,6 +175,10 @@ export function Layout() {
           Sign out
         </button>
       </header>
+
+      {/* Under the header and above everything else, because it says what everything
+          else is about. §13. */}
+      <ContextBar />
 
       <nav className="nav" aria-label="Sections">
         {/* Outside every group: the answer to the question you ask before you have one. */}

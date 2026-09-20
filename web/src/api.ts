@@ -220,6 +220,19 @@ export interface Site {
   resources: SiteCounts;
 }
 
+/**
+ * A resource group, as the context picker lists them.
+ *
+ * `members` rather than the members themselves: a picker showing forty groups must not
+ * read forty membership lists to render forty numbers.
+ */
+export interface Group {
+  id: string;
+  name: string;
+  description: string;
+  members: number;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<void>("/api/v1/auth/login", { method: "POST", body: { email, password } }),
@@ -228,12 +241,26 @@ export const api = {
 
   me: () => request<Me>("/api/v1/me"),
 
-  resources: (tenant: string, cursor?: string) => {
-    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-    return request<Page<Resource>>(`/api/v1/resources${query}`, { tenant });
+  /**
+   * The inventory, narrowed.
+   *
+   * `filter` is whatever the shell's context means — see `contextParams` — plus a cursor.
+   * Undefined entries are dropped rather than sent empty, because `?site=` is a filter
+   * the server would have to decide the meaning of, and the answer it would pick is not
+   * obviously "no filter".
+   */
+  resources: (tenant: string, filter: Record<string, string | undefined> = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) {
+      if (value) query.set(key, value);
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return request<Page<Resource>>(`/api/v1/resources${suffix}`, { tenant });
   },
 
   sites: (tenant: string) => request<Site[]>("/api/v1/sites", { tenant }),
+
+  groups: (tenant: string) => request<Group[]>("/api/v1/groups", { tenant }),
 
   placeSite: (tenant: string, id: string, location: Coordinate | null) =>
     request<void>(`/api/v1/sites/${encodeURIComponent(id)}/location`, {

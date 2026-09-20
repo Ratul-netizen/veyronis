@@ -34,6 +34,10 @@ use crate::state::AppState;
 pub struct ListParams {
     pub kind: Option<ResourceKind>,
     pub site: Option<SiteId>,
+    /// Members of one resource group. The shell's context sets this; so can a link.
+    pub group: Option<uops_core::ResourceGroupId>,
+    /// One resource. The narrowest the shell's context goes.
+    pub only: Option<ResourceId>,
     pub status: Option<ResourceStatus>,
     /// Substring of the name or display name.
     pub q: Option<String>,
@@ -81,6 +85,8 @@ pub async fn list(
             &ResourceFilter {
                 kind: params.kind,
                 site_id: params.site,
+                group_id: params.group,
+                only: params.only,
                 status: params.status,
                 name_contains: params.q,
                 cursor: params.cursor.map(Cursor),
