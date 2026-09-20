@@ -4,9 +4,9 @@
 //!
 //! ```text
 //!   NetFlow v5   fixed 48-byte records, no templates          v5
-//!   NetFlow v9   templates (RFC 3954)                         - next
-//!   IPFIX        templates, variable-length fields (RFC 7011) - next
-//!   sFlow v5     sampled packet headers                       - next
+//!   NetFlow v9   templates (RFC 3954)                         v9
+//!   IPFIX        templates, variable-length fields (RFC 7011) ipfix
+//!   sFlow v5     sampled packet headers                       sflow
 //! ```
 //!
 //! # No I/O, on purpose
@@ -29,6 +29,7 @@
 //! code got wrong is a caught error rather than a read out of bounds.
 
 pub mod ipfix;
+pub mod sflow;
 pub mod templates;
 pub mod v5;
 pub mod v9;
