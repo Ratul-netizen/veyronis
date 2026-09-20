@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                j.id,\n                j.tenant_id       AS \"tenant_id: TenantId\",\n                j.name,\n                j.description,\n                j.ranges::text[]  AS \"ranges!: Vec<String>\",\n                j.site_id         AS \"site_id: SiteId\",\n                j.credential_refs,\n                j.snmp_port,\n                j.skip_silent_hosts,\n                EXTRACT(EPOCH FROM j.schedule)::bigint AS \"schedule_seconds: i64\",\n                j.enabled,\n                j.last_run_at,\n                j.created_by      AS \"created_by: ActorId\",\n                j.created_at,\n                j.updated_at\n              FROM discovery_job j\n             WHERE j.tenant_id = $1\n               AND j.enabled\n               AND j.schedule IS NOT NULL\n               AND (j.last_run_at IS NULL OR j.last_run_at + j.schedule <= now())\n               AND NOT EXISTS (\n                     SELECT 1\n                       FROM discovery_run r\n                      WHERE r.job_id = j.id\n                        AND r.tenant_id = j.tenant_id\n                        AND r.status = 'running'\n                   )\n             ORDER BY j.last_run_at NULLS FIRST\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id: TenantId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "ranges!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "site_id: SiteId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "credential_refs",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "snmp_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "skip_silent_hosts",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "schedule_seconds: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_run_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_by: ActorId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      false,
+      false,
+      false,
+      null,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "90de6c2aea8dd6d9e11428054d775f2dca73c31a5155092b3b3509042890e722"
+}

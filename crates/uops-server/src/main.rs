@@ -45,6 +45,10 @@ use uops_store_pg::{PgSealedStore, PgStore};
 
 use crate::config::Config;
 
+/// What this binary's vault is made of. The same three parts the poller uses, so a
+/// credential sealed here opens there.
+type Vault = LocalVault<RustCryptoAead, PgSealedStore, MemoryAccessLog>;
+
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
@@ -85,23 +89,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // The vault, if this deployment configured a key. Built before the state so a bad
     // KEK — unreadable, malformed, or group-readable — fails here with a sentence rather
     // than on the first request to store a credential.
-    let vault = if let Some(source) = &config.kek {
-        let ring = match source {
-            config::KekSource::File(path) => {
-                KekRing::from_file(path, uops_secrets::record::KeyId(config.kek_id.clone()))
-            }
-            config::KekSource::Env(name) => {
-                KekRing::from_env(name, uops_secrets::record::KeyId(config.kek_id.clone()))
-            }
-        }
-        .map_err(|e| format!("the key ring could not be opened: {e}"))?;
+    let vault = if config.kek.is_some() {
         println!("credential storage enabled");
-        Some(LocalVault::new(
-            RustCryptoAead,
-            PgSealedStore::new(store.clone()),
-            MemoryAccessLog::new(),
-            ring,
-        ))
+        Some(open_vault(&config, &store)?)
     } else {
         // Not a warning. A deployment that only wants the inventory is a supported one,
         // and the credential routes say so themselves with a 503 naming the variable.
@@ -114,6 +104,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // of connections.
     let store_for_alerts = store.clone();
     let telemetry_for_alerts = telemetry.clone();
+    let store_for_discovery = store.clone();
 
     let state = if config.secure_cookies {
         AppState::new(store, telemetry)
@@ -146,6 +137,32 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // The discovery scheduler, in this process for the same reason the alert engine is:
+    // an installation that starts one thing gets a product rather than a component. It
+    // shares the pool and the shutdown signal, and it claims each job through migration
+    // 0020's index — so a second replica with this on is safe, merely redundant.
+    let discovery = if !config.discovery {
+        println!("discovery: disabled by UOPS_DISCOVERY");
+        None
+    } else if config.kek.is_none() {
+        // Not a failure to start. An installation with no KEK has no stored credentials,
+        // so it has no discovery job that could run — but it will have created jobs in
+        // the UI, so the reason is said out loud rather than left as silence.
+        println!("discovery: no KEK configured, so scheduled sweeps cannot open credentials");
+        None
+    } else {
+        let sweeper = uops_sweeper::Live::new(
+            store_for_discovery.clone(),
+            open_vault(&config, &store_for_discovery)?,
+        );
+        println!("discovery: running scheduled jobs when they are due");
+        Some(tokio::spawn(uops_sweeper::run(
+            store_for_discovery,
+            sweeper,
+            shutdown::signal(),
+        )))
+    };
+
     let mut app = router(state);
     if let Some(root) = web::root_from_env() {
         app = web::serve(app, &root)?;
@@ -173,6 +190,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // rather than dropping the handle means a rule that was mid-evaluation finishes
     // writing its state — a phase recorded without the notification that belongs to it is
     // the one inconsistency this process can produce on the way out.
+    if let Some(discovery) = discovery
+        && let Err(e) = discovery.await
+    {
+        // Same reasoning as below: the symptom of a panicked scheduler is an installation
+        // whose nightly sweeps stopped on a date nobody can identify.
+        eprintln!("discovery: the scheduler stopped unexpectedly: {e}");
+    }
+
     if let Some(alerts) = alerts
         && let Err(e) = alerts.await
     {
@@ -184,4 +209,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("stopped cleanly");
     Ok(())
+}
+
+/// One vault, built from the configured key ring.
+///
+/// Called once per thing that needs one rather than shared, because neither [`KekRing`]
+/// nor [`LocalVault`] is `Clone` — deliberately, since cloning a ring would put a second
+/// copy of the key material somewhere nothing zeroizes. Reading the file twice at boot is
+/// the cheaper half of that trade.
+///
+/// # Errors
+///
+/// When the KEK cannot be read, is not 64 hex characters, or — on Unix — is in a file
+/// other local accounts can read.
+fn open_vault(config: &Config, store: &PgStore) -> Result<Vault, String> {
+    let id = uops_secrets::record::KeyId(config.kek_id.clone());
+    let ring = match config.kek.as_ref() {
+        Some(config::KekSource::File(path)) => KekRing::from_file(path, id),
+        Some(config::KekSource::Env(name)) => KekRing::from_env(name, id),
+        // Unreachable through either caller, both of which check first. A sentence rather
+        // than a panic, because the thing it would crash is a server at boot.
+        None => return Err("no KEK is configured".to_owned()),
+    }
+    .map_err(|e| format!("the key ring could not be opened: {e}"))?;
+
+    Ok(LocalVault::new(
+        RustCryptoAead,
+        PgSealedStore::new(store.clone()),
+        MemoryAccessLog::new(),
+        ring,
+    ))
 }

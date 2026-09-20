@@ -161,6 +161,22 @@ pub fn poll_context(resource: ResourceId) -> AccessContext {
     AccessContext::new(Actor::Collector, "snmp-poll").for_resource(resource)
 }
 
+/// The access-log context a discovery sweep uses.
+///
+/// No resource, and that is the point rather than an omission: a sweep opens a credential
+/// in order to find out whether anything at 10.0.0.7 exists at all, so there is no
+/// resource to name until after the probe has answered. `AccessContext::resource_id` is
+/// already `Option` for exactly this case.
+///
+/// A separate purpose from `"snmp-poll"` because the questions an auditor asks about them
+/// are different: a poll is a credential used against a device somebody already approved,
+/// and a sweep is a credential sprayed across a range. A log that called both
+/// `"snmp-poll"` could not tell them apart, and the second is the one worth finding.
+#[must_use]
+pub fn discovery_context() -> AccessContext {
+    AccessContext::new(Actor::Collector, "snmp-discovery")
+}
+
 /// The context for a one-off test from the UI, which a person triggered.
 ///
 /// A different purpose *and* a different actor, because "an operator tested this

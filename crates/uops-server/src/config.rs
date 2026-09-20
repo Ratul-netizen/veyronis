@@ -33,6 +33,18 @@ pub struct Config {
     /// one database do not produce two alerts, because the state write deduplicates on
     /// `(tenant, dedup_key)`, but they do double the load on `ClickHouse` for no benefit.
     pub alerts: bool,
+    /// Whether this process runs discovery jobs when they are due.
+    ///
+    /// On by default, for the same reason as `alerts`: a job an operator scheduled and
+    /// that never runs is worse than no scheduler, because the UI says "nightly" either
+    /// way. `UOPS_DISCOVERY=off` is for the replicas that should not — though unlike
+    /// alerting, two schedulers over one database are *safe* rather than merely
+    /// wasteful: migration 0020's partial unique index means the second one loses the
+    /// claim and moves on.
+    ///
+    /// It also needs `kek`. A sweep opens the credentials its job names, and without a
+    /// key ring there is nothing to open them with — see the banner in `main`.
+    pub discovery: bool,
     pub first_run: FirstRunNames,
     /// Where the key-encryption key comes from, if anywhere.
     ///
@@ -147,6 +159,13 @@ impl Config {
                     .as_str(),
                 "0" | "false" | "no" | "off"
             ),
+            discovery: !matches!(
+                std::env::var("UOPS_DISCOVERY")
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .as_str(),
+                "0" | "false" | "no" | "off"
+            ),
             kek: match (
                 std::env::var("UOPS_KEK_FILE").ok(),
                 std::env::var("UOPS_KEK_HEX").ok(),
@@ -175,12 +194,13 @@ impl Config {
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
-            "bind={} postgres={} clickhouse={} secure_cookies={} alerts={} credentials={}",
+            "bind={} postgres={} clickhouse={} secure_cookies={} alerts={} discovery={} credentials={}",
             self.bind,
             redact(&self.postgres.url),
             redact(&self.clickhouse.url),
             self.secure_cookies,
             self.alerts,
+            self.discovery,
             match &self.kek {
                 Some(KekSource::File(p)) => format!("file {}", p.display()),
                 Some(KekSource::Env(v)) => format!("env {v}"),

@@ -188,6 +188,40 @@ question that gets asked.
 
 Manual runs are `Operator`. Editing a job's ranges is `Operator`. Reading is `Viewer`.
 
+### 2.8 The scheduler schedules; it does not re-implement discovery.
+
+A job with a schedule has to run without anybody pressing anything, and the piece that
+does it is `uops-sweeper`. Everything between claiming a job and closing its run is a call
+into code that already existed: `uops_discover::run_with` for the probes,
+`PgStore::record_sweep` for the inventory, `PgStore::finish_discovery_run` for the
+counters. If a scheduled sweep ever behaves differently from one an operator started by
+hand, that is a bug in the scheduler rather than a feature of it.
+
+**There is no in-memory schedule.** The next run is `discovery_job.schedule` plus
+`last_run_at`, asked of PostgreSQL once a minute through `discovery_job_due_idx`. A server
+that is killed and comes back asks the same question and gets the same answer, so a
+restart loses nothing — unlike the alert engine's wheel, which discovery does not need
+because jobs are counted in tens and run hourly at their fastest.
+
+**Two schedulers are safe, not merely wasteful.** Migration 0020 puts a partial unique
+index over the in-flight run of a job, so the second replica's `INSERT` fails with 23505
+and it moves on. The claim is the insert; there is no check-then-insert gap for a second
+caller to get into.
+
+**A run whose process died is reaped, not left.** A `running` row blocks its job forever,
+because the index that prevents the double sweep cannot tell a live sweep from an
+abandoned one. After two hours — five times the longest sweep the schema permits — it is
+closed as `failed` with a sentence saying the process stopped before it finished.
+
+**`last_run_at` advances whether or not the sweep worked.** A job that fails every night
+must retry tomorrow night, not every single minute; a `last_run_at` that only moved on
+success is how a wrong credential becomes a packet flood.
+
+**A sweep that cannot open one of its credentials does not run at all.** Probing with
+three of the four an operator configured would record everything the fourth would have
+answered as `unreachable`, which is worse than not sweeping because it looks like an
+answer. The run fails naming the credential, and the estate is left as it was.
+
 ---
 
 ## 3. Schema
@@ -227,6 +261,16 @@ cannot trust.
       clock — and the three caps are asserted to be consistent with each other, which
       they were not at first
 - [x] No code path anywhere tries a credential that was not named by the job
+- [x] A job whose schedule has elapsed is swept without anybody pressing anything, and one
+      whose schedule has not is left alone — including a disabled job, a manual-only job
+      (`schedule IS NULL`) and one that has never run
+- [x] Two schedulers over one database sweep a due job once, not twice — the second gets
+      the constraint violation and reports it as somebody else's claim rather than as an
+      error
+- [x] A run left `running` by a process that did not come back is closed after
+      `STALE_AFTER`, and its job becomes due again
+- [x] A failed sweep still closes its run and still stamps `last_run_at`, so a broken job
+      retries on its schedule rather than every turn
 
 ---
 

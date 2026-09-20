@@ -1,6 +1,6 @@
 # M5 Discovery — where it stands
 
-Last updated: 2026-09-18. Written to be picked up cold.
+Last updated: 2026-09-20. Written to be picked up cold.
 
 The specification is [`M5-discovery.md`](./M5-discovery.md); its §4 acceptance criteria
 all pass. This file is the *state*, which is a different question: what is built, what
@@ -21,44 +21,34 @@ remains, and what a person walking back in needs to know before touching it.
 | Neighbours → edges and candidates | `crates/uops-store-pg/src/neighbour_ingest.rs` |
 | Seven routes, tenant-isolated | `crates/uops-api/src/routes/discovery.rs` |
 | Three screens — Jobs, Runs, Candidates | `web/src/discovery.ts`, `web/src/discoverypages.tsx` |
+| One run in flight per job, in the schema | `migrations/0020` |
+| The scheduler — due, claim, sweep, finish, reap | `crates/uops-sweeper/src/lib.rs` |
+| The sweep it runs in production | `crates/uops-sweeper/src/live.rs` |
+| Wired into the server behind `UOPS_DISCOVERY` | `crates/uops-server/src/main.rs` |
 
-All eight acceptance criteria pass. 47 tests in `uops-discover`, 38 across the two store
-test files, 7 isolation cases, and the whole workspace at 104 test binaries.
+All twelve acceptance criteria pass. 47 tests in `uops-discover`, 38 across the two store
+test files, 12 in `uops-sweeper`, 8 isolation cases, and 1 024 passing across the
+workspace — with 37 failures that are all ClickHouse being unreachable on this machine
+and none of them in discovery's path.
 
 ---
 
 ## Not done
 
-**The scheduler and the runner.** This is the last piece, and it is one piece rather than
-two:
+**The neighbour walk is not scheduled.** `uops_discover::neighbours` and
+`PgStore::record_neighbours` both exist and are tested, and an operator can walk a device
+through the API — but a scheduled job sweeps and does not then walk what it found. That is
+the next thing to add to `Live::sweep`, after the `record_sweep` call, and it is additive:
+the counters it would contribute are already columns on `discovery_run`.
 
-- `discovery_job.schedule` and `discovery_job_due_idx` exist; nothing reads them.
-- Nothing inside the server can *run* a sweep, which is why there is no
-  `POST /api/v1/discovery/jobs/{id}/run` and why the jobs screen says jobs do not run on
-  a schedule yet rather than offering a button that would appear broken.
+**A scheduled run writes no audit entry.** §2.7 requires one carrying the ranges, and
+`routes/discovery.rs` writes it for a manual run. A scheduled run has no `Caller`, so it
+needs the system-actor path — which does not exist yet and is the only reason this is
+still open.
 
-What it needs to do, and the pieces are all already there:
-
-1. A wheel-driven loop, the way `uops-alert`'s scheduler does it — `uops_poll::Wheel`,
-   `RELOAD`, `TICK`. That crate is the worked example to copy from.
-2. For a due job: read its credentials from the vault, build one `UdpTransport` per
-   credential, call `PgStore::start_discovery_run`, then `uops_discover::run_with`, then
-   `PgStore::record_sweep`, then `PgStore::finish_discovery_run` with the counters
-   `record_sweep` returned.
-3. The audit entry §2.7 requires, carrying the ranges. `routes/discovery.rs` shows the
-   shape; a scheduled run has no `Caller`, so it needs the system-actor path.
-4. Then the neighbour walk on each known device, into `PgStore::record_neighbours`.
-
-**Two things to decide when starting it**, neither closed:
-
-- **Where the loop lives.** `uops-alert` runs inside `uops-server`. Discovery could too,
-  or it could be its own binary like `uops-poller`. The argument for its own binary is
-  that a sweep is minutes of work and a server restart mid-sweep leaves a `running` row
-  with no process behind it. The argument against is one more thing to deploy.
-- **What happens to a run whose process died.** `discovery_run` has a `running` status
-  and `discovery_run_finishes_iff_it_is_over` makes a stuck run findable without a
-  heuristic, but nothing reaps one. A run still `running` after some multiple of its
-  expected duration is `cancelled`, and that multiple is a decision.
+**There is no `POST /api/v1/discovery/jobs/{id}/run`.** The machinery to serve it now
+exists — it is `Live::sweep` with a `Trigger::Manual` — so this is a route to write rather
+than a thing to build.
 
 ---
 
@@ -91,12 +81,19 @@ forbids creating the far end of a link.
 
 ---
 
-## Running it by hand today
+## Running it
 
-There is no runner, so a sweep is driven from a test. `crates/uops-store-pg/tests/sweep_ingest.rs`
-is the end-to-end example: build a `Fleet`, `Sweep::new`, `run`, `record_sweep`. Against
-real equipment, substitute `UdpTransport::new(credential)` for the `Fleet`.
+Start `uops-server` with a KEK configured and it runs. Every minute it asks each tenant
+what is due, sweeps at most one job at a time — the probe caps are per sweep, so running
+two at once would double what the customer's network sees — and prints a line when
+something happened. `UOPS_DISCOVERY=off` turns it off for a replica that should not have
+it; the startup banner says which way it went, and says so explicitly when the reason is a
+missing KEK rather than the flag.
+
+Without equipment to point it at, `crates/uops-sweeper/tests/turn.rs` drives the whole
+loop against a fake sweep and a real database, and
+`crates/uops-store-pg/tests/sweep_ingest.rs` drives a real sweep against a simulated
+fleet. Between them every line of the path is exercised except the UDP socket.
 
 The demo instance has a job, a run and three candidates seeded so the screens have
-content — the run and candidates were inserted as SQL, not produced by a sweep, because
-nothing can run one yet.
+content; the run and candidates were inserted as SQL rather than produced by a sweep.

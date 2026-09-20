@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE discovery_run\n               SET status = 'failed',\n                   finished_at = now(),\n                   error = 'the process running this sweep stopped before it finished'\n             WHERE tenant_id = $1\n               AND status = 'running'\n               AND started_at < now() - make_interval(secs => $2::bigint)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "750d620d92a9a87111d5bf29fc31f5bff49ca2d323088043b37a7945dba1be64"
+}

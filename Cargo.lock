@@ -2574,6 +2574,7 @@ dependencies = [
  "uops-secrets",
  "uops-store-ch",
  "uops-store-pg",
+ "uops-sweeper",
 ]
 
 [[package]]
@@ -2627,6 +2628,22 @@ dependencies = [
  "uops-query",
  "uops-secrets",
  "uops-snmp",
+ "uuid",
+]
+
+[[package]]
+name = "uops-sweeper"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "sqlx",
+ "tokio",
+ "uops-core",
+ "uops-discover",
+ "uops-identity",
+ "uops-secrets",
+ "uops-snmp",
+ "uops-store-pg",
  "uuid",
 ]
 

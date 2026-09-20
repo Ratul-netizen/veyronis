@@ -1056,3 +1056,113 @@ impl PgStore {
         Ok(())
     }
 }
+
+// ----------------------------------------------------------------------------
+// What the scheduler asks
+// ----------------------------------------------------------------------------
+
+impl PgStore {
+    /// The jobs whose next run is due.
+    ///
+    /// Due means: enabled, scheduled, and either never run or last run longer ago than
+    /// the interval. A job with a run already in flight is excluded here as well as by
+    /// the unique index in migration 0020 — the index is the guarantee, this is the part
+    /// that stops the scheduler trying and reading a constraint violation every minute
+    /// for the whole length of a long sweep.
+    ///
+    /// Ordered by how overdue they are, so a backlog is worked oldest-first rather than
+    /// by whichever uuid sorts lowest.
+    ///
+    /// # Errors
+    ///
+    /// Storage failures.
+    pub async fn due_discovery_jobs(&self, scope: &TenantScope) -> Result<Vec<DiscoveryJob>> {
+        // tenant-exempt: the tenant is the only bound parameter, from the scope.
+        let rows = sqlx::query_as!(
+            JobRow,
+            r#"
+            SELECT
+                j.id,
+                j.tenant_id       AS "tenant_id: TenantId",
+                j.name,
+                j.description,
+                j.ranges::text[]  AS "ranges!: Vec<String>",
+                j.site_id         AS "site_id: SiteId",
+                j.credential_refs,
+                j.snmp_port,
+                j.skip_silent_hosts,
+                EXTRACT(EPOCH FROM j.schedule)::bigint AS "schedule_seconds: i64",
+                j.enabled,
+                j.last_run_at,
+                j.created_by      AS "created_by: ActorId",
+                j.created_at,
+                j.updated_at
+              FROM discovery_job j
+             WHERE j.tenant_id = $1
+               AND j.enabled
+               AND j.schedule IS NOT NULL
+               AND (j.last_run_at IS NULL OR j.last_run_at + j.schedule <= now())
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM discovery_run r
+                      WHERE r.job_id = j.id
+                        AND r.tenant_id = j.tenant_id
+                        AND r.status = 'running'
+                   )
+             ORDER BY j.last_run_at NULLS FIRST
+            "#,
+            scope.tenant_id() as TenantId,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("discovery_job", "due".to_owned(), e))?;
+
+        rows.into_iter().map(JobRow::parse).collect()
+    }
+
+    /// Close runs whose process is not coming back.
+    ///
+    /// `discovery_run_finishes_iff_it_is_over` makes a stuck run findable without a
+    /// heuristic about age — but nothing was closing one. A server killed mid-sweep left
+    /// a `running` row forever, and because migration 0020 allows one in-flight run per
+    /// job, that row would block its job from ever being swept again. The reaper is what
+    /// stops a single unclean shutdown disabling a job permanently.
+    ///
+    /// Marked `failed` rather than `cancelled` so it can carry a sentence: the schema's
+    /// `discovery_run_error_iff_failed` allows a reason only on a failure, and "this
+    /// stopped and here is why" is more use to an operator than a status with nothing
+    /// beside it.
+    ///
+    /// Returns how many were closed.
+    ///
+    /// # Errors
+    ///
+    /// Storage failures.
+    pub async fn reap_stale_runs(
+        &self,
+        scope: &TenantScope,
+        older_than: std::time::Duration,
+    ) -> Result<u64> {
+        let seconds = i64::try_from(older_than.as_secs()).unwrap_or(i64::MAX);
+
+        // tenant-exempt: the tenant is a bound parameter, from the scope.
+        let done = sqlx::query!(
+            r#"
+            UPDATE discovery_run
+               SET status = 'failed',
+                   finished_at = now(),
+                   error = 'the process running this sweep stopped before it finished'
+             WHERE tenant_id = $1
+               AND status = 'running'
+               AND started_at < now() - make_interval(secs => $2::bigint)
+            "#,
+            scope.tenant_id() as TenantId,
+            seconds,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| map("discovery_run", "reap".to_owned(), e))?;
+
+        Ok(done.rows_affected())
+    }
+}

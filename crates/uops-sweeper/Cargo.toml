@@ -1,0 +1,30 @@
+[package]
+name = "uops-sweeper"
+description = "Runs discovery jobs when they are due. Schedules sweeps; does not implement them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+uops-core.workspace = true
+uops-discover.workspace = true
+uops-identity.workspace = true
+uops-secrets.workspace = true
+uops-snmp.workspace = true
+uops-store-pg.workspace = true
+
+chrono.workspace = true
+# The run id the sweep is given, so it can attribute candidates to the run that found them.
+uuid.workspace = true
+tokio = { workspace = true, features = ["time", "rt", "macros"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "test-util"] }
+sqlx.workspace = true
+
+[lints]
+workspace = true

@@ -121,7 +121,8 @@ export function DiscoveryPage() {
         {rows.length === 0
           ? "No discovery jobs. A job is a list of ranges to sweep and the credentials it may try."
           : `${rows.length} job${rows.length === 1 ? "" : "s"}.`}{" "}
-        Jobs do not run on a schedule yet — the scheduler is the next piece.
+        A job with a schedule runs on it. One without waits for a manual run,
+        which is not built yet.
       </p>
 
       {mayWrite(tenant.role) && (
@@ -197,7 +198,13 @@ function JobRow({
           the one that decides whether a job is a few minutes or most of an hour. */}
       <td>{addressCount(job.addresses)}</td>
       <td>{schedule ?? <span className="dim">manual only</span>}</td>
-      <td>{job.last_run_at ? ago(job.last_run_at) : <span className="dim">never</span>}</td>
+      <td>
+        {job.last_run_at ? (
+          ago(job.last_run_at)
+        ) : (
+          <span className="dim">never</span>
+        )}
+      </td>
       <td>
         {writable && (
           <button
@@ -283,8 +290,9 @@ function NewJob({
         />
       </label>
       <p className="dim">
-        One CIDR per line. Nothing wider than a /16, and 65,536 addresses across the whole
-        job — a sweep must not be the reason somebody's network monitoring alerts.
+        One CIDR per line. Nothing wider than a /16, and 65,536 addresses across
+        the whole job — a sweep must not be the reason somebody's network
+        monitoring alerts.
       </p>
 
       <label>
@@ -299,13 +307,17 @@ function NewJob({
       {/* The sentence that explains the whole of §2.2, on the screen where somebody
           might otherwise wonder why there is no "try common community strings" box. */}
       <p className="dim">
-        Discovery only ever tries credentials a job names. It does not guess: an address
-        that answers nothing is recorded as unreachable, not retried with a wordlist.
+        Discovery only ever tries credentials a job names. It does not guess: an
+        address that answers nothing is recorded as unreachable, not retried
+        with a wordlist.
       </p>
 
       <label>
         Schedule
-        <select value={schedule} onChange={(event) => setSchedule(event.target.value)}>
+        <select
+          value={schedule}
+          onChange={(event) => setSchedule(event.target.value)}
+        >
           <option value="">Manual only</option>
           <option value="3600">Hourly</option>
           <option value="86400">Daily</option>
@@ -386,12 +398,14 @@ function RunRow({ run }: { run: DiscoveryRun }) {
   const tone = runTone(run);
   // The one number that diagnoses a wrong credential list: a network where everything
   // was probed and nothing at all replied is almost never an empty network.
-  const suspicious = run.status === "succeeded" && run.probed > 0 && run.answered === 0;
+  const suspicious =
+    run.status === "succeeded" && run.probed > 0 && run.answered === 0;
 
   return (
     <tr>
       <td>
-        <span className={`dot ${tone}`} aria-hidden="true" /> {ago(run.started_at)}
+        <span className={`dot ${tone}`} aria-hidden="true" />{" "}
+        {ago(run.started_at)}
         {run.status === "running" && <span className="dim"> · running</span>}
         {run.error && <div className="dim">{run.error}</div>}
       </td>
@@ -491,7 +505,9 @@ export function DiscoveryCandidatesPage() {
                   candidate={candidate}
                   mayWrite={mayWrite(tenant.role)}
                   busy={dismiss.isPending}
-                  onIgnore={(reason) => dismiss.mutate({ id: candidate.id, reason })}
+                  onIgnore={(reason) =>
+                    dismiss.mutate({ id: candidate.id, reason })
+                  }
                 />
               ))}
             </tbody>
@@ -511,7 +527,8 @@ export function DiscoveryCandidatesPage() {
  * not "—" with the description underneath it.
  */
 function Describes({ candidate }: { candidate: DiscoveryCandidate }) {
-  const heading = candidate.sys_name ?? candidate.platform ?? candidate.sys_descr;
+  const heading =
+    candidate.sys_name ?? candidate.platform ?? candidate.sys_descr;
   // Only when it is not already the heading, so nothing is said twice.
   const detail = candidate.sys_descr === heading ? null : candidate.sys_descr;
 
@@ -521,7 +538,9 @@ function Describes({ candidate }: { candidate: DiscoveryCandidate }) {
       {detail && <div className="dim">{detail}</div>}
       {/* A chassis ID is the strongest thing a neighbour reports and is worth showing: it
           is what an operator matches against the label on the front of a box. */}
-      {candidate.chassis_id && <div className="dim mono">{candidate.chassis_id}</div>}
+      {candidate.chassis_id && (
+        <div className="dim mono">{candidate.chassis_id}</div>
+      )}
     </>
   );
 }
@@ -557,7 +576,9 @@ function CandidateRow({
             <Link to="/resources/$id" params={{ id: candidate.seen_from }}>
               this device
             </Link>
-            {candidate.port_id && <span className="mono"> {candidate.port_id}</span>}
+            {candidate.port_id && (
+              <span className="mono"> {candidate.port_id}</span>
+            )}
           </div>
         )}
       </td>
