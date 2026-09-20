@@ -47,12 +47,12 @@ const BAD = ["error", "critical", "alert", "emergency"];
  * this is bad" without anybody consulting a legend.
  */
 const STACK: { severity: string; colour: string }[] = [
-  { severity: "debug", colour: "var(--unknown)" },
-  { severity: "info", colour: "var(--series-1)" },
-  { severity: "notice", colour: "var(--series-6)" },
-  { severity: "warn", colour: "var(--warn)" },
-  { severity: "error", colour: "var(--danger)" },
-  { severity: "critical", colour: "var(--maintenance)" },
+  { severity: "debug", colour: "var(--sev-debug)" },
+  { severity: "info", colour: "var(--sev-info)" },
+  { severity: "notice", colour: "var(--sev-notice)" },
+  { severity: "warn", colour: "var(--sev-warn)" },
+  { severity: "error", colour: "var(--sev-error)" },
+  { severity: "critical", colour: "var(--sev-critical)" },
 ];
 
 export function OverviewPage() {
@@ -156,6 +156,15 @@ export function OverviewPage() {
   const firing = rows.filter((a) => a.state === "firing");
   const pending = rows.filter((a) => a.state === "pending");
   const total = resources.data?.items.length ?? null;
+  // id → name, for the panels that group by resource_id. Memoised on the list itself so
+  // it is rebuilt when the inventory changes and not on every render.
+  const names = useMemo(
+    () =>
+      new Map(
+        (resources.data?.items ?? []).map((r) => [r.id, r.display_name ?? r.name]),
+      ),
+    [resources.data],
+  );
   const talking = reporting.data?.rows.length ?? null;
 
   const worst = firing.length > 0 ? "firing" : pending.length > 0 ? "pending" : "quiet";
@@ -256,7 +265,7 @@ export function OverviewPage() {
             <span className="dim">errors and worse</span>
           </header>
           <PanelState panel={busiest}>
-            {(result) => <Busiest result={result} />}
+            {(result) => <Busiest result={result} names={names} />}
           </PanelState>
         </section>
       </div>
@@ -371,28 +380,50 @@ function Volume({ result }: { result: ResultSet }) {
 }
 
 /** Who is producing the errors, by host name. */
-function Busiest({ result }: { result: ResultSet }) {
+/**
+ * The resources producing the most errors.
+ *
+ * `names` turns the `resource_id` the query groups by into something a person can read.
+ * Telemetry is stored against the id — that is the whole point of the identity model —
+ * so the panel used to render the uuid, which is not a thing anybody can act on at 3am
+ * and is not what UI-SPEC §8.1 asked for ("links to the resource page"). The page has
+ * already fetched the tenant's resources for the count above, so this costs no request.
+ *
+ * An id with no name is still shown, in mono, rather than dropped: a resource that is
+ * producing errors and is not in the inventory is a fact worth seeing, not a row to hide.
+ */
+function Busiest({
+  result,
+  names,
+}: {
+  result: ResultSet;
+  names: Map<string, string>;
+}) {
   const rows = result.rows
-    .map((row) => ({ host: String(row[0] ?? ""), n: Number(row[1]) || 0 }))
-    .filter((row) => row.host !== "");
+    .map((row) => ({ id: String(row[0] ?? ""), n: Number(row[1]) || 0 }))
+    .filter((row) => row.id !== "");
   if (rows.length === 0) return <p className="dim">No errors in this window.</p>;
 
   const worst = Math.max(...rows.map((r) => r.n), 1);
 
   return (
     <ul className="ranked">
-      {rows.map((row) => (
-        // A bar as well as a number: "4 200 and 3 900" is two numbers, and two bars of
-        // almost the same length is a fact. Drawn as the row's own background — see the
-        // note in styles.css on why a child element cannot do it.
-        <li
-          key={row.host}
-          style={{ ["--fill" as string]: `${(row.n / worst) * 100}%` }}
-        >
-          <span className="ranked-name mono">{row.host}</span>
-          <span className="ranked-count">{row.n.toLocaleString()}</span>
-        </li>
-      ))}
+      {rows.map((row) => {
+        const name = names.get(row.id);
+        return (
+          // A bar as well as a number: "4 200 and 3 900" is two numbers, and two bars of
+          // almost the same length is a fact. Drawn as the row's own background — see the
+          // note in styles.css on why a child element cannot do it.
+          <li key={row.id} style={{ ["--fill" as string]: `${(row.n / worst) * 100}%` }}>
+            <span className={`ranked-name${name ? "" : " mono"}`}>
+              <Link to="/resources/$id" params={{ id: row.id }}>
+                {name ?? row.id}
+              </Link>
+            </span>
+            <span className="ranked-count">{row.n.toLocaleString()}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

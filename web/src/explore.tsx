@@ -826,8 +826,12 @@ export function ExplorePage() {
         </div>
       )}
 
+      {/* An empty screen is an invitation to act, so it says what to do rather than
+          describing where a control lives. */}
       {!shown && !followed && !run.isPending && !run.isError && (
-        <p className="dim">Choose a signal and run. The window is the one in the header.</p>
+        <p className="dim">
+          Choose a signal and run. Results cover the time range in the header.
+        </p>
       )}
     </>
   );

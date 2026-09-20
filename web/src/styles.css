@@ -150,6 +150,27 @@
   --series-5: #7c3aed;
   --series-6: #0f766e;
 
+  /* --- severity ramp (§1.4a) -----------------------------------------------
+     Severity is *ordinal* — debug below info below warn below error — so it gets a ramp
+     rather than the categorical series, and the ramp runs neutral to red so the shape of
+     a stacked bar reads as "how much of this is bad" without anybody consulting a legend.
+
+     It exists because the chart used to borrow: `info` was drawn in `--series-1` and
+     `critical` in `--maintenance`, which is the colour that means "suppressed by a
+     maintenance window, this is fine". One colour meaning both "fine" and "the worst
+     thing in the product" is exactly what §1.2 forbids, and the borrowed blue also put a
+     large coloured chart on a screen that is supposed to have no colour when nothing is
+     wrong.
+
+     The three quiet levels are greys of increasing weight: nobody needs to tell debug
+     from info at a glance, and the legend is there for when they do. */
+  --sev-debug: #c3c8d0;
+  --sev-info: #98a0ad;
+  --sev-notice: #6b7280;
+  --sev-warn: #9a6400;
+  --sev-error: #b4232b;
+  --sev-critical: #7a1119;
+
   /* --- shape, space and motion (§1.5) -------------------------------------
      Radius belongs to controls. A region with a radius is a card, and cards are
      what this design is not; a button with one is a thing you can press. */
@@ -212,6 +233,13 @@
     --accent: #e8ebef;
     --accent-text: #0c0f13;
     --accent-dim: #e8ebef1a;
+
+    --sev-debug: #3a4250;
+    --sev-info: #5a6472;
+    --sev-notice: #8b93a1;
+    --sev-warn: #e0b054;
+    --sev-error: #ff7b7b;
+    --sev-critical: #c74a4a;
 
     --series-1: #6d9bff;
     --series-2: #57d08a;
