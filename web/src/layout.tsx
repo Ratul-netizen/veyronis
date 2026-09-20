@@ -8,11 +8,54 @@
  */
 
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { api } from "./api";
 import { Wordmark } from "./brand";
+import { CommandPalette } from "./palette";
 import { PRESETS, describeRange, useShell, type ShellSearch, type TimeRange } from "./shell";
+
+/**
+ * The sidebar, grouped by the question each section answers — UI-SPEC §11.2.
+ *
+ * Only what exists. An entry with no screen behind it, or a screen with no data behind
+ * it, is the product telling the operator it is unfinished every time they look at it —
+ * and the sidebar is on every page, so it says so more often than anything else. This
+ * grows as the product does; it is not a roadmap.
+ *
+ * Observability holds one item because metrics, logs and traces are all the Explorer with
+ * a different `signal`. Three entries pointing at one screen with a preselected dropdown
+ * would be three lies about how the product is built.
+ */
+const NAV: { heading: string; items: { to: string; label: string; exact?: boolean }[] }[] = [
+  {
+    heading: "Network",
+    items: [
+      { to: "/resources", label: "Resources" },
+      { to: "/discovery", label: "Discovery", exact: true },
+      { to: "/map", label: "Map" },
+    ],
+  },
+  { heading: "Observability", items: [{ to: "/explore", label: "Explore" }] },
+  {
+    heading: "Operations",
+    items: [
+      { to: "/alerts", label: "Alerts", exact: true },
+      { to: "/alerts/rules", label: "Rules" },
+      { to: "/alerts/channels", label: "Channels" },
+    ],
+  },
+];
+
+/**
+ * Sections that stand alone, below the groups.
+ *
+ * Dashboards is not a group: a heading reading "Dashboards" above a single item reading
+ * "Dashboards" says the word twice and means it once. Observability keeps its heading
+ * despite also holding one item, because there the heading says something the item does
+ * not — that this is where logs, metrics and traces will live.
+ */
+const LOOSE: { to: string; label: string }[] = [{ to: "/dashboards", label: "Dashboards" }];
 
 /** Carries the shell's search params through every navigation. */
 function keepSearch(old: ShellSearch): ShellSearch {
@@ -130,33 +173,55 @@ export function Layout() {
         </button>
       </header>
 
-      <nav className="nav">
-        <Link to="/" search={keepSearch} activeProps={{ className: "active" }} activeOptions={{ exact: true }}>
+      <nav className="nav" aria-label="Sections">
+        {/* Outside every group: the answer to the question you ask before you have one. */}
+        <Link
+          to="/"
+          search={keepSearch}
+          activeProps={{ className: "active" }}
+          activeOptions={{ exact: true }}
+        >
           Overview
         </Link>
-        <Link to="/map" search={keepSearch} activeProps={{ className: "active" }}>
-          Map
-        </Link>
-        <Link to="/resources" search={keepSearch} activeProps={{ className: "active" }}>
-          Resources
-        </Link>
-        <Link to="/discovery" search={keepSearch} activeProps={{ className: "active" }}>
-          Discovery
-        </Link>
-        <Link to="/explore" search={keepSearch} activeProps={{ className: "active" }}>
-          Explore
-        </Link>
-        <Link to="/dashboards" search={keepSearch} activeProps={{ className: "active" }}>
-          Dashboards
-        </Link>
-        <Link to="/alerts" search={keepSearch} activeProps={{ className: "active" }}>
-          Alerts
-        </Link>
+
+        {NAV.map((group) => (
+          <Fragment key={group.heading}>
+            {/* Not a link. A heading that navigates has to decide which of its children
+                it means, and the answer is always arbitrary. */}
+            <h2 className="nav-heading">{group.heading}</h2>
+            {group.items.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                search={keepSearch}
+                activeProps={{ className: "active" }}
+                {...(item.exact ? { activeOptions: { exact: true } } : {})}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </Fragment>
+        ))}
+
+        {LOOSE.map((item) => (
+          <Link
+            key={item.to}
+            to={item.to}
+            search={keepSearch}
+            activeProps={{ className: "active" }}
+            className="nav-loose"
+          >
+            {item.label}
+          </Link>
+        ))}
       </nav>
 
       <main className="content">
         <Outlet />
       </main>
+
+      {/* Outside the grid: it covers the page rather than occupying a cell. */}
+      <CommandPalette />
     </div>
   );
 }

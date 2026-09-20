@@ -1771,3 +1771,116 @@ button.following {
     padding-left: 0;
   }
 }
+
+/* --- the command palette (§12) --------------------------------------------------
+ *
+ * Over the page, not a page of its own: `Esc` returns you to exactly where you were,
+ * which is the whole reason it is faster than the sidebar.
+ */
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  /* flex-start, or the default `stretch` makes the dialog as tall as the screen however
+     few results there are — a box of mostly nothing, which is what it did at first. */
+  align-items: flex-start;
+  /* A fifth of the way down rather than centred: the eye is already near the top of the
+     screen, and a centred dialog makes it travel to meet a list that then grows
+     downwards past where it started. */
+  padding: 12vh 16px 16px;
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+}
+
+.palette {
+  width: min(44rem, 100%);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  /* The one shadow in the product. It is here because this is the one surface that is
+     genuinely floating above the page rather than part of it. */
+  box-shadow: 0 16px 48px rgb(0 0 0 / 28%);
+  overflow: hidden;
+}
+
+.palette-input {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  padding: 14px 16px;
+  font-size: var(--t-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.palette-input:focus-visible {
+  outline: 0;
+}
+
+.palette-results {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.palette-results li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--space) * 4);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+/* Inverted, like every other "this is the one" in the product. */
+.palette-results li.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.palette-hint {
+  color: var(--text-dim);
+  font-size: var(--t-label);
+  white-space: nowrap;
+}
+
+.palette-results li.on .palette-hint {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--text-dim);
+}
+
+/* --- grouped navigation (§11.2) -------------------------------------------------- */
+
+.nav-heading {
+  margin: calc(var(--space) * 4) 0 calc(var(--space));
+  padding: 0 10px;
+  color: var(--text-dim);
+  font-size: var(--t-label);
+  font-weight: 500;
+  /* Sentence case. Tracked-out capitals above every group is the tell §2 removed from
+     column headers, and it is no more legible here than it was there. */
+  letter-spacing: 0;
+}
+
+.nav-heading:first-of-type {
+  margin-top: calc(var(--space) * 3);
+}
+
+/* A section with no group, separated by space rather than by a rule: one hairline for
+   one item is more chrome than the item is worth. */
+.nav-loose {
+  margin-top: calc(var(--space) * 4);
+}

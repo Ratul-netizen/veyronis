@@ -508,3 +508,147 @@ push · per-page performance budgets beyond the dashboard's measured one.
 Each is specified when it is the next thing built, in a part 2 of this document — not
 guessed at now, because a specification written a milestone early is a specification that
 gets ignored.
+
+---
+
+# Part 2
+
+Written as each thing is built, per §10. What follows is the navigation, the command
+palette and the context bar, because those are what is being built now. Incidents,
+investigations, flows, traces and automation stay in §10's list: no backend answers them
+yet, and specifying a screen over data that does not exist is how a specification becomes
+fiction.
+
+## 11. Navigation
+
+### 11.1 The rule that decides what is in it
+
+**Only what exists.** A sidebar entry with no screen behind it, or a screen with no data
+behind it, is the product telling the operator it is unfinished — every time they look at
+it. That is the same argument §8.2 makes against a "topology coming soon" panel, and it
+applies with more force here because the sidebar is on every page.
+
+So the navigation grows as the product does. It is not a roadmap.
+
+### 11.2 Groups
+
+Seven flat links was right at five. It stops being right somewhere around nine, and the
+product is there. The groups are by *question asked*, not by subsystem:
+
+```
+  Overview                    ← the one thing before you know what you are looking for
+
+  NETWORK                     ← what is out there
+    Resources
+    Discovery
+    Topology
+    Map
+
+  OBSERVABILITY               ← what it is doing
+    Explore
+
+  OPERATIONS                  ← what is wrong
+    Alerts
+    Rules
+    Channels
+
+  DASHBOARDS                  ← what you decided to keep watching
+    Dashboards
+```
+
+Group headings are **not links**. A heading that navigates is a heading that has to decide
+which of its children it means, and the answer is always arbitrary.
+
+Overview sits outside every group, because it is the answer to the question you ask before
+you have one.
+
+**Observability holds one item today.** Metrics, logs and traces are all the Explorer with
+a different `signal`, and three sidebar entries pointing at one screen with a preselected
+dropdown would be three lies about how the product is built. They become separate entries
+when they become separate screens.
+
+### 11.3 Collapsing
+
+Below `--sidebar` the rail collapses to icons with the group headings hidden and a
+tooltip per item. NOC wall mode collapses it by default; a wall display has no cursor and
+the navigation is not what it is showing.
+
+## 12. The command palette
+
+`Ctrl`/`Cmd` + `K`. The fastest path to any resource or screen, and the reason the
+navigation does not have to grow a search box of its own.
+
+### 12.1 What it searches
+
+In order, because the order is the ranking:
+
+1. **Resources by name.** The commonest thing anybody wants, and the one that gets slower
+   to reach as the estate grows — which is exactly backwards from what a console should do.
+2. **Screens.** By name and by the words somebody would use for them: "logs" finds
+   Explore, "topology" finds Topology.
+3. **Actions.** Things with a verb: create a dashboard, add a discovery job, sign out.
+
+### 12.2 What it is not
+
+**Not a query language.** `packet loss > 5%` belongs in the Explorer, which has a
+compiler, a `Query` AST and an opinion about what is answerable. A palette that accepted
+half a query language would be a second query language that cannot be saved, alerted on or
+shared — and the product already refuses to have two of those.
+
+The palette's job is *navigation*. When something typed into it looks like a question
+rather than a destination, it offers to open the Explorer with it.
+
+### 12.3 Behaviour
+
+- Opens over the page, does not navigate away; `Esc` closes it and returns focus to where
+  it was.
+- Arrow keys move, `Enter` opens, and the first result is selected so `Ctrl+K` `Enter` on
+  an exact name is two keystrokes.
+- Results are keyboard-reachable and announced: it is a `listbox`, not a list of divs.
+- No results is a sentence saying what it searches, not an empty box.
+- It respects `--motion`: it appears, it does not spring.
+
+## 13. Context
+
+> **Specified, not built.** §11 and §12 ship; this does not yet. It is written down
+> because it is the next thing, and because the two decisions in §13.1 and §13.2 — what
+> may be a context, and that it lives in the URL — are the ones that would otherwise get
+> made accidentally by whichever screen implemented it first.
+
+A bar under the header naming what the whole application is currently about.
+
+```
+  Context: All resources ▾        ← everything below is scoped to this
+```
+
+Setting a context scopes **every** screen: the overview's counts, the Explorer's default
+filter, the alert list, the topology's root, the dashboards' variables. That is the idea
+`UI.md` and the research both reach for, and it is only honest to offer it because the
+backend already has the thing it scopes on — a `TenantScope`, a `site_id`, a
+`resource_id`, a resource group.
+
+### 13.1 What can be a context
+
+Only what the data model already has, and in this order of narrowing:
+
+```
+All resources → Site → Resource group → Resource
+```
+
+Tenant is deliberately **not** in that list: it is above context, it lives in the header,
+and switching it is switching customers rather than narrowing a view. Conflating the two
+would put "which customer am I looking at" in the same control as "which rack".
+
+### 13.2 How it is carried
+
+In the URL, beside the time range, in `ShellSearch`. Two reasons and both are practical: a
+context that is not in the URL is a context nobody can send to a colleague during an
+incident, and one held only in memory is one that resets on reload — at the moment when
+reloading is exactly what somebody under pressure will do.
+
+### 13.3 What it must not do
+
+**It must not silently hide things.** A scoped screen says what it is scoped to, in words,
+and offers the way out. An operator who cannot find a device because a context they forgot
+about is filtering it out will conclude the product has lost the device — and they will be
+right to distrust it afterwards.
