@@ -270,7 +270,13 @@ impl Cx {
                     "tenant_id, resource_id, site_id, observed_at, ingested_at, severity, \
                      previous_status, current_status, reason, attributes"
                 }
-                SignalType::Trace | SignalType::Flow => unreachable!("refused by plan()"),
+                SignalType::Flow => {
+                    "tenant_id, resource_id, site_id, observed_at, started_at, ingested_at, \
+                     src_address, dst_address, src_port, dst_port, protocol, bytes, packets, \
+                     sampling_rate, tcp_flags, tos, input_if, output_if, src_as, dst_as, \
+                     src_resource_id, dst_resource_id, attributes"
+                }
+                SignalType::Trace => unreachable!("refused by plan()"),
             };
             self.b.push(cols);
             return Ok(());
@@ -317,6 +323,17 @@ impl Cx {
                 };
                 self.b.push(f);
             }
+            // `flows_5m` stores SimpleAggregateFunction(sum, …), which is a value and not
+            // a state — so this is a plain `sum` over the stored column rather than a
+            // `sumMerge`. `records` is the row's own count of the raw flows behind it,
+            // which is what `count` has to mean here: counting the aggregate's rows would
+            // count conversations-per-bucket, not flows.
+            TableKind::FlowAggregate => match (a.func, &a.field) {
+                (AggFunc::Count, None) => self.b.push("sum(records)"),
+                (AggFunc::Sum, Some(Field::Bytes)) => self.b.push("sum(bytes)"),
+                (AggFunc::Sum, Some(Field::Packets)) => self.b.push("sum(packets)"),
+                (other, _) => return Err(rollup_refuses(other, "flows_5m")),
+            },
         }
 
         self.b.push(" AS ");

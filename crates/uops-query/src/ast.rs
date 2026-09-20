@@ -149,6 +149,29 @@ pub enum Field {
     PreviousStatus,
     /// States only.
     CurrentStatus,
+
+    /// Flows only. Stored as `IPv6`, with IPv4 mapped — one column, both families.
+    SrcAddress,
+    /// Flows only.
+    DstAddress,
+    /// Flows only. The ephemeral end of a conversation; `dst_port` names the service.
+    SrcPort,
+    /// Flows only.
+    DstPort,
+    /// Flows only. The IANA protocol number: 6 is TCP, 17 UDP.
+    Protocol,
+    /// Flows only, and **as observed** — see [`Field::SamplingRate`].
+    Bytes,
+    /// Flows only, as observed.
+    Packets,
+    /// Flows only. One in how many packets was sampled.
+    ///
+    /// Stored beside the counts rather than applied to them, so a caller that wants an
+    /// estimate multiplies and a caller that wants the measurement does not. M7 §2.4,
+    /// and the reason it is a field here at all: a query that sums `bytes` across rows
+    /// with different rates has to be able to group by this, or its answer is neither an
+    /// estimate nor a measurement.
+    SamplingRate,
     /// A semconv attribute (logs/events) or label (metrics). Compiles to a real column
     /// when the key is materialised — W1 measured `GROUP BY attributes['host.name']` at
     /// 2 252 ms, the slowest query in the whole suite.
@@ -192,6 +215,14 @@ impl Field {
             Self::EventType => "event_type".into(),
             Self::PreviousStatus => "previous_status".into(),
             Self::CurrentStatus => "current_status".into(),
+            Self::SrcAddress => "src_address".into(),
+            Self::DstAddress => "dst_address".into(),
+            Self::SrcPort => "src_port".into(),
+            Self::DstPort => "dst_port".into(),
+            Self::Protocol => "protocol".into(),
+            Self::Bytes => "bytes".into(),
+            Self::Packets => "packets".into(),
+            Self::SamplingRate => "sampling_rate".into(),
             Self::Attr { key } => format!("attributes[{key}]"),
             Self::TimeBucket { seconds } => format!("time_bucket({seconds}s)"),
             Self::Rate => "rate".into(),

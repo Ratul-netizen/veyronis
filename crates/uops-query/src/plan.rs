@@ -26,6 +26,14 @@ pub const RAW_METRIC_SPAN: chrono::TimeDelta = chrono::TimeDelta::hours(6);
 /// Beyond this, the 5-minute rollup is itself past retention and the hourly one serves.
 pub const FIVE_MINUTE_SPAN: chrono::TimeDelta = chrono::TimeDelta::days(30);
 
+/// Longest window still answered from raw flow rows.
+///
+/// Seven days, which is `flows`' TTL in `ch-migrations/0007_flows.sql`. The same argument
+/// `RAW_METRIC_SPAN` makes and a sharper version of it: raw flow is the shortest-retained
+/// table in the product, so a month-long query against it returns the last week and looks
+/// like a month.
+pub const RAW_FLOW_SPAN: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
 /// The bucket width of `logs_counts_5m` and `metrics_5m`. A histogram finer than this
 /// cannot be served from them.
 pub const PREAGGREGATE_BUCKET_SECONDS: u32 = 300;
@@ -38,6 +46,12 @@ pub enum TableKind {
     LogCounts,
     /// `metrics_5m` / `metrics_1h` — `AggregatingMergeTree` states, not raw values.
     MetricRollup,
+    /// `flows_5m` — sums per conversation per five minutes.
+    ///
+    /// Not a `MetricRollup` despite the shape, because what it stores is different:
+    /// `SimpleAggregateFunction(sum)` rather than aggregate states, so a reader writes
+    /// `sum(bytes)` and never `sumMerge(bytes)`.
+    FlowAggregate,
 }
 
 /// Which table, and the handful of facts codegen needs about its shape.
@@ -81,7 +95,35 @@ pub(crate) fn plan(q: &Query) -> Result<(TablePlan, Vec<QueryWarning>)> {
 
     let plan = match q.signal {
         SignalType::Trace => return Err(Error::Unsupported("trace queries (M8)")),
-        SignalType::Flow => return Err(Error::Unsupported("flow queries (M7)")),
+        SignalType::Flow => {
+            if serves_from_flows_5m(q) {
+                if q.time.span() > RAW_FLOW_SPAN {
+                    warnings.push(QueryWarning::Downsampled {
+                        table: "flows_5m".into(),
+                        bucket_seconds: PREAGGREGATE_BUCKET_SECONDS,
+                    });
+                }
+                TablePlan {
+                    table: "flows_5m",
+                    kind: TableKind::FlowAggregate,
+                    signal: q.signal,
+                    time_col: "bucket",
+                    attr_map: "attributes",
+                    stored_bucket_seconds: PREAGGREGATE_BUCKET_SECONDS,
+                }
+            } else {
+                // Raw, and said out loud when the window reaches past what raw keeps.
+                // Refusing would be worse: the caller asked for something the aggregate
+                // cannot answer, and a truncated answer they know about beats no answer.
+                if q.time.span() > RAW_FLOW_SPAN {
+                    warnings.push(QueryWarning::BeyondRetention {
+                        table: "flows".into(),
+                        days: RAW_FLOW_SPAN.num_days(),
+                    });
+                }
+                base("flows", "attributes")
+            }
+        }
         SignalType::Event => base("events", "attributes"),
         SignalType::State => base("states", "attributes"),
         SignalType::Log => {
@@ -162,6 +204,159 @@ fn serves_from_log_counts(q: &Query) -> bool {
     })
 }
 
+/// The column a field names on a pre-aggregate.
+///
+/// Each of these tables was built to answer one shape of question, and holds only what
+/// that shape needs — so the honest answer to anything else is that the column is not
+/// there. Naming the *table* rather than the signal in the error is deliberate: "severity
+/// is not available on `flows_5m`" tells an operator which table they landed on, which is
+/// the thing they did not choose and cannot see.
+fn preaggregate_column(f: &Field, p: &TablePlan) -> Result<Col> {
+    match (p.kind, f) {
+        (_, Field::ResourceId) => Ok(Col::Plain("resource_id")),
+        (TableKind::LogCounts, Field::Severity) => Ok(Col::Plain("severity")),
+        (TableKind::MetricRollup, Field::Metric) => Ok(Col::Plain("metric")),
+
+        // Exactly the columns `0007_flows.sql` gave `flows_5m`, and no others.
+        // `src_port` is deliberately absent — it is ephemeral, and the aggregate drops it
+        // rather than carry one row per connection.
+        (
+            TableKind::FlowAggregate,
+            Field::SrcAddress
+            | Field::DstAddress
+            | Field::DstPort
+            | Field::Protocol
+            | Field::SamplingRate
+            | Field::Bytes
+            | Field::Packets,
+        ) => Ok(Col::Plain(match f {
+            Field::SrcAddress => "src_address",
+            Field::DstAddress => "dst_address",
+            Field::DstPort => "dst_port",
+            Field::Protocol => "protocol",
+            Field::SamplingRate => "sampling_rate",
+            Field::Bytes => "bytes",
+            _ => "packets",
+        })),
+
+        // Re-bucketing rows that are already at the requested width is a function call
+        // per row for no change in the result.
+        (_, Field::TimeBucket { seconds }) if *seconds == p.stored_bucket_seconds => {
+            Ok(Col::Plain(p.time_col))
+        }
+        (_, Field::TimeBucket { seconds }) => Ok(Col::Bucket {
+            seconds: *seconds,
+            base: p.time_col,
+        }),
+        (_, Field::ObservedAt) => Ok(Col::Plain(p.time_col)),
+
+        _ => Err(Error::FieldNotAvailable {
+            field: f.label(),
+            signal: p.table,
+        }),
+    }
+}
+
+/// The `flows` column a flow-only field names, on a flow query.
+///
+/// `None` on any other signal, which the caller turns into the same
+/// `FieldNotAvailable` every other mismatched field gets.
+fn flow_column(f: &Field, signal: SignalType) -> Option<Col> {
+    if signal != SignalType::Flow {
+        return None;
+    }
+    Some(match f {
+        Field::SrcAddress => Col::Plain("src_address"),
+        Field::DstAddress => Col::Plain("dst_address"),
+        Field::SrcPort => Col::Plain("src_port"),
+        Field::DstPort => Col::Plain("dst_port"),
+        Field::Protocol => Col::Plain("protocol"),
+        Field::Bytes => Col::Plain("bytes"),
+        Field::Packets => Col::Plain("packets"),
+        Field::SamplingRate => Col::Plain("sampling_rate"),
+        _ => return None,
+    })
+}
+
+/// Whether `flows_5m` can answer this, rather than the raw table.
+///
+/// The aggregate holds sums per conversation per five minutes, so it serves the questions
+/// every flow screen asks — top talkers, what changed, who is this host speaking to — and
+/// nothing else. A query wanting a source port, a TCP flag or an individual conversation
+/// is asking about *one* flow, which is an investigation and belongs on raw rows.
+///
+/// # `sampling_rate` is not optional here
+///
+/// A query that sums bytes across the aggregate without grouping by the rate adds numbers
+/// measured 1-in-1000 to numbers measured 1-in-1. 0007 keeps the rate in the sort key so
+/// the rows stay apart; this keeps them apart in the *answer*, by refusing to serve a
+/// grouped sum that does not carry the rate through. Raw rows have the same problem and
+/// the same fix, but there the caller can at least see every row's rate.
+fn serves_from_flows_5m(q: &Query) -> bool {
+    if !q.is_aggregate() {
+        return false;
+    }
+
+    // Sums only. The aggregate stores `SimpleAggregateFunction(sum, …)`, so a max or a
+    // quantile over it would be a max of sums — a different number wearing the right
+    // name.
+    let summable = q.aggregations.iter().all(|a| {
+        matches!(
+            (a.func, &a.field),
+            (AggFunc::Count, None) | (AggFunc::Sum, Some(Field::Bytes | Field::Packets))
+        )
+    });
+    if !summable {
+        return false;
+    }
+
+    let available = |f: &Field| match f {
+        Field::ResourceId
+        | Field::SrcAddress
+        | Field::DstAddress
+        | Field::DstPort
+        | Field::Protocol
+        | Field::SamplingRate => true,
+        Field::TimeBucket { seconds } => {
+            *seconds >= PREAGGREGATE_BUCKET_SECONDS && seconds % PREAGGREGATE_BUCKET_SECONDS == 0
+        }
+        _ => false,
+    };
+
+    if !q.group_by.iter().all(available) {
+        return false;
+    }
+
+    // Summing bytes without the rate in the grouping mixes differently-measured traffic.
+    // §2.4, as a planner rule rather than a comment.
+    let sums_counters = q
+        .aggregations
+        .iter()
+        .any(|a| matches!(a.field, Some(Field::Bytes | Field::Packets)));
+    let carries_rate = q.group_by.contains(&Field::SamplingRate)
+        || q.filter.as_ref().is_some_and(|f| {
+            let mut fields = Vec::new();
+            fields_of(f, &mut fields);
+            fields.contains(&Field::SamplingRate)
+        });
+    if sums_counters && !carries_rate {
+        return false;
+    }
+
+    if let Some(f) = &q.filter {
+        let mut fields = Vec::new();
+        fields_of(f, &mut fields);
+        if !fields.iter().all(available) {
+            return false;
+        }
+    }
+
+    q.order_by.iter().all(|s| match &s.key {
+        SortKey::Field { field } => available(field),
+        SortKey::Alias { .. } => true,
+    })
+}
+
 /// Which metric rollup, if any. `None` means the raw table.
 fn metric_rollup(q: &Query) -> Result<Option<(&'static str, u32)>> {
     // Rollups hold aggregate states, not points. A query asking for individual samples
@@ -233,28 +428,10 @@ pub(crate) fn column_of(f: &Field, p: &TablePlan, warnings: &mut Vec<QueryWarnin
         })
     };
 
-    // A pre-aggregate has four columns and no more. Checked before the per-signal
-    // mapping so the error names the real reason.
+    // A pre-aggregate holds a handful of columns and no more. Checked before the
+    // per-signal mapping so the error names the real reason.
     if p.kind != TableKind::Base {
-        return match (p.kind, f) {
-            (_, Field::ResourceId) => Ok(Col::Plain("resource_id")),
-            (TableKind::LogCounts, Field::Severity) => Ok(Col::Plain("severity")),
-            (TableKind::MetricRollup, Field::Metric) => Ok(Col::Plain("metric")),
-            // Re-bucketing rows that are already at the requested width is a function
-            // call per row for no change in the result.
-            (_, Field::TimeBucket { seconds }) if *seconds == p.stored_bucket_seconds => {
-                Ok(Col::Plain(p.time_col))
-            }
-            (_, Field::TimeBucket { seconds }) => Ok(Col::Bucket {
-                seconds: *seconds,
-                base: p.time_col,
-            }),
-            (_, Field::ObservedAt) => Ok(Col::Plain(p.time_col)),
-            _ => Err(Error::FieldNotAvailable {
-                field: f.label(),
-                signal: p.table,
-            }),
-        };
+        return preaggregate_column(f, p);
     }
 
     Ok(match f {
@@ -291,6 +468,18 @@ pub(crate) fn column_of(f: &Field, p: &TablePlan, warnings: &mut Vec<QueryWarnin
             (S::Metric, Field::Value) => Col::Plain("value"),
             (S::Metric, Field::Unit) => Col::Plain("unit"),
             _ => return unavailable(),
+        },
+
+        Field::SrcAddress
+        | Field::DstAddress
+        | Field::SrcPort
+        | Field::DstPort
+        | Field::Protocol
+        | Field::Bytes
+        | Field::Packets
+        | Field::SamplingRate => match flow_column(f, p.signal) {
+            Some(c) => c,
+            None => return unavailable(),
         },
 
         // A column of the rate subquery the compiler wraps the table in — see
@@ -532,10 +721,155 @@ mod tests {
     }
 
     #[test]
-    fn traces_and_flows_are_declared_but_refuse_to_compile() {
-        for s in [SignalType::Trace, SignalType::Flow] {
-            let q = Query::new(s, TimeRange::new(at(0), at(60)));
-            assert!(matches!(plan(&q).unwrap_err(), Error::Unsupported(_)));
+    fn traces_are_declared_but_refuse_to_compile() {
+        // Flows used to be here too. M7 built them.
+        let q = Query::new(SignalType::Trace, TimeRange::new(at(0), at(60)));
+        assert!(matches!(plan(&q).unwrap_err(), Error::Unsupported(_)));
+    }
+
+    // --- flows, M7 ---------------------------------------------------------------
+
+    fn flows(span: Duration) -> Query {
+        Query::new(
+            SignalType::Flow,
+            TimeRange::new(at(0), at(span.num_seconds())),
+        )
+    }
+
+    fn sum(field: Field, alias: &str) -> Aggregation {
+        Aggregation {
+            func: AggFunc::Sum,
+            field: Some(field),
+            alias: alias.into(),
+        }
+    }
+
+    #[test]
+    fn a_flow_query_for_individual_conversations_reads_the_raw_table() {
+        // Not an aggregate, so nothing pre-aggregated can answer it: this is somebody
+        // looking at the actual conversations in a minute, which is an investigation.
+        let (p, _) = plan(&flows(Duration::hours(1))).unwrap();
+        assert_eq!(p.table, "flows");
+        assert_eq!(p.kind, TableKind::Base);
+    }
+
+    #[test]
+    fn top_talkers_is_answered_from_the_aggregate() {
+        // The shape every flow screen asks: bytes per conversation per bucket. Carrying
+        // the sampling rate through is what makes the sum mean anything.
+        let mut q = flows(Duration::days(1));
+        q.aggregations = vec![sum(Field::Bytes, "b")];
+        q.group_by = vec![
+            Field::TimeBucket { seconds: 300 },
+            Field::SrcAddress,
+            Field::DstAddress,
+            Field::SamplingRate,
+        ];
+
+        let (p, _) = plan(&q).unwrap();
+        assert_eq!(p.table, "flows_5m");
+        assert_eq!(p.kind, TableKind::FlowAggregate);
+    }
+
+    #[test]
+    fn a_summed_flow_query_that_drops_the_sampling_rate_does_not_get_the_aggregate() {
+        // §2.4 as a planner rule. Summing bytes across rows sampled 1-in-1000 and 1-in-1
+        // gives a number that is neither an estimate nor a measurement, and the aggregate
+        // is exactly where those rows sit side by side.
+        let mut q = flows(Duration::days(1));
+        q.aggregations = vec![sum(Field::Bytes, "b")];
+        q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::SrcAddress];
+
+        assert_eq!(plan(&q).unwrap().0.table, "flows");
+    }
+
+    #[test]
+    fn counting_flows_needs_no_sampling_rate() {
+        // A count of records is not a count of traffic, so mixing rates does not spoil
+        // it. Only the byte and packet sums carry the hazard.
+        let mut q = flows(Duration::days(1));
+        q.aggregations = vec![count()];
+        q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::DstPort];
+
+        assert_eq!(plan(&q).unwrap().0.table, "flows_5m");
+    }
+
+    #[test]
+    fn a_query_naming_the_source_port_stays_on_raw_rows() {
+        // `src_port` is ephemeral and the aggregate drops it — see 0007. Asking for it
+        // is asking about one connection, which raw rows answer.
+        let mut q = flows(Duration::days(1));
+        q.aggregations = vec![count()];
+        q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::SrcPort];
+
+        assert_eq!(plan(&q).unwrap().0.table, "flows");
+    }
+
+    #[test]
+    fn a_bucket_finer_than_five_minutes_cannot_come_from_the_aggregate() {
+        let mut q = flows(Duration::days(1));
+        q.aggregations = vec![count()];
+        q.group_by = vec![Field::TimeBucket { seconds: 60 }];
+
+        assert_eq!(plan(&q).unwrap().0.table, "flows");
+    }
+
+    #[test]
+    fn a_window_past_raw_retention_says_so_rather_than_answering_short() {
+        // Raw flow keeps seven days. A month-long query that needs a raw-only column
+        // gets the last week — which looks exactly like a quiet month unless somebody
+        // says otherwise.
+        let mut q = flows(Duration::days(30));
+        q.aggregations = vec![count()];
+        q.group_by = vec![Field::SrcPort];
+
+        let (p, warnings) = plan(&q).unwrap();
+        assert_eq!(p.table, "flows");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, QueryWarning::BeyondRetention { .. })),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_window_the_aggregate_can_serve_is_downsampled_rather_than_truncated() {
+        let mut q = flows(Duration::days(30));
+        q.aggregations = vec![count()];
+        q.group_by = vec![Field::TimeBucket { seconds: 300 }];
+
+        let (p, warnings) = plan(&q).unwrap();
+        assert_eq!(p.table, "flows_5m");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, QueryWarning::Downsampled { .. })),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn a_flow_column_is_not_available_on_another_signal() {
+        let (p, _) = plan(&logs(Duration::hours(1))).unwrap();
+        for f in [Field::SrcAddress, Field::Bytes, Field::SamplingRate] {
+            let err = column_of(&f, &p, &mut Vec::new()).unwrap_err();
+            assert!(matches!(err, Error::FieldNotAvailable { .. }), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_column_the_aggregate_dropped_is_refused_by_name() {
+        let mut q = flows(Duration::days(1));
+        q.aggregations = vec![count()];
+        q.group_by = vec![Field::TimeBucket { seconds: 300 }];
+        let (p, _) = plan(&q).unwrap();
+
+        // The planner would not have chosen flows_5m for a query naming these, but the
+        // mapping has to refuse them anyway: a caller reaching column_of directly must
+        // not get a column that is not there.
+        for f in [Field::SrcPort, Field::SiteId] {
+            assert!(column_of(&f, &p, &mut Vec::new()).is_err(), "{f:?}");
         }
     }
 }

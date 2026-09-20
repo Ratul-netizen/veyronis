@@ -43,6 +43,16 @@ pub enum QueryWarning {
     /// projection (W1: 2 303 ms → 72 ms), which exists precisely for this shape, but
     /// it is still the widest read the product offers.
     FullTenantScan,
+
+    /// The window reaches further back than the table keeps, and no aggregate could
+    /// serve it.
+    ///
+    /// Distinct from [`QueryWarning::Downsampled`], which says "you got the aggregate
+    /// instead". This one says "you got the raw table and it does not go back that far",
+    /// which happens when the query needs a column the aggregate does not have — a source
+    /// port, say. The result is real and it is *short*, and a short result that looks
+    /// complete is the failure this exists to prevent.
+    BeyondRetention { table: Cow<'static, str>, days: i64 },
 }
 
 /// A warning as the API sends it.
@@ -100,6 +110,9 @@ impl QueryWarning {
                 "this reads every resource in the tenant; narrowing to a resource is much faster"
                     .into()
             }
+            Self::BeyondRetention { table, days } => format!(
+                "{table} keeps {days} days, and this window reaches further back;                  the result is complete only for the part that is still stored"
+            ),
         }
     }
 }
