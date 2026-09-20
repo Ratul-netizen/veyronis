@@ -152,23 +152,50 @@ mod tests {
 
     #[test]
     fn the_real_migration_set_loads_in_order() {
+        // Contiguous from 1 and ascending, rather than a hard-coded list of versions.
+        //
+        // The list was the obvious thing and it was the wrong thing: every new migration
+        // failed this test for no reason but its own existence, which teaches whoever is
+        // adding one to update the expectation without reading what it is for. What the
+        // loader actually promises is ordering and no gaps, and that is what a missing
+        // file would break.
         let set = load_dir(&ch_migrations()).unwrap();
         let versions: Vec<u32> = set.iter().map(|m| m.version).collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6], "{versions:?}");
+
+        assert!(!versions.is_empty(), "no migrations were found at all");
+        let expected: Vec<u32> = (1..=u32::try_from(versions.len()).unwrap()).collect();
+        assert_eq!(versions, expected, "{versions:?}");
         assert!(set.iter().all(|m| !m.statements.is_empty()));
     }
 
     #[test]
     fn the_deferred_directory_is_not_part_of_the_applied_set() {
-        // traces and flows are declared in the repository and created in M7/M8. If they
-        // leaked into the applied set, every deployment would carry two empty tables
-        // with TTLs and a bloom filter nobody asked for.
+        // `traces` is declared in the repository and created in M8. If it leaked into the
+        // applied set, every deployment would carry an empty table with a TTL and a bloom
+        // filter nobody asked for.
         let set = load_dir(&ch_migrations()).unwrap();
         assert!(
             !set.iter().any(|m| m.name.contains("traces")),
             "deferred DDL must not be applied"
         );
-        assert!(ch_migrations().join("deferred/traces_flows.sql").exists());
+        assert!(ch_migrations().join("deferred/traces.sql").exists());
+    }
+
+    #[test]
+    fn flows_left_the_deferred_directory_when_m7_built_its_decoders() {
+        // The other half of the rule above, and the reason the directory exists: a
+        // deferred file is meant to be promoted, not to sit there forever. `flows` was
+        // promoted in M7 — gaining the sampling column it had been declared without —
+        // and this is what says the promotion happened rather than a copy being made.
+        let set = load_dir(&ch_migrations()).unwrap();
+        assert!(
+            set.iter().any(|m| m.name.contains("flows")),
+            "flows should be an applied migration now"
+        );
+        assert!(
+            !ch_migrations().join("deferred/traces_flows.sql").exists(),
+            "the old combined file should be gone, not left beside its replacement"
+        );
     }
 
     #[test]

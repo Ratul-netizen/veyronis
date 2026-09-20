@@ -10,7 +10,8 @@ SPEC §M0.6, amended by W1. Applied by [`uops-ch-migrate`](../crates/uops-ch-mig
 | `0004_metrics.sql` | metrics + the 5-minute rollup | |
 | `0005_metrics_1h.sql` | the hourly rollup | closes the open item `uops-query` left: it already plans onto this table |
 | `0006_events_states.sql` | events and state transitions | |
-| `deferred/` | traces and flows | declared, created in M7/M8. The runner ignores this directory |
+| `0007_flows.sql` | flows + the 5-minute aggregate | M7. Promoted from `deferred/`, gaining the sampling column it lacked and a retention that suits the highest-volume signal |
+| `deferred/` | traces | declared, created in M8. The runner ignores this directory |
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d

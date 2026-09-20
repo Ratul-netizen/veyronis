@@ -3,6 +3,9 @@
 Declared now, created in the milestone that needs them. SPEC §M0.6: traces and flows
 "are declared in `ch-migrations/` but not created until M7/M8".
 
+`flows` has left: M7 built the decoders that fill it, so it is `0007_flows.sql` now.
+`traces` waits for M8.
+
 The runner ignores this directory — it only reads `NNNN_*.sql` at the top level. These
 files become numbered migrations when the collectors that fill them are built.
 

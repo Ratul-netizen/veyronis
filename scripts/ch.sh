@@ -112,12 +112,15 @@ cmd_smoke() {
   local T="018f0000-0000-7000-8000-000000000001"
   local R="018f0000-0000-7000-8000-0000000000aa"
   local S="018f0000-0000-7000-8000-000000000055"
+  local NIL="00000000-0000-0000-0000-000000000000"
 
   echo "TRUNCATE TABLE logs"        | ch > /dev/null
   echo "TRUNCATE TABLE logs_counts_5m" | ch > /dev/null
   echo "TRUNCATE TABLE metrics"     | ch > /dev/null
   echo "TRUNCATE TABLE metrics_5m"  | ch > /dev/null
   echo "TRUNCATE TABLE metrics_1h"  | ch > /dev/null
+  echo "TRUNCATE TABLE flows"       | ch > /dev/null
+  echo "TRUNCATE TABLE flows_5m"    | ch > /dev/null
 
   printf '%s' "{\"tenant_id\":\"$T\",\"resource_id\":\"$R\",\"site_id\":\"$S\",\
 \"observed_at\":\"2026-09-01 00:03:00.000\",\"ingested_at\":\"2026-09-01 00:03:01.000\",\
@@ -135,6 +138,46 @@ cmd_smoke() {
         "$T" "$R" "$S" "$((i * 2))" "$((i * 2))" "$((i + 1))"
     done
   } | ch "&query=INSERT%20INTO%20metrics%20FORMAT%20JSONEachRow"
+
+  # Three flows, one conversation, one five-minute bucket — but not one sampling rate.
+  # Two were sampled 1-in-1000 and one 1-in-1, which is what the assertions below are
+  # about: see 0007_flows.sql on why that has to produce two aggregate rows.
+  #
+  # # Why these timestamps are relative when every other fixture here is fixed
+  #
+  # Raw flow keeps seven days (§2.5), where logs keep a year. A fixture at a fixed date
+  # is inside that window on the day it is written and outside it the week after, and the
+  # failure is not loud: the rows insert, the materialised view fires, and then TTL takes
+  # them out of the base table — so the aggregate assertions pass and only the ones
+  # reading `flows` fail. That is exactly how it failed the first time this was run.
+  #
+  # `crates/uops-store-ch/tests/telemetry.rs` learned the same lesson the same way and
+  # says so at length. Anchoring to the current five-minute boundary keeps all three
+  # flows in one bucket however long this file lives.
+  cat <<SQL | ch > /dev/null
+INSERT INTO flows (tenant_id, resource_id, site_id, observed_at, started_at, ingested_at,
+                   src_address, dst_address, src_port, dst_port, protocol,
+                   bytes, packets, sampling_rate, tcp_flags, tos,
+                   input_if, output_if, src_as, dst_as,
+                   src_resource_id, dst_resource_id, attributes)
+SELECT
+    '$T', '$R', '$S',
+    bucket + toIntervalSecond(n * 10),
+    bucket + toIntervalSecond(n * 10 - 5),
+    now64(3),
+    toIPv6('::ffff:10.0.0.7'), toIPv6('::ffff:8.8.8.8'),
+    51000 + n, 443, 6,
+    b, p, rate,
+    24, 16, 11, 22, NULL, 15169,
+    '$NIL', '$NIL', map()
+FROM
+(
+    SELECT
+        toDateTime64(toStartOfFiveMinute(now()), 3) AS bucket,
+        arrayJoin([(0, 6000, 42, 1000), (1, 4000, 30, 1000), (2, 100, 2, 1)]) AS t,
+        t.1 AS n, t.2 AS b, t.3 AS p, t.4 AS rate
+)
+SQL
 
   echo "smoke:"
 
@@ -169,6 +212,42 @@ cmd_smoke() {
     "1/24"
   expect "metrics_1h keeps the raw point count" \
     "SELECT countMerge(cnt) FROM metrics_1h" "24"
+
+  # --- flows, M7 -----------------------------------------------------------------
+  #
+  # The one that would be silently wrong. Three flows of one conversation in one bucket,
+  # sampled at two different rates: the aggregate must keep them apart, because adding
+  # bytes measured 1-in-1000 to bytes measured 1-in-1 produces a number that is neither
+  # an estimate nor a measurement. 0007_flows.sql puts sampling_rate in the sort key for
+  # exactly this, and this is that decision as an assertion.
+  expect "flows_5m separates rows sampled at different rates" \
+    "SELECT count() FROM flows_5m" "2"
+
+  expect "flows_5m sums within a rate and not across them" \
+    "SELECT sum(bytes) FROM flows_5m WHERE sampling_rate = 1000" "10000"
+  expect "the unsampled flow is its own row" \
+    "SELECT sum(bytes) FROM flows_5m WHERE sampling_rate = 1" "100"
+
+  # What a screen actually shows, and the reason the rate is stored rather than applied:
+  # 10 000 observed bytes at 1-in-1000 stands for ten million.
+  expect "the estimate is the reader's multiplication" \
+    "SELECT sum(bytes * sampling_rate) FROM flows_5m" "10000100"
+
+  # Counts are stored as observed. A decoder that pre-multiplied would show 10 000 100
+  # here too, and nothing downstream could tell the two apart.
+  expect "flows keeps the counts the exporter reported" \
+    "SELECT sum(bytes) FROM flows" "10100"
+
+  expect "flows_5m records how many raw flows it was built from" \
+    "SELECT sum(records) FROM flows_5m" "3"
+
+  # IPv4 stored mapped, one column for both families.
+  expect "an IPv4 address round-trips through the IPv6 column" \
+    "SELECT DISTINCT IPv6NumToString(src_address) FROM flows" "::ffff:10.0.0.7"
+
+  # 0 is a legitimate AS number, so "not reported" has to be a different value.
+  expect "a null AS number stays null rather than becoming zero" \
+    "SELECT count() FROM flows WHERE src_as IS NULL" "3"
 
   echo "$FAILURES failure(s)"
   [ "$FAILURES" -eq 0 ]
