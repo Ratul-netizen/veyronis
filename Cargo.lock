@@ -2353,6 +2353,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-collector-flow"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_yaml_ng",
+ "socket2",
+ "sqlx",
+ "tokio",
+ "uops-core",
+ "uops-flow",
+ "uops-identity",
+ "uops-pipeline",
+ "uops-store-ch",
+ "uops-store-pg",
+ "uuid",
+]
+
+[[package]]
 name = "uops-collector-otlp"
 version = "0.0.1"
 dependencies = [

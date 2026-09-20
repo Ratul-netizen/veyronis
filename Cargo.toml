@@ -159,6 +159,8 @@ uops-otlp = { path = "crates/uops-otlp" }
 uops-collector-otlp = { path = "crates/uops-collector-otlp" }
 uops-alert = { path = "crates/uops-alert" }
 uops-discover = { path = "crates/uops-discover" }
+uops-collector-flow = { path = "crates/uops-collector-flow" }
+uops-flow = { path = "crates/uops-flow" }
 uops-sweeper = { path = "crates/uops-sweeper" }
 uops-api = { path = "crates/uops-api" }
 uops-server = { path = "crates/uops-server" }

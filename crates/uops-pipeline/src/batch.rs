@@ -76,6 +76,15 @@ pub trait Sink<R>: Send + Sync {
 }
 
 #[async_trait]
+impl Sink<uops_store_ch::FlowRow> for uops_store_ch::ChStore {
+    async fn write(&self, rows: &[uops_store_ch::FlowRow]) -> Result<(), String> {
+        uops_store_ch::FlowStore::insert_flows(self, rows)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[async_trait]
 impl Sink<LogRow> for uops_store_ch::ChStore {
     async fn write(&self, rows: &[LogRow]) -> Result<(), String> {
         uops_store_ch::LogStore::insert_logs(self, rows)

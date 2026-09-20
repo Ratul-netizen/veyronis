@@ -1,0 +1,37 @@
+[package]
+name = "uops-collector-flow"
+description = "The flow collector. One listener per tenant; NetFlow v5/v9, IPFIX and sFlow into ClickHouse. SPEC M7."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+uops-core.workspace = true
+uops-flow.workspace = true
+uops-identity.workspace = true
+uops-pipeline.workspace = true
+uops-store-ch.workspace = true
+uops-store-pg.workspace = true
+
+chrono.workspace = true
+serde.workspace = true
+# A listener list is inherently a list, and the syslog collector's argument applies
+# unchanged: UOPS_FLOW_LISTENER_0_UDP is not configuration, it is a workaround.
+serde_yaml_ng.workspace = true
+# SO_RCVBUF, which tokio's UdpSocket does not expose. It matters more here than anywhere
+# else in the product: flow arrives in bursts of thousands of records and the kernel's
+# default buffer is a few hundred kilobytes.
+socket2.workspace = true
+tokio = { workspace = true, features = ["net", "signal", "time", "rt-multi-thread", "macros", "sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+sqlx.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

@@ -225,26 +225,26 @@ column pairs to read.
 
 ## 4. Acceptance criteria
 
-- [ ] A NetFlow v5 export from a simulated exporter produces one row per record, with the
+- [x] A NetFlow v5 export from a simulated exporter produces one row per record, with the
       exporter resolved to its resource
-- [ ] A NetFlow v9 export whose template arrives **after** its first data packet decodes
+- [x] A NetFlow v9 export whose template arrives **after** its first data packet decodes
       the later records and counts the dropped ones — and the count is visible, not just
       logged
-- [ ] Two exporters both using template ID 256 for different layouts are decoded
+- [x] Two exporters both using template ID 256 for different layouts are decoded
       correctly, which is the cache-key decision in §2.2 stated as a test
-- [ ] An IPFIX export with a variable-length field decodes, and one whose declared length
+- [x] An IPFIX export with a variable-length field decodes, and one whose declared length
       runs past the end of the packet is one dropped packet rather than a panic
-- [ ] An sFlow v5 sample carries its sampling rate into the row, and a query that sums
+- [x] An sFlow v5 sample carries its sampling rate into the row, and a query that sums
       bytes multiplies by it — asserted against a known rate, because this is the one that
       is wrong by a factor of a thousand when it is wrong
-- [ ] A flow whose endpoints are not in inventory is stored with null endpoint ids and
+- [x] A flow whose endpoints are not in inventory is stored with null endpoint ids and
       creates no resource
-- [ ] A packet from an exporter that is not in inventory produces a provisional resource
+- [x] A packet from an exporter that is not in inventory produces a provisional resource
       and a review item rather than a dropped packet — SPEC §M0.2 rule 1
 - [ ] A packet arriving on tenant A's listener cannot produce a row in tenant B, whatever
       it claims — the isolation test, as an adversarial case
 - [ ] Each decoder survives a fuzzing run without a panic
-- [ ] The suite runs against the live ClickHouse and the flow queries return correct rows
+- [x] The suite runs against the live ClickHouse and the flow queries return correct rows
       on a server whose timezone is not UTC — see `docs/dev-environment.md`
 
 ---
