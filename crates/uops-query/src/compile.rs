@@ -484,11 +484,11 @@ impl Cx {
         // 14:35 bucket. Found by running a real query against a real pre-aggregate;
         // both sides' unit tests were happy.
         self.b
-            .bind("DateTime64(3)", fmt_ts(self.window_start(q.time.start)));
+            .bind(TS_PARAM, fmt_ts(self.window_start(q.time.start)));
         self.b.push(" AND ");
         self.b.push(time_col);
         self.b.push(" < ");
-        self.b.bind("DateTime64(3)", fmt_ts(q.time.end));
+        self.b.bind(TS_PARAM, fmt_ts(q.time.end));
 
         match resources.ids() {
             None => {
@@ -719,7 +719,7 @@ impl Cx {
             }
             Value::Str(s) => self.b.bind("String", s.clone()),
             Value::Uuid(u) => self.b.bind("UUID", u.to_string()),
-            Value::Timestamp(t) => self.b.bind("DateTime64(3)", fmt_ts(*t)),
+            Value::Timestamp(t) => self.b.bind(TS_PARAM, fmt_ts(*t)),
             Value::List(_) => {
                 return Err(Error::Invalid(
                     "a list cannot be nested inside a list".into(),
@@ -845,7 +845,24 @@ fn rollup_refuses(func: AggFunc, table: &'static str) -> Error {
     }
 }
 
-/// `ClickHouse` parses `DateTime64(3)` parameters from this form.
+/// The type every timestamp parameter is bound as.
+///
+/// **The timezone is load-bearing.** A parameter declared `DateTime64(3)` carries no
+/// timezone, so `ClickHouse` parses its text in the *server's* timezone — while every
+/// telemetry column is declared `DateTime64(3, 'UTC')`. On a server running anything but
+/// UTC the two disagree by the offset, and a window query silently returns the wrong
+/// rows or none at all. No error: an empty graph, during an incident.
+///
+/// It survived unnoticed because the pinned image in `deploy/docker-compose.yml` runs
+/// UTC, so the naive parse happened to coincide. It was found the first time the suite
+/// ran against a `ClickHouse` on `America/New_York`, where a window of 15:00–18:00 UTC
+/// was read as 19:00–22:00 and matched nothing.
+///
+/// `fmt_ts` renders an instant that is already UTC, so naming UTC here is not a
+/// conversion — it is telling the server what the digits already mean.
+const TS_PARAM: &str = "DateTime64(3, 'UTC')";
+
+/// `ClickHouse` parses a [`TS_PARAM`] from this form.
 fn fmt_ts(t: chrono::DateTime<chrono::Utc>) -> String {
     t.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }

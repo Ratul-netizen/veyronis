@@ -210,3 +210,31 @@ fn every_golden_statement_filters_by_tenant() {
         );
     }
 }
+
+#[test]
+fn no_timestamp_parameter_is_left_without_a_timezone() {
+    // A `DateTime64(3)` parameter carries no timezone, so ClickHouse parses its text in
+    // the *server's* timezone — while every telemetry column is `DateTime64(3, 'UTC')`.
+    // On a server that is not running UTC the two disagree by the offset and a window
+    // query silently returns the wrong rows, or none: no error, just an empty graph.
+    //
+    // This is checked against the recorded SQL rather than by running a query, because
+    // the bug is invisible on a UTC server — which the pinned image in
+    // deploy/docker-compose.yml is, which is exactly why it went unnoticed until the
+    // suite was first run against a ClickHouse on America/New_York.
+    for f in fs::read_dir(golden_dir()).unwrap() {
+        let p = f.unwrap().path();
+        if p.extension().is_none_or(|e| e != "sql") {
+            continue;
+        }
+        let sql = fs::read_to_string(&p).unwrap();
+        for (n, line) in sql.lines().enumerate() {
+            assert!(
+                !line.contains("DateTime64(3)"),
+                "{}:{} emits a timezone-less DateTime64(3); bind TS_PARAM instead\n  {line}",
+                p.display(),
+                n + 1,
+            );
+        }
+    }
+}
