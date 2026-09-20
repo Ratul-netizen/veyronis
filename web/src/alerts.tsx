@@ -134,7 +134,7 @@ export function AlertsPage() {
                     {/* A pending alert is one nobody has been told about. Saying so on
                         the row stops it being read as a page that was missed. */}
                     {alert.state === "pending" && (
-                      <span className="dim"> · nobody notified</span>
+                      <span className="dim">, nobody notified</span>
                     )}
                   </td>
                   <td>

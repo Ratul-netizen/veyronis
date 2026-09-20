@@ -8,23 +8,112 @@
  * SBOM entries and a look this product does not want — and the shell is a sidebar, a
  * header, a table and a form. Custom properties do the theming; the browser does the
  * rest.
+ *
+ * ---------------------------------------------------------------------------------
+ * The one idea: the screen is quiet until something is wrong.
+ * ---------------------------------------------------------------------------------
+ *
+ * When nothing is firing there is no colour on this screen at all — type, hairlines and
+ * one ground. When something breaks, colour arrives, at the left edge of the thing that
+ * broke, and the count that matters is set large.
+ *
+ * So the amount of colour on screen is proportional to how much is wrong, and that is
+ * readable from four metres without reading a word. It is also why the product is
+ * comfortable to sit in front of all day: a console that is permanently shouting is one
+ * whose operator stops hearing it.
+ *
+ * Two consequences worth stating, because they look like omissions otherwise.
+ *
+ * **There is no brand accent colour.** UI-SPEC's rule 2 is "colour is semantic, never
+ * decoration" — and a blue meaning "you are here" is decoration by that rule's own
+ * logic. The only hues in this product are the five semantic states. Selection is drawn
+ * by inversion, interaction by weight and a hairline, and `--accent` is therefore the
+ * ink itself. That also disposes of a real accessibility problem: an accent hue has to
+ * stay distinguishable from five semantic hues under three kinds of colour blindness,
+ * and the easiest way to pass that test is not to have one.
+ *
+ * **Regions are not cards.** A panel is an area of the same ground, bounded by a
+ * hairline and held together by its own alignment. Stacked surfaces with shadows are how
+ * a web app looks; equipment you read is ruled, not stacked. Radius survives only on
+ * things you can press, where it means "this is a control" rather than "this is a box".
  */
+
+/* IBM Plex Sans and Plex Mono, self-hosted.
+ *
+ * UI.md §9 shortlisted Inter, Geist and IBM Plex Sans, and UI-SPEC §2 left the choice
+ * open because a web font is "a download, a licence and an air-gap question". All three
+ * are answered here: the files are in the repository, the licence is SIL OFL 1.1 and
+ * sits beside them, and nothing is fetched from a CDN at runtime — this product is
+ * installed on networks with no route to the internet, and a font that arrives from
+ * Google is a font that does not arrive.
+ *
+ * Plex rather than Inter because Inter is the default: it is what every product with no
+ * typographic opinion uses, and this one has one. Plex was drawn for IBM's technical
+ * products, it has the large x-height and open apertures that survive 13px on a bad
+ * monitor, and its mono is the same superfamily — which matters here more than it
+ * usually would, because the sans/mono distinction in this product is *semantic*. Mono
+ * means "you may need to compare this character by character": addresses, OIDs, chassis
+ * IDs, timestamps. Two faces from one family make that read as a change of voice rather
+ * than a change of typeface.
+ *
+ * Latin subsets only, four faces, 82 KB in total. `swap` because a console that shows
+ * nothing until a font arrives is worse than one that reflows.
+ */
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-Regular-Latin1.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-Medium-Latin1.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-SemiBold-Latin1.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   color-scheme: light dark;
 
-  /* --- ground and surfaces (UI-SPEC §1.1) --------------------------------- */
-  --bg: #fbfbfc;
+  /* --- ground and surfaces (UI-SPEC §1.1) ---------------------------------
+     Three tones, not four, and two of them are nearly the same: a console has a
+     ground and a hairline, and the only thing genuinely *recessed* is a place
+     you type into. Panels used to be a fourth, lighter tone; they are now the
+     ground with a rule around them. */
+  --bg: #ffffff;
   --bg-raised: #ffffff;
-  --bg-sunken: #f2f3f5;
-  --border: #dfe1e6;
-  --text: #16181d;
-  --text-dim: #5c6270;
+  /* Wells: inputs, table headers, anything the eye should read as inset. */
+  --bg-sunken: #f5f6f8;
+  --border: #e2e5ea;
+  /* A second rule weight, for the one or two places that separate *sections*
+     rather than rows. Without it every division shouts equally. */
+  --border-strong: #c9cdd5;
+  --text: #12151a;
+  --text-dim: #5b6472;
 
   /* --- semantic state (§1.2) ----------------------------------------------
-     Five, and a screen may not introduce a sixth. None of them is ever used
-     decoratively, and none is the only carrier of its meaning — every one
-     appears beside a word. */
+     Five, and a screen may not introduce a sixth. Now also the *only* colours
+     in the product: see the header. None is ever used decoratively, and none is
+     the only carrier of its meaning — every one appears beside a word. */
   --ok: #1a7f4b;
   --warn: #9a6400;
   --danger: #b4232b;
@@ -36,10 +125,12 @@
      is the second. */
   --maintenance: #6d4ad6;
 
-  /* --- accent (§1.3): where you are, and what you can press. Never state. -- */
-  --accent: #2c5fd6;
+  /* --- accent (§1.3): the ink, not a hue -----------------------------------
+     Selection inverts; it does not tint. See the header for why this product
+     has no brand colour on screen. */
+  --accent: #12151a;
   --accent-text: #ffffff;
-  --accent-dim: #2c5fd614;
+  --accent-dim: #12151a12;
 
   /* --- series (§1.4) -------------------------------------------------------
      Categorical, deliberately NOT the semantic five: a second line drawn in the
@@ -47,7 +138,11 @@
      common colour-vision deficiencies — blue and amber lead, red sits fourth.
      Six, because a chart with more than six lines is one whose grouping is too
      fine to read; after six they repeat, which is a visible signal that this has
-     happened. */
+     happened.
+
+     Series blue is no longer also the accent, which it used to be: one colour
+     meaning both "the first line on this chart" and "the page you are on" is a
+     collision nobody can resolve by looking. */
   --series-1: #2c5fd6;
   --series-2: #1a7f4b;
   --series-3: #9a6400;
@@ -55,21 +150,41 @@
   --series-5: #7c3aed;
   --series-6: #0f766e;
 
-  /* --- shape, space and motion (§1.5) ------------------------------------- */
-  --radius: 6px;
-  --radius-lg: 10px;
+  /* --- shape, space and motion (§1.5) -------------------------------------
+     Radius belongs to controls. A region with a radius is a card, and cards are
+     what this design is not; a button with one is a thing you can press. */
+  --radius: 5px;
+  --radius-lg: 8px;
   --space: 4px;
-  --sidebar: 224px;
+  --sidebar: 208px;
   --sidebar-collapsed: 56px;
-  --header: 52px;
+  --header: 48px;
   --row: 28px;
   --tap: 32px;
+  /* The state rail: the left edge of anything that has a state. Read as a shape
+     from across a room, which a dot in the third column is not. */
+  --rail: 3px;
   /* One duration. A product with five easing curves reads as five products. */
   --motion: 120ms;
   --motion-slow: 240ms;
 
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --font:
+    "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --mono:
+    "IBM Plex Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* --- type scale (§2) -----------------------------------------------------
+     One large step at the top, so a screen can have exactly one loud thing, and
+     small deliberate steps below it. The old scale ran 12/14/15/22 — four sizes
+     within ten points of each other, which is four sizes that all read the same
+     and no way to make anything matter more than anything else. */
+  --t-hero: 46px;
+  --t-display: 20px;
+  --t-section: 13px;
+  --t-body: 14px;
+  --t-label: 12px;
+  --t-mono: 12.5px;
 }
 
 /* Dark is the theme designed first — a NOC wall runs dark for eight hours at a
@@ -77,14 +192,16 @@
    light, and retrofitting it later is a rewrite of every colour decision. */
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Blue-dark rather than neutral charcoal — UI.md §9 asks for "very dark
-       blue / charcoal", and the difference is about eight points of hue. */
-    --bg: #0d1017;
-    --bg-raised: #161a22;
-    --bg-sunken: #090b10;
-    --border: #252b36;
-    --text: #e6e8ec;
-    --text-dim: #9aa1ae;
+    /* Near-black and barely cool. UI.md §9 asks for "very dark blue / charcoal";
+       the blue is eight points of hue, enough to stop it reading as a grey
+       screenshot and not enough to tint the semantic colours sitting on it. */
+    --bg: #0c0f13;
+    --bg-raised: #0c0f13;
+    --bg-sunken: #070a0d;
+    --border: #1e242c;
+    --border-strong: #333c48;
+    --text: #e8ebef;
+    --text-dim: #8a93a0;
 
     --ok: #57d08a;
     --warn: #e0b054;
@@ -92,9 +209,9 @@
     --unknown: #8b93a1;
     --maintenance: #9d7bff;
 
-    --accent: #6d9bff;
-    --accent-text: #0e1013;
-    --accent-dim: #6d9bff26;
+    --accent: #e8ebef;
+    --accent-text: #0c0f13;
+    --accent-dim: #e8ebef1a;
 
     --series-1: #6d9bff;
     --series-2: #57d08a;
@@ -124,8 +241,60 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
+  font-size: var(--t-body);
   line-height: 1.5;
+  /* Plex ships with a single-storey `a` and a slashed zero available as features. The
+     slashed zero is switched on everywhere rather than only in mono, because this product
+     shows a great many numbers and `0` against `O` is a real confusion in a hostname. */
+  font-feature-settings: "zero" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings carry the scale. There used to be no rules for these at all, so a page title
+   and a section title differed by five points and nothing else, and no screen could make
+   one thing matter more than another. */
+h1 {
+  margin: 0 0 2px;
+  font-size: var(--t-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  margin: 0;
+  font-size: var(--t-section);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Links are the ink, underlined.
+   With no accent hue left to spend, a link is distinguished by the one thing that has
+   always distinguished a link. The offset keeps the rule clear of the descenders, which
+   at 14px is the difference between an underline and a strikethrough through the tails. */
+a {
+  color: inherit;
+  text-decoration-color: var(--text-dim);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* The state rail: the left edge of anything that has a state.
+   Read as a shape from four metres, which a coloured dot in the third column is not, and
+   never the only carrier of its meaning — every rail sits beside the word for its state.
+   `--tone` is set per row; with none set the rail is invisible rather than grey, because
+   a row with no state should add nothing to the amount of colour on screen. */
+.rail {
+  border-left: var(--rail) solid var(--tone, transparent);
+  padding-left: calc(var(--space) * 3);
+  /* The rail belongs to the row, so it starts where the row starts. Negative margin pulls
+     it out of the content column and lines every rail on the page up with the left edge
+     of the type above it, which is what makes them read as one bar of varying colour when
+     seen from across a room. */
+  margin-left: calc(var(--rail) * -1 - var(--space) * 3);
 }
 
 button,
@@ -258,13 +427,51 @@ select {
 /* --- controls ----------------------------------------------------------- */
 
 select,
+textarea,
 input[type="text"],
 input[type="email"],
 input[type="password"] {
   padding: 6px 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg);
+  /* Recessed, which is the one place the third surface tone earns itself: a field you
+     type into should look like a hole rather than another piece of the ground. */
+  background: var(--bg-sunken);
+  color: var(--text);
+}
+
+textarea {
+  font-family: var(--mono);
+  font-size: var(--t-mono);
+  resize: vertical;
+}
+
+/* A field is its label and its control, stacked.
+ *
+ * There was no rule for this at all, so `<label>Name<input /></label>` rendered the two
+ * inline and the control sat on top of the words naming it. Every form in the product
+ * that had not written its own rule was affected; the discovery job form shipped that
+ * way, because the list behind it was the only part anybody had looked at.
+ *
+ * `.login label`, `.explore-form label` and `.saved label` carry a class and therefore
+ * still win where they disagree. */
+form label {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 1);
+  margin-bottom: calc(var(--space) * 3);
+  color: var(--text-dim);
+  font-size: var(--t-label);
+  font-weight: 500;
+}
+
+/* The control inside a field is body text: the label is the small quiet thing, not the
+   value somebody is reading back to check. */
+form label input,
+form label textarea,
+form label select {
+  font-size: var(--t-body);
+  color: var(--text);
 }
 
 button {
@@ -296,16 +503,72 @@ button.preset[aria-pressed="true"] {
   color: var(--accent-text);
 }
 
+/* The time range: one control, not five buttons.
+ *
+ * SPEC calls this "the single most-used control in the product", and it was drawn as a
+ * row of separate bordered buttons indistinguishable from Sign out — so the thing used
+ * fifty times a day and the thing used once looked identical. Segmented: one outline
+ * around the set, hairlines between the choices, and the current one inverted. That reads
+ * as a single control with a position, which is what it is.
+ */
 .range {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .range .label {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
-  margin-right: 4px;
+}
+
+.range .presets {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.range .presets button {
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 5px 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.range .presets button:first-child {
+  border-left: 0;
+}
+
+/* The selected range inverts, like everything else that says "you are here". */
+.range .presets button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* An action that is not the point of the screen.
+   Sign out, Cancel, dismissals — things used once a session or offered only as a way back
+   out. Drawn as buttons they competed with the one action somebody came to take: a form
+   with Create job and Cancel side by side in identical boxes makes the reader choose
+   between two equals when only one of them is the point.
+
+   Not scoped to the header, which is where it started: a quiet button is a quiet button
+   wherever it is, and the first form that reused the class found the scoping by having
+   its Cancel come out a full-weight button. */
+.quiet {
+  border: 0;
+  background: none;
+  padding: 5px 4px;
+  color: var(--text-dim);
+}
+
+.quiet:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* --- table -------------------------------------------------------------- */
@@ -322,17 +585,26 @@ td {
   border-bottom: 1px solid var(--border);
 }
 
+/* Sentence case, not caps. Tracked-out capitals above every column is the single
+   commonest tell of a templated interface, and capitals are measurably slower to read at
+   12px — which is the size at which a column header is always set. */
 th {
   color: var(--text-dim);
   font-weight: 500;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--t-label);
+  letter-spacing: 0;
 }
 
-td.mono {
+td.mono,
+.mono {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--t-mono);
+}
+
+/* Every number in a table, not only the ones somebody remembered to mark up: a column of
+   figures that shifts as it updates is a column nobody can read at a glance. */
+td {
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- states ------------------------------------------------------------- */
@@ -846,67 +1118,243 @@ h2 {
 
 /* --- the operations overview --- */
 
-/* Four numbers across, collapsing to two and then one. Tiles are links where there is
-   somewhere to go: the count of what is firing is a question, and the alert list is the
-   answer. */
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: calc(var(--space) * 3);
-  margin: calc(var(--space) * 3) 0;
+/* --- the Operations Overview ---------------------------------------------------
+ *
+ * The screen the product is judged by, and the one place the "quiet until something is
+ * wrong" idea has to be visible rather than described.
+ *
+ * Calm: two lines of text and no colour anywhere.
+ * Wrong: a count set at --t-hero in the colour of its state, and every row that is wrong
+ * carrying a rail on its left edge.
+ *
+ * The transition between those is not animated. A number that counts up is a number
+ * somebody has to wait for, and an operator who has just been paged is not in a mood to
+ * watch an interface perform.
+ */
+
+/* The calm state: a sentence, not a zero in a red tile. UI-SPEC §8.2 has required this
+   from the beginning; the four-tile version never actually did it, because a tile whose
+   label says "Firing" is still a tile about firing when the answer is none. */
+.all-quiet {
+  margin: calc(var(--space) * 7) 0 calc(var(--space) * 9);
+  font-size: var(--t-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
 }
 
-.tile {
+.all-quiet .estate {
+  display: block;
+  margin-top: calc(var(--space) * 2);
+  font-size: var(--t-body);
+  color: var(--text-dim);
+}
+
+/* The loud state. */
+.wrong {
+  margin: calc(var(--space) * 6) 0 calc(var(--space) * 7);
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: calc(var(--space) * 3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: calc(var(--space) * 3) calc(var(--space) * 10);
+}
+
+.wrong-count {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--space) * 3);
   color: inherit;
   text-decoration: none;
 }
 
-a.tile:hover {
-  border-color: var(--accent);
-}
-
-.tile-label {
-  color: var(--text-dim);
-  font-size: 12px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.tile-value {
-  font-size: 34px;
+.wrong-count .n {
+  font-size: var(--t-hero);
   font-weight: 600;
-  line-height: 1.1;
-  /* So a column of counts does not shift as it updates. */
+  line-height: 1;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-/* Tone is applied only to a number that is *not* zero — a nought drawn in the colour of
-   danger is a screen telling somebody there is an emergency when there is not. */
-.tile-value.danger {
+/* The word beside the number, which is what stops the colour being the only carrier of
+   the meaning — and what makes the tile readable to somebody who cannot see the red. */
+.wrong-count .what {
+  font-size: var(--t-body);
+}
+
+.wrong-count.firing .n {
   color: var(--danger);
 }
 
-.tile-value.warn {
+.wrong-count.pending .n {
   color: var(--warn);
 }
 
-.tile-of {
-  color: var(--text-dim);
-  font-size: 18px;
-  font-weight: 400;
+/* Pending is deliberately smaller than firing. They used to be two identical tiles, which
+   said they were equally important; one of them has woken somebody up and the other has
+   not. */
+.wrong-count.pending .n {
+  font-size: var(--t-display);
 }
 
-.tile-note {
+.wrong-count:hover .what {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The quiet supporting numbers. Not tiles: a bordered box around "248" is three sides of
+   chrome around three characters. */
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--space) * 2) calc(var(--space) * 8);
+  margin: calc(var(--space) * 5) 0 calc(var(--space) * 6);
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--t-body);
+}
+
+.facts b {
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A set of sibling screens, as tabs rather than links joined by middle dots.
+ *
+ * "Jobs · Runs · Candidates" was three links and two pieces of punctuation pretending to
+ * be a control. These are three places you can be, one of which you are in, so they are
+ * drawn the way every other "you are here" in this product is drawn: the current one
+ * inverts.
+ */
+.subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--space));
+  margin: calc(var(--space) * 2) 0 calc(var(--space) * 5);
+}
+
+.subnav a {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.subnav a:hover {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.subnav a.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* A region: a part of a page, not a card.
+   `.panel` stays a card because a dashboard panel genuinely is a discrete object you can
+   move and resize. A section of the overview is not an object; it is a paragraph with a
+   heading, and boxing it says otherwise. */
+.region {
+  border-top: 1px solid var(--border);
+  padding-top: calc(var(--space) * 3);
+  margin-top: calc(var(--space) * 6);
+  min-width: 0;
+}
+
+.region > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--space) * 2);
+  margin-bottom: calc(var(--space) * 3);
+}
+
+.region > header h3 {
+  color: var(--text-dim);
+}
+
+/* Two regions side by side on a wide screen, stacked below 70rem — the same breakpoint
+   the dashboard grid collapses at, because a NOC wall and a phone are the two sizes this
+   is actually read at. */
+.regions {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: calc(var(--space) * 9);
+}
+
+@media (max-width: 70rem) {
+  .regions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+/* A railed list of what is wrong. */
+.wrong-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* A measure, not the width of the monitor.
+     Without this the row stretches to whatever the screen is and the elapsed time ends up
+     a thousand pixels from the device it belongs to — related facts separated by an
+     expanse of nothing, which is the opposite of what putting them on one row was for.
+     Wide enough for a long rule name at 14px and no wider. */
+  max-width: 68rem;
+}
+
+/* severity | resource | what it says (takes the slack) | how long.
+   The flexible column is the rule, not the resource: a hostname is eight characters and
+   a rule is a sentence, so giving the slack to the hostname pushed the sentence to the
+   far side of a 1600px screen, a thousand pixels from the device it was about. */
+.wrong-list li {
+  display: grid;
+  grid-template-columns: 5rem auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: calc(var(--space) * 3);
+  padding: calc(var(--space) * 2) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wrong-list li:last-child {
+  border-bottom: 0;
+}
+
+.wrong-list .when {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-label);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wrong-list .rule {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .wrong-list li {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .wrong-list .severity {
+    grid-area: 1 / 1;
+  }
+
+  .wrong-list a {
+    grid-area: 1 / 2;
+  }
+
+  .wrong-list .when {
+    grid-area: 1 / 3;
+  }
+
+  /* Underneath, across the whole row, where a sentence can be a sentence instead of
+     wrapping inside a column three words wide. */
+  .wrong-list .rule {
+    grid-area: 2 / 1 / 2 / 4;
+    white-space: normal;
+  }
 }
 
 /* A ranked list: name, count, and a bar behind them. Two numbers of almost the same size
@@ -1137,14 +1585,15 @@ a.tile:hover {
    one thing on the row that is not the same weight as everything else. Colour is never
    the only carrier: the word is there too, for a screen read in daylight and for anyone
    who does not see the difference between amber and red. */
+/* Severity is a word in the colour of its state, not an outlined capsule in capitals.
+   The capsule was doing the rail's job and doing it worse: a pill draws a box around one
+   word and puts four edges on screen for every row, and at a glance a page of pills reads
+   as a page of buttons. The rail on the left of the row carries the shape now, so this
+   only has to carry the word — which is also what keeps the meaning off hue alone. */
 .severity {
   display: inline-block;
-  padding: 0.05rem 0.45rem;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: var(--t-label);
+  font-weight: 500;
 }
 
 .severity.critical {

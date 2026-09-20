@@ -80,16 +80,52 @@ them may be used decoratively.
 "suppressed" drawn as healthy are the two most consequential lies a monitoring UI can
 tell.
 
-### 1.3 Accent
+### 1.3 Accent — there is not one
 
-One family, used sparingly — `UI.md` §9. It marks *where you are* and *what you can
-press*, and it never marks state.
+**The product has no brand colour on screen.** The only hues in the interface are the
+five semantic states in §1.2.
+
+This was a blue, `#2c5fd6`, and rule 2 above is the argument against it: *colour is
+semantic, never decoration*. A blue that means "you are here" is decoration by that
+rule's own logic — and it created a real collision, because the same blue was also
+`--series-1`, so one colour meant both "the page you are on" and "the first line on this
+chart".
+
+It also removed an accessibility problem rather than solving one. An accent hue has to
+stay distinguishable from five semantic hues under three kinds of colour blindness, on
+two backgrounds. The cheapest way to pass that test is not to take it.
+
+So `--accent` is the ink, and selection is drawn by **inversion**:
 
 | Token | Dark | Light |
 |---|---|---|
-| `--accent` | `#6d9bff` | `#2c5fd6` |
-| `--accent-text` | `#0e1013` | `#ffffff` |
-| `--accent-dim` | `#6d9bff26` | `#2c5fd614` | a wash behind an active row or tab |
+| `--accent` | `#e8ebef` (= `--text`) | `#12151a` (= `--text`) |
+| `--accent-text` | `#0c0f13` (= `--bg`) | `#ffffff` |
+| `--accent-dim` | `#e8ebef1a` | `#12151a12` | a wash behind an active row |
+
+Consequences, all of them deliberate:
+
+- the current nav item, the current time range and the current tab are **inverted
+  blocks**, not tinted ones;
+- a link is the ink plus an underline, offset clear of the descenders — links previously
+  had no rule at all and fell through to the browser's own blue, which was outside the
+  token system entirely;
+- the focus ring is `--accent`, which is now the highest-contrast colour available on
+  either ground.
+
+### 1.3a The one idea: quiet until something is wrong
+
+When nothing is firing there is **no colour on the screen at all**. When something breaks,
+colour arrives — at the left edge of the thing that broke, and in the count that says how
+much.
+
+The amount of colour on screen is therefore proportional to how much is wrong, which is
+readable from four metres without reading a word. It is also what makes the product
+bearable to sit in front of all day: a console that is permanently shouting is one whose
+operator stops hearing it.
+
+This is not a mood. It is the reason §8.2's "no zero in a red tile" rule can finally be
+kept: the calm state is a sentence, because there is nothing to count.
 
 ### 1.4 Series colours
 
@@ -108,18 +144,43 @@ and amber lead, and the red sits fourth rather than second.
 ### 1.5 Shape, space and motion
 
 ```
---radius      6px     --radius-lg   10px    (cards, popovers)
+--radius      5px     --radius-lg   8px     controls, and panels on a dashboard
 --space       4px     the unit; every margin and gap is a multiple
---sidebar     224px   --sidebar-collapsed  56px
---header      52px
+--sidebar     208px   --sidebar-collapsed  56px
+--header      48px
 --row         28px    one table row at default density
 --tap         32px    the smallest interactive target
+--rail        3px     the state bar on the left edge of a row
 --motion      120ms   the only transition duration
 --motion-slow 240ms   panels sliding in, and nothing else
 ```
 
 One duration, because a product with five easing curves reads as five products. Easing is
 `ease-out` on entry and `linear` on anything that repeats.
+
+**Radius belongs to controls.** A region with a radius is a card; a button with one is a
+thing you can press. That distinction is load-bearing and replaces the previous rule,
+which was that everything had the same radius regardless of what it was.
+
+**Regions are not cards.** A panel used to be a lighter surface with a border, a radius
+and its own fill. `--bg-raised` is now the same value as `--bg`, and a section of a page
+is bounded by a hairline and held together by its own alignment. Stacked surfaces with
+shadows are how a web application looks; equipment you read is ruled, not stacked.
+
+The exception is a **dashboard panel**, which stays a card — because it genuinely is a
+discrete object that can be moved, resized and deleted, and drawing it as part of the page
+would say otherwise.
+
+### 1.6 The rail
+
+Anything with a state carries it as a `--rail`-wide bar on its **left edge**, tinted with
+the semantic colour, set through a `--tone` custom property on the row.
+
+A coloured dot in the third column is legible at arm's length and invisible at four
+metres. A column of rails is a single bar of varying colour down the side of the page, and
+that is a shape rather than a hue — so it survives both distance and colour blindness.
+
+Rule 4 still applies without exception: every rail sits beside the word for its state.
 
 ---
 
@@ -134,10 +195,40 @@ One duration, because a product with five easing curves reads as five products. 
 | Stat | `--font` | 34px | 600 | the one number on a stat panel |
 | Mono | `--mono` | 13px | 400 | see below |
 
-`--font` is the system stack today. `UI.md` §9 names Inter, Geist or IBM Plex Sans; any of
-them is a self-hosted web font, which is a download, a licence and an air-gap question, so
-it is a deliberate later decision and not a default. The system stack is not a placeholder
-— it is what ships until that decision is made.
+The decision `UI.md` §9 left open is made: **IBM Plex Sans and IBM Plex Mono**,
+self-hosted from `web/public/fonts`. All three of the questions that deferred it are
+answered — the files are in the repository, the licence is SIL OFL 1.1 and sits beside
+them, and nothing is fetched at runtime. This product is installed on networks with no
+route to the internet, and a font that arrives from Google is a font that does not arrive.
+
+Plex rather than Inter because Inter is what a product with no typographic opinion uses.
+Plex was drawn for IBM's technical products, it holds up at 13px on a bad monitor, and its
+mono is the same superfamily — which matters more here than it usually would, because the
+sans/mono distinction in this product is *semantic* rather than stylistic. Two faces from
+one family make that read as a change of voice, not a change of typeface.
+
+Four faces, Latin subsets, 82 KB in total: Sans at 400/500/600 and Mono at 400. Loaded
+with `font-display: swap`, because a console that shows nothing until a font arrives is
+worse than one that reflows.
+
+The scale carries the hierarchy, and has one large step at the top so a screen can have
+exactly one loud thing:
+
+```
+--t-hero    46px   the count that matters, when something is wrong
+--t-display 20px   the page's name
+--t-section 13px   a section heading
+--t-body    14px
+--t-label   12px   column headers, field labels, units
+--t-mono   12.5px
+```
+
+The previous scale ran 12/14/15/22 — four sizes inside ten points, which is four sizes
+that all read the same and no way to make anything matter more than anything else.
+
+**Sentence case, never capitals.** Tracked-out capitals above every column is the
+commonest tell of a templated interface, and capitals are measurably slower to read at the
+12px a label is always set in.
 
 **Mono is not a style choice, it is a type.** Anything the operator may need to compare
 character by character is mono: IP and MAC addresses, timestamps, log bodies, metric

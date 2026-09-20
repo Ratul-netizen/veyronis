@@ -81,19 +81,24 @@ function RangePicker() {
   return (
     <div className="range">
       <span className="label">{describeRange(range)}</span>
-      {PRESETS.map((p) => (
-        <button
-          key={p.label}
-          className="preset"
-          aria-pressed={range.from === p.range.from && range.to === p.range.to}
-          onClick={() => setRange(p.range)}
-        >
-          {p.label}
+      {/* One segmented control rather than five separate buttons: the presets are
+          alternatives to each other, and drawing them apart said they were five unrelated
+          actions sitting next to Sign out. */}
+      <span className="presets">
+        {PRESETS.map((p) => (
+          <button
+            key={p.label}
+            className="preset"
+            aria-pressed={range.from === p.range.from && range.to === p.range.to}
+            onClick={() => setRange(p.range)}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button onClick={() => setEditing(true)} title="Absolute or relative, e.g. now-90m">
+          Custom
         </button>
-      ))}
-      <button onClick={() => setEditing(true)} title="Absolute or relative, e.g. now-90m">
-        Custom
-      </button>
+      </span>
     </div>
   );
 }
@@ -114,6 +119,7 @@ export function Layout() {
           {me.display_name}
         </span>
         <button
+          className="quiet"
           onClick={() => {
             // The cookie is cleared by the server; this only stops showing a shell the
             // session behind it no longer supports.

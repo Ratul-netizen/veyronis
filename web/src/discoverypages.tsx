@@ -50,10 +50,23 @@ function mayWrite(role: string): boolean {
 /** The three screens, linked from each of them. */
 function Tabs() {
   return (
-    <p className="dim">
-      <Link to="/discovery">Jobs</Link> · <Link to="/discovery/runs">Runs</Link> ·{" "}
-      <Link to="/discovery/candidates">Candidates</Link>
-    </p>
+    <nav className="subnav">
+      {/* `exact` on Jobs only: /discovery is a prefix of the other two, so without it the
+          Jobs tab would be lit on every screen in the set. */}
+      <Link
+        to="/discovery"
+        activeProps={{ className: "active" }}
+        activeOptions={{ exact: true }}
+      >
+        Jobs
+      </Link>
+      <Link to="/discovery/runs" activeProps={{ className: "active" }}>
+        Runs
+      </Link>
+      <Link to="/discovery/candidates" activeProps={{ className: "active" }}>
+        Candidates
+      </Link>
+    </nav>
   );
 }
 
@@ -113,7 +126,11 @@ export function DiscoveryPage() {
 
       {mayWrite(tenant.role) && (
         <p>
-          <button type="button" onClick={() => setAdding((open) => !open)}>
+          <button
+            type="button"
+            className={adding ? "quiet" : undefined}
+            onClick={() => setAdding((open) => !open)}
+          >
             {adding ? "Cancel" : "New job"}
           </button>
         </p>

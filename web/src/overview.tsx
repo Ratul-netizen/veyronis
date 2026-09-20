@@ -32,7 +32,7 @@ import { useMemo } from "react";
 import { ago, listAlerts, order, type Alert } from "./alerting";
 import { api } from "./api";
 import { message, runQuery, type Query, type ResultSet } from "./query";
-import { resolveRange, useShell } from "./shell";
+import { describeRange, resolveRange, useShell } from "./shell";
 
 /** How often the control-plane panels re-read — UI-SPEC §5. */
 const REFRESH_MS = 10_000;
@@ -158,68 +158,89 @@ export function OverviewPage() {
   const total = resources.data?.items.length ?? null;
   const talking = reporting.data?.rows.length ?? null;
 
+  const worst = firing.length > 0 ? "firing" : pending.length > 0 ? "pending" : "quiet";
+
   return (
     <>
       <h1>Operations overview</h1>
       <p className="dim">
-        {tenant.name} · all sites · the window is the one in the header.
+        {tenant.name}, all sites, {describeRange(range).toLowerCase()}
       </p>
 
-      <div className="tiles">
-        <Tile label="Resources" value={total} href="/resources" />
-        <Tile
-          label="Firing"
-          value={firing.length}
-          tone={firing.length > 0 ? "danger" : undefined}
-          href="/alerts"
-        />
-        <Tile
-          label="Pending"
-          value={pending.length}
-          tone={pending.length > 0 ? "warn" : undefined}
-          note="nobody notified"
-          href="/alerts"
-        />
-        <Tile
-          label="Reporting"
-          value={talking}
-          of={total}
-          // Not "availability": that implies an SLA calculation with maintenance
-          // windows excluded, which is M9.
-          note="sent telemetry in this window"
-        />
-      </div>
+      {alerts.isError ? (
+        <p className="warn">{message(alerts.error)}</p>
+      ) : worst === "quiet" ? (
+        /* No colour on this screen at all. The estate is stated as a sentence because
+           that is what somebody asked: is anything wrong, and how much am I watching. */
+        <p className="all-quiet">
+          Nothing is firing.
+          <span className="estate">
+            {total === null
+              ? "Counting what is out there…"
+              : `${total.toLocaleString()} resources, ${
+                  talking === null ? "…" : talking.toLocaleString()
+                } of them reporting in this window.`}
+          </span>
+        </p>
+      ) : (
+        <div className="wrong">
+          {firing.length > 0 && (
+            <Link className="wrong-count firing" to="/alerts">
+              <span className="n">{firing.length}</span>
+              <span className="what">firing</span>
+            </Link>
+          )}
+          {pending.length > 0 && (
+            <Link className="wrong-count pending" to="/alerts">
+              <span className="n">{pending.length}</span>
+              {/* What separates pending from firing is that nobody has been told, and
+                  that is the whole reason the two are counted apart. */}
+              <span className="what">pending, nobody notified</span>
+            </Link>
+          )}
+        </div>
+      )}
 
-      <section className="panel">
-        <header>
-          <h3>What is firing</h3>
-          <Link to="/alerts">All alerts</Link>
-        </header>
-        {alerts.isError ? (
-          <p className="warn">{message(alerts.error)}</p>
-        ) : rows.length === 0 ? (
-          <p className="dim">Nothing is firing.</p>
-        ) : (
-          <ul className="panel-alerts">
-            {rows.slice(0, 6).map((alert: Alert) => (
-              <li key={alert.id}>
-                <span className={`severity ${alert.severity}`}>{alert.severity}</span>
-                <Link to="/resources/$id" params={{ id: alert.resource_id }}>
-                  {alert.resource}
-                </Link>
-                <span className="dim">{alert.rule}</span>
-                <span className="dim">
-                  {alert.state === "pending" ? "pending · " : ""}
-                  {ago(alert.since)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {worst !== "quiet" && (
+        <ul className="wrong-list">
+          {rows.slice(0, 6).map((alert: Alert) => (
+            <li
+              key={alert.id}
+              className="rail"
+              style={{ "--tone": toneOf(alert) } as React.CSSProperties}
+            >
+              <span className={`severity ${alert.severity}`}>{alert.severity}</span>
+              <Link to="/resources/$id" params={{ id: alert.resource_id }}>
+                {alert.resource}
+              </Link>
+              <span className="rule">{alert.rule}</span>
+              <span className="when">
+                {alert.state === "pending" ? "pending, " : ""}
+                {ago(alert.since)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
-      <div className="grid">
-        <section className="panel" style={{ gridColumn: "span 7", minHeight: "220px" }}>
+      {/* Always shown, in both states: an operator who has just dealt with an alert wants
+          to know the estate is still the size they think it is. When the screen is calm
+          these numbers are in the sentence above instead, so this row only appears when
+          the sentence has been replaced by a count. */}
+      {worst !== "quiet" && total !== null && (
+        <p className="facts">
+          <span>
+            <b>{total.toLocaleString()}</b> resources
+          </span>
+          <span>
+            <b>{talking === null ? "…" : talking.toLocaleString()}</b> reporting in this
+            window
+          </span>
+        </p>
+      )}
+
+      <div className="regions">
+        <section className="region">
           <header>
             <h3>Log volume by severity</h3>
             <Link to="/explore">Explore</Link>
@@ -229,7 +250,7 @@ export function OverviewPage() {
           </PanelState>
         </section>
 
-        <section className="panel" style={{ gridColumn: "span 5", minHeight: "220px" }}>
+        <section className="region">
           <header>
             <h3>Busiest resources</h3>
             <span className="dim">errors and worse</span>
@@ -241,6 +262,18 @@ export function OverviewPage() {
       </div>
     </>
   );
+}
+
+/**
+ * The colour of an alert's rail.
+ *
+ * A pending alert is one evaluation from firing and nobody has been told, so it is amber
+ * whatever its configured severity: the rail answers "has this woken somebody", which is
+ * the question being asked at the moment somebody looks at this list.
+ */
+function toneOf(alert: Alert): string {
+  if (alert.state === "pending") return "var(--warn)";
+  return alert.severity === "critical" ? "var(--danger)" : "var(--warn)";
 }
 
 /** One telemetry panel's query, with the five states the widget contract requires. */
@@ -273,51 +306,7 @@ function PanelState({
   return <>{children(panel.data)}</>;
 }
 
-/** A headline number. Never a zero in the colour of danger — see the module docs. */
-function Tile({
-  label,
-  value,
-  of,
-  note,
-  tone,
-  href,
-}: {
-  label: string;
-  value: number | null;
-  of?: number | null | undefined;
-  note?: string | undefined;
-  // `| undefined` spelled out: this project has exactOptionalPropertyTypes on, and a
-  // tile with no tone genuinely passes the key with nothing in it.
-  tone?: "danger" | "warn" | undefined;
-  href?: "/resources" | "/alerts" | undefined;
-}) {
-  const body = (
-    <>
-      <span className="tile-label">{label}</span>
-      <span className={`tile-value${tone && value ? ` ${tone}` : ""}`}>
-        {value === null ? "—" : value.toLocaleString()}
-        {of != null && <span className="tile-of"> / {of.toLocaleString()}</span>}
-      </span>
-      {note && <span className="tile-note">{note}</span>}
-    </>
-  );
 
-  return href ? (
-    <Link className="tile" to={href}>
-      {body}
-    </Link>
-  ) : (
-    <div className="tile">{body}</div>
-  );
-}
-
-/**
- * Log volume, stacked by severity.
- *
- * Bars rather than a line: a count over a bucket is a quantity in a period, and a line
- * between two counts implies values in between that were never measured. The same
- * argument the Explorer's histogram makes.
- */
 function Volume({ result }: { result: ResultSet }) {
   // [bucket, severity, n] — group_by order, then the aggregate.
   const buckets = new Map<string, Map<string, number>>();
