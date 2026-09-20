@@ -28,7 +28,7 @@ use uops_query::{Compiled, Query, ResolvedResources, compile, compile_tail};
 
 use crate::client::ChClient;
 use crate::error::{Error, Result};
-use crate::rows::{LogRow, MetricRow, ResultSet, StateRow};
+use crate::rows::{FlowRow, LogRow, MetricRow, ResultSet, StateRow};
 
 /// Reading telemetry.
 #[async_trait]
@@ -76,6 +76,12 @@ pub trait MetricStore: TelemetryStore {
 #[async_trait]
 pub trait StateStore: TelemetryStore {
     async fn insert_states(&self, rows: &[StateRow]) -> Result<()>;
+}
+
+/// Writing flows. SPEC §M0.6 declared this trait in M0; M7 fills it.
+#[async_trait]
+pub trait FlowStore: TelemetryStore {
+    async fn insert_flows(&self, rows: &[FlowRow]) -> Result<()>;
 }
 
 /// What `/api/v1/health` reports about telemetry storage.
@@ -202,6 +208,15 @@ impl MetricStore for ChStore {
 impl StateStore for ChStore {
     async fn insert_states(&self, rows: &[StateRow]) -> Result<()> {
         self.insert("states", rows).await
+    }
+}
+
+#[async_trait]
+impl FlowStore for ChStore {
+    async fn insert_flows(&self, rows: &[FlowRow]) -> Result<()> {
+        // `flows_5m` is a materialised view on this table, so it is filled by this
+        // insert and never written to directly.
+        self.insert("flows", rows).await
     }
 }
 

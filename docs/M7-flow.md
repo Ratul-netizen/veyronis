@@ -150,9 +150,27 @@ is the worst class of bug this architecture exists to make impossible. Tenancy i
 product is a type (`TenantScope`) and a composite foreign key precisely so that it is never
 decided by attacker-controlled input.
 
-**An exporter that does not resolve to a resource in that listener's tenant is dropped and
-counted.** The port says which tenant; the inventory says whether this device is allowed to
-speak into it. Both, not either.
+**An exporter that is not in inventory is not dropped.** It is resolved like any other
+sender: `uops_pipeline::Pipeline::attribute` matches it, or creates a provisional resource
+and a review item, and the flow is stored against whatever came back.
+
+This paragraph used to say the opposite — that an unresolved exporter was dropped and
+counted, because "the port says which tenant; the inventory says whether this device is
+allowed to speak into it". That was written without checking what the collector it claims
+to copy actually does, and it is wrong twice over.
+
+It contradicts **SPEC §M0.2 rule 1, *never block ingestion***, which is a product-wide rule
+and not a syslog one. And `uops-collector-syslog`'s own configuration file records the
+argument, having already had it: an allow-list posture "loses the logs of every device
+somebody forgot to register — which are disproportionately the devices involved in an
+incident, because an unregistered device is one nobody is watching." Flow makes that
+sharper rather than softer. An exporter nobody registered is precisely the one whose
+traffic gets asked about at 3 a.m.
+
+The security concern behind the original wording is real and is answered where syslog
+answers it: at the firewall, where it is one rule rather than a second identity system
+inside the product. What the port decides — which tenant — is not weakened by any of this,
+and that is the decision this section exists to record.
 
 ### 2.7 GeoIP is optional and never bundled.
 
@@ -221,8 +239,8 @@ column pairs to read.
       is wrong by a factor of a thousand when it is wrong
 - [ ] A flow whose endpoints are not in inventory is stored with null endpoint ids and
       creates no resource
-- [ ] A packet from an address that resolves to no resource in the listener's tenant is
-      dropped and counted
+- [ ] A packet from an exporter that is not in inventory produces a provisional resource
+      and a review item rather than a dropped packet — SPEC §M0.2 rule 1
 - [ ] A packet arriving on tenant A's listener cannot produce a row in tenant B, whatever
       it claims — the isolation test, as an adversarial case
 - [ ] Each decoder survives a fuzzing run without a panic

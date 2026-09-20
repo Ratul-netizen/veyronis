@@ -45,7 +45,7 @@ pub mod store;
 
 pub use client::{ChClient, ChConfig, Summary};
 pub use error::{Error, Result};
-pub use rows::{Column, LogRow, MetricRow, ResultSet, StateRow};
+pub use rows::{Column, FlowRow, LogRow, MetricRow, ResultSet, StateRow};
 pub use store::{
-    ChStore, LogStore, MetricStore, StateStore, StoreHealth, TelemetryStore, fingerprint,
+    ChStore, FlowStore, LogStore, MetricStore, StateStore, StoreHealth, TelemetryStore, fingerprint,
 };

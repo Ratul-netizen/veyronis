@@ -107,6 +107,109 @@ pub struct MetricRow {
     pub labels: std::collections::BTreeMap<String, String>,
 }
 
+/// An address, in the form the `IPv6` column wants.
+///
+/// IPv4 is stored mapped — `::ffff:10.0.0.7` — because `ch-migrations/0007_flows.sql`
+/// keeps one address column for both families rather than two for one each. Written out
+/// explicitly rather than left to `ClickHouse` to coerce: a v4 literal in a v6 column is
+/// accepted by some versions and not others, and the ingestion path is the worst place to
+/// discover which.
+fn clickhouse_address<S: serde::Serializer>(
+    value: &std::net::IpAddr,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    let mapped = match value {
+        std::net::IpAddr::V4(v4) => v4.to_ipv6_mapped(),
+        std::net::IpAddr::V6(v6) => *v6,
+    };
+    serializer.serialize_str(&mapped.to_string())
+}
+
+fn clickhouse_address_de<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<std::net::IpAddr, D::Error> {
+    use serde::Deserialize as _;
+    let text = String::deserialize(deserializer)?;
+    let parsed: std::net::IpAddr = text
+        .parse()
+        .map_err(|_| serde::de::Error::custom(format!("{text:?} is not an address")))?;
+
+    // Unmapped on the way back, so a row that went in as IPv4 comes out as IPv4 rather
+    // than as its mapped spelling. Without this a round trip is not one.
+    Ok(match parsed {
+        std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(parsed, std::net::IpAddr::V4),
+        v4 @ std::net::IpAddr::V4(_) => v4,
+    })
+}
+
+/// One row of `flows` — one conversation, as an exporter described it.
+///
+/// Mirrors `ch-migrations/0007_flows.sql` column for column. Two of those columns carry
+/// most of the meaning and are easy to misread:
+///
+/// * **`bytes` and `packets` are as observed, never scaled.** `sampling_rate` says what
+///   they stand for, and multiplying is the reader's job — M7 §2.4, and the migration
+///   repeats the argument where the column is declared.
+/// * **`src_resource_id` and `dst_resource_id` are nil when the endpoint is not in
+///   inventory**, which is the common case rather than a gap: every flow to the internet
+///   has one. §2.3 forbids inventing a resource from traffic.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowRow {
+    pub tenant_id: TenantId,
+    /// The exporter — the device that sent the packet, not either endpoint.
+    pub resource_id: ResourceId,
+    pub site_id: SiteId,
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub observed_at: DateTime<Utc>,
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub started_at: DateTime<Utc>,
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub ingested_at: DateTime<Utc>,
+
+    #[serde(
+        serialize_with = "clickhouse_address",
+        deserialize_with = "clickhouse_address_de"
+    )]
+    pub src_address: std::net::IpAddr,
+    #[serde(
+        serialize_with = "clickhouse_address",
+        deserialize_with = "clickhouse_address_de"
+    )]
+    pub dst_address: std::net::IpAddr,
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub protocol: u8,
+
+    pub bytes: u64,
+    pub packets: u64,
+    /// One in how many packets was sampled. Never 0 — every consumer multiplies by it.
+    pub sampling_rate: u32,
+
+    pub tcp_flags: u16,
+    pub tos: u8,
+
+    /// `None` is "the exporter did not report it", which is not the same as 0 — 0 is a
+    /// legitimate `ifIndex` and a legitimate AS number.
+    pub input_if: Option<u32>,
+    pub output_if: Option<u32>,
+    pub src_as: Option<u32>,
+    pub dst_as: Option<u32>,
+
+    pub src_resource_id: ResourceId,
+    pub dst_resource_id: ResourceId,
+
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
 /// One row of `states` — an availability or status transition.
 ///
 /// Written on a *change*, never on every check. A device polled every 30 seconds for a

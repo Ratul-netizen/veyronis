@@ -19,7 +19,8 @@ use uops_query::{
     AggFunc, Aggregation, Expr, Field, Query, ResolvedResources, SignalType, TextMode, TimeRange,
 };
 use uops_store_ch::{
-    ChClient, ChConfig, ChStore, LogRow, LogStore, MetricRow, MetricStore, TelemetryStore,
+    ChClient, ChConfig, ChStore, FlowRow, FlowStore, LogRow, LogStore, MetricRow, MetricStore,
+    TelemetryStore,
 };
 
 fn store() -> ChStore {
@@ -80,11 +81,15 @@ fn window_start() -> chrono::DateTime<Utc> {
 
 /// The shortest retention any table these fixtures write to has.
 ///
-/// `metrics` is 30 days; `logs`, `events` and the pre-aggregates are 365 or more. The
-/// shortest one is what binds, because a fixture outside it is removed from that table
-/// and left in the others — which is precisely the half-present state that made this
-/// hard to see. Keep it in step with `ch-migrations/`.
-const SHORTEST_RETENTION_DAYS: i64 = 30;
+/// `flows` is 7 days, `metrics` 30, and `logs`, `events` and the pre-aggregates 365 or
+/// more. The shortest one is what binds, because a fixture outside it is removed from
+/// that table and left in the others — which is precisely the half-present state that
+/// made this hard to see. Keep it in step with `ch-migrations/`.
+///
+/// It became 7 when M7 added `flows` with the retention §2.5 asks for. `scripts/ch.sh`
+/// learned the same lesson on the same day, from the other direction: its fixtures were
+/// at a fixed date and silently fell out of the new table's window.
+const SHORTEST_RETENTION_DAYS: i64 = 7;
 
 #[test]
 fn the_fixtures_are_inside_every_retention_window() {
@@ -904,4 +909,200 @@ async fn bodies(store: &ChStore, scope: &TenantScope, q: &Query) -> Vec<String> 
                 .to_owned()
         })
         .collect()
+}
+
+// --- flows, M7 -------------------------------------------------------------------
+//
+// The rows go in through `FlowRow` rather than hand-written JSON, which is the point of
+// these tests existing: a column renamed in `ch-migrations/` and not here is an insert
+// failure on the ingestion path, and this is where it is found instead.
+
+/// One value, read with raw SQL.
+///
+/// `uops-query` has no flow support yet — `SignalType::Flow` compiles to a refusal until
+/// the planner learns the table — so these read through the client rather than through
+/// the AST. That is a gap being worked around, not a preference.
+async fn scalar(sql: &str) -> String {
+    let client = ChClient::new(ChConfig {
+        user: std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "uops".into()),
+        password: std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "uops".into()),
+        ..ChConfig::from_env()
+    });
+    client
+        .run(&format!("{sql} FORMAT TSV"), &[])
+        .await
+        .expect("the statement should run")
+        .body
+        .trim()
+        .to_owned()
+}
+
+fn flow(
+    tenant: TenantId,
+    resource: ResourceId,
+    src: &str,
+    dst: &str,
+    bytes: u64,
+    rate: u32,
+) -> FlowRow {
+    let at = window().start + Duration::seconds(10);
+    FlowRow {
+        tenant_id: tenant,
+        resource_id: resource,
+        site_id: SiteId::nil(),
+        observed_at: at,
+        started_at: at - Duration::seconds(5),
+        ingested_at: at,
+        src_address: src.parse().expect("a fixture address"),
+        dst_address: dst.parse().expect("a fixture address"),
+        src_port: 51_000,
+        dst_port: 443,
+        protocol: 6,
+        bytes,
+        packets: 42,
+        sampling_rate: rate,
+        tcp_flags: 0x18,
+        tos: 0x10,
+        input_if: Some(11),
+        output_if: None,
+        src_as: None,
+        dst_as: Some(15169),
+        src_resource_id: ResourceId::nil(),
+        dst_resource_id: ResourceId::nil(),
+        attributes: BTreeMap::new(),
+    }
+}
+
+#[tokio::test]
+async fn a_flow_goes_in_and_comes_back_out() {
+    let store = store();
+    let tenant = TenantId::new();
+
+    store
+        .insert_flows(&[flow(
+            tenant,
+            ResourceId::new(),
+            "10.0.0.7",
+            "8.8.8.8",
+            6000,
+            1000,
+        )])
+        .await
+        .unwrap();
+
+    let got = scalar(&format!(
+        "SELECT concat(toString(bytes), '/', toString(sampling_rate), '/', \
+         IPv6NumToString(src_address)) FROM flows WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+
+    // IPv4 stored mapped, which is the one column decision in 0007 a reader could trip
+    // over, and the counts stored as observed rather than scaled by the rate.
+    assert_eq!(got, "6000/1000/::ffff:10.0.0.7");
+}
+
+#[tokio::test]
+async fn an_ipv6_flow_is_stored_unmapped() {
+    let store = store();
+    let tenant = TenantId::new();
+
+    store
+        .insert_flows(&[flow(
+            tenant,
+            ResourceId::new(),
+            "2001:db8::1",
+            "2001:db8::2",
+            100,
+            1,
+        )])
+        .await
+        .unwrap();
+
+    let got = scalar(&format!(
+        "SELECT IPv6NumToString(src_address) FROM flows WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+    assert_eq!(got, "2001:db8::1");
+}
+
+#[tokio::test]
+async fn a_null_as_number_stays_null_rather_than_becoming_zero() {
+    // 0 is a legitimate AS number and a legitimate ifIndex, so the column has to be able
+    // to say "the exporter did not report it" — see `FlowRow`.
+    let store = store();
+    let tenant = TenantId::new();
+
+    store
+        .insert_flows(&[flow(
+            tenant,
+            ResourceId::new(),
+            "10.0.0.1",
+            "10.0.0.2",
+            1,
+            1,
+        )])
+        .await
+        .unwrap();
+
+    let got = scalar(&format!(
+        "SELECT concat(toString(isNull(src_as)), '/', toString(dst_as), '/', \
+         toString(isNull(output_if)), '/', toString(input_if)) \
+         FROM flows WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+    assert_eq!(got, "1/15169/1/11");
+}
+
+#[tokio::test]
+async fn the_aggregate_keeps_differently_sampled_traffic_apart() {
+    // The decision `0007_flows.sql` exists to make. Three flows of one conversation in
+    // one bucket, sampled at two rates: summing them together gives a number that is
+    // neither an estimate nor a measurement.
+    let store = store();
+    let tenant = TenantId::new();
+    let resource = ResourceId::new();
+
+    store
+        .insert_flows(&[
+            flow(tenant, resource, "10.0.0.7", "8.8.8.8", 6000, 1000),
+            flow(tenant, resource, "10.0.0.7", "8.8.8.8", 4000, 1000),
+            flow(tenant, resource, "10.0.0.7", "8.8.8.8", 100, 1),
+        ])
+        .await
+        .unwrap();
+
+    let where_tenant = format!("FROM flows_5m WHERE tenant_id = '{tenant}'");
+
+    assert_eq!(
+        scalar(&format!("SELECT count() {where_tenant}")).await,
+        "2",
+        "the two sampling rates were merged into one row"
+    );
+    assert_eq!(
+        scalar(&format!(
+            "SELECT sum(bytes) {where_tenant} AND sampling_rate = 1000"
+        ))
+        .await,
+        "10000"
+    );
+    assert_eq!(
+        scalar(&format!(
+            "SELECT sum(bytes) {where_tenant} AND sampling_rate = 1"
+        ))
+        .await,
+        "100"
+    );
+    assert_eq!(
+        scalar(&format!(
+            "SELECT sum(records) {where_tenant} AND sampling_rate = 1000"
+        ))
+        .await,
+        "2"
+    );
+    // What a screen shows: the reader multiplies, and the two rates are multiplied
+    // separately because they mean different things.
+    assert_eq!(
+        scalar(&format!("SELECT sum(bytes * sampling_rate) {where_tenant}")).await,
+        "10000100"
+    );
 }
