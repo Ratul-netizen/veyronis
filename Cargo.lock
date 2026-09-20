@@ -2421,6 +2421,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-flow"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "uops-identity"
 version = "0.0.1"
 dependencies = [

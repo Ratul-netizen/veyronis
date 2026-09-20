@@ -1,0 +1,23 @@
+[package]
+name = "uops-flow"
+description = "NetFlow v5/v9, IPFIX and sFlow decoding. No I/O. SPEC M7."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+# The absolute time a flow ended, worked out from the exporter's uptime — see `v5::when`.
+chrono.workspace = true
+thiserror.workspace = true
+
+# Deliberately nothing else. This crate is four binary parsers reading attacker-reachable
+# input off an unauthenticated UDP port, and it has no socket, no store and no tenant in
+# it: bytes in, `Flow` out. That is what makes the whole of it testable from a byte array
+# and fuzzable without a network, and it is the same split `uops-syslog` has.
+
+[lints]
+workspace = true
