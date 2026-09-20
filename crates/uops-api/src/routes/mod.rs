@@ -20,6 +20,7 @@ pub mod query;
 pub mod resources;
 pub mod searches;
 pub mod sites;
+pub mod topology;
 
 use axum::routing::{any, delete, get, patch, post, put};
 use axum::{Router, middleware};
@@ -133,6 +134,10 @@ pub fn router(state: AppState) -> Router {
                 .put(dashboards::update)
                 .delete(dashboards::delete),
         )
+        // The link graph -- what M5's neighbour walk found out about how the estate is
+        // wired. Read-only: edges come from a device naming its neighbour, not from
+        // anybody drawing a line.
+        .route("/api/v1/topology", get(topology::get))
         // Finding devices -- M5. Reading is Viewer; writing a job or dismissing a
         // candidate is Operator, because a discovery job is an instruction to send
         // packets across somebody's network and the ranges describe their estate.

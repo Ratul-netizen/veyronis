@@ -66,6 +66,7 @@ pub mod searches;
 pub mod sites;
 pub mod store;
 pub mod sweep_ingest;
+pub mod topology;
 
 pub use alerts::{ActiveAlert, AlertRule, AlertStateRow, Evaluated, NewRule};
 pub use audit::{AccessEntry, AuditEntry};

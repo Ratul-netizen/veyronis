@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT e.source_id AS \"source: ResourceId\",\n                   e.target_id AS \"target: ResourceId\",\n                   e.discovered_by\n              FROM resource_relationship e\n              JOIN resource a ON a.id = e.source_id AND a.tenant_id = e.tenant_id\n              JOIN resource b ON b.id = e.target_id AND b.tenant_id = e.tenant_id\n             WHERE e.tenant_id = $1\n               AND e.kind = 'connected_to'\n               AND a.status <> 'decommissioned'\n               AND b.status <> 'decommissioned'\n             ORDER BY e.source_id, e.target_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "target: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "discovered_by",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "08c76d8b561230e7fde3875aad101e6f9a6a003413b08f5721262ec14ca6f731"
+}

@@ -652,3 +652,99 @@ reloading is exactly what somebody under pressure will do.
 and offers the way out. An operator who cannot find a device because a context they forgot
 about is filtering it out will conclude the product has lost the device — and they will be
 right to distrust it afterwards.
+
+## 14. Topology, 2D
+
+The first screen that draws the relationships rather than listing them. Its data is the
+`connected_to` edges M5's neighbour walk writes, and the resources at their ends.
+
+### 14.0 Backend truth
+
+A rule worth stating here because this is the screen most tempted to break it:
+
+> **The UI may visualise backend truth. It may not invent backend semantics.**
+
+The proposal this screen came from wanted animated particles flowing along links to show
+traffic direction and volume. There is no flow data — that is M7 — so those particles
+would be an animation of nothing, on the screen an operator would most reasonably believe.
+They are not drawn. When M7 lands they can be, and they will mean something.
+
+The same rule removes link utilisation colouring, bandwidth labels, and any notion of a
+"primary path". What the backend knows about a `connected_to` edge is that two devices
+reported each other, and which protocol said so. That is what the edge shows.
+
+### 14.1 What a node is
+
+A resource. It carries:
+
+| | from |
+|---|---|
+| name | `resource.display_name ?? resource.name` |
+| kind | `resource.kind` |
+| state | `resource.status` — the semantic five, drawn as the node's fill |
+
+Nothing else, because nothing else is known without another query per node, and a
+topology that issues one request per node is a topology that stops working at the size
+where it starts being useful.
+
+### 14.2 What an edge is
+
+A `connected_to` relationship: undirected, deduplicated, with `discovered_by` naming the
+protocol that last confirmed it. LLDP and CDP are drawn solid; ARP is drawn dashed,
+because §2.5 is right that an ARP sighting is much weaker evidence and the picture should
+say so without being asked.
+
+`member_of` — an interface inside its device — is **not** drawn. It is containment rather
+than adjacency, it would triple the node count, and it is what the resource page is for.
+
+### 14.3 Layout is deterministic
+
+A force simulation, run to a fixed iteration count at load, seeded from each resource's
+id. Then it stops.
+
+Two consequences, both deliberate:
+
+- **The same estate always draws the same picture.** An operator comparing this morning's
+  topology with a screenshot from last week is comparing two pictures of the same shape,
+  not two random arrangements of the same graph. A layout seeded from `Math.random` makes
+  that impossible and makes every bug report unreproducible.
+- **Nothing moves after load.** A permanently running simulation is a permanently running
+  animation frame — on a NOC wall that is a machine that never idles, and §6's rule is
+  that motion communicates a change of state. A graph settling is not a change of state.
+
+Dragging a node pins it and re-runs the simulation with that node fixed. That is motion
+answering a person's action, which §6 allows.
+
+### 14.4 The hairball, and what is done about it
+
+A force layout of two thousand nodes is a black circle. The rule:
+
+- Under `NODE_BUDGET`, draw every node.
+- Over it, draw the **largest connected component** and say, in words, how many nodes and
+  components were left out with a control to include them.
+
+Not silent truncation, and not a spinner that never ends. An operator who cannot see a
+device must be told it is not being shown — otherwise they conclude the product lost it,
+and they are right to distrust it afterwards.
+
+Grouping by site is the better answer and arrives when a meaningful number of
+installations set `site_id`; until then it would be a control that does nothing on most
+estates.
+
+### 14.5 Controls belong to the screen
+
+Search, layout and filters sit on the topology, not in global settings — the pattern worth
+keeping from the research. They apply to what is loaded.
+
+There is no 2D/3D switch until there is a 3D mode. A control that is present and does
+nothing is the sidebar problem in miniature.
+
+### 14.6 Selection
+
+Clicking a node selects it: the node and its edges stay at full strength and everything
+else drops back, so the question "what is this connected to" is answered by looking rather
+than by reading. A second click, or `Esc`, clears it.
+
+Selection is not navigation. The panel that opens offers the ways on — the resource, its
+alerts, its logs — and going to one of them is a deliberate act, because losing the
+topology you just oriented yourself in is expensive during an incident.

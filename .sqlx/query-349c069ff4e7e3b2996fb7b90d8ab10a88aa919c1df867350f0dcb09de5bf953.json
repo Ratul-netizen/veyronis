@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT r.id            AS \"id: ResourceId\",\n                   r.name,\n                   r.display_name,\n                   r.kind          AS \"kind: ResourceKind\",\n                   r.status        AS \"status: ResourceStatus\"\n              FROM resource r\n             WHERE r.tenant_id = $1\n               AND r.status <> 'decommissioned'\n               AND EXISTS (\n                     SELECT 1\n                       FROM resource_relationship e\n                      WHERE e.tenant_id = r.tenant_id\n                        AND e.kind = 'connected_to'\n                        AND (e.source_id = r.id OR e.target_id = r.id)\n                   )\n             ORDER BY r.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind: ResourceKind",
+        "type_info": {
+          "Custom": {
+            "name": "resource_kind",
+            "kind": {
+              "Enum": [
+                "device",
+                "interface",
+                "host",
+                "vm",
+                "container",
+                "service",
+                "application",
+                "database",
+                "cloud_resource",
+                "site"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status: ResourceStatus",
+        "type_info": {
+          "Custom": {
+            "name": "resource_status",
+            "kind": {
+              "Enum": [
+                "up",
+                "down",
+                "degraded",
+                "unknown",
+                "maintenance",
+                "decommissioned"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "349c069ff4e7e3b2996fb7b90d8ab10a88aa919c1df867350f0dcb09de5bf953"
+}

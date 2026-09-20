@@ -1884,3 +1884,134 @@ button.following {
 .nav-loose {
   margin-top: calc(var(--space) * 4);
 }
+
+/* --- topology (§14) --------------------------------------------------------------
+ *
+ * The canvas and a detail column. Both are the same ground as everything else: the graph
+ * is the content of this screen rather than a widget sitting on it.
+ */
+.topo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: calc(var(--space) * 6);
+  align-items: start;
+  margin-top: calc(var(--space) * 4);
+}
+
+@media (max-width: 70rem) {
+  .topo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.topo-canvas {
+  width: 100%;
+  /* Square, because the layout is square. A 16:9 box would stretch the graph and make
+     two equal-length links look different lengths. */
+  aspect-ratio: 1;
+  max-height: 72vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+
+.topo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 2);
+  margin: calc(var(--space) * 4) 0 0;
+}
+
+.topo-edge {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+/* Dropped back rather than hidden: a link that disappears when you select something
+   makes the graph change shape, and the shape is what you were reading. */
+.topo-edge.faded {
+  opacity: 0.18;
+}
+
+.topo-node text {
+  fill: var(--text-dim);
+  font-size: 15px;
+  font-family: var(--font);
+  pointer-events: none;
+}
+
+.topo-node {
+  cursor: pointer;
+}
+
+.topo-node.faded {
+  opacity: 0.25;
+}
+
+.topo-node.on .topo-dot {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+
+.topo-node.on text {
+  fill: var(--text);
+}
+
+/* The UA draws `outline: auto` on a focused element with a tabindex, and that is a
+   rectangle around a circle. It is suppressed on `:focus` rather than `:focus-visible`,
+   because a mouse click focuses the node without matching `:focus-visible` — so the
+   narrower rule never fired and every click drew a box.
+
+   Keyboard focus is still visible: the rule below strokes the dot itself, which is a
+   ring around a circle rather than a box around one. */
+.topo-node:focus {
+  outline: none;
+}
+
+.topo-node:focus-visible .topo-dot {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+
+/* A search hit. Not a fill change: the fill is the device's state and this would
+   overwrite it. */
+.topo-hit {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+  opacity: 0.55;
+}
+
+.topo-detail {
+  border-left: 1px solid var(--border);
+  padding-left: calc(var(--space) * 4);
+  min-width: 0;
+}
+
+@media (max-width: 70rem) {
+  .topo-detail {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: calc(var(--space) * 4) 0 0;
+  }
+}
+
+.topo-detail-heading {
+  margin-top: calc(var(--space) * 5);
+  color: var(--text-dim);
+}
+
+.topo-links {
+  list-style: none;
+  margin: calc(var(--space) * 2) 0 0;
+  padding: 0;
+}
+
+.topo-links li {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--space) * 3);
+  padding: calc(var(--space)) 0;
+  border-bottom: 1px solid var(--border);
+}

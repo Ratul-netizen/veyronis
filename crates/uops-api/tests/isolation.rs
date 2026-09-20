@@ -316,6 +316,16 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Unscoped,
         body: None,
     },
+    // The link graph. Scoped, and the second attack is the one that matters: a topology
+    // is a map of a customer's network, which is the single most sensitive read in the
+    // product after the credentials themselves.
+    RouteCase {
+        path: "/api/v1/topology",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     // Discovery -- M5. Every one of these is Scoped, and the second attack is the one
     // that matters here: a discovery job names a customer's networks, and a run records
     // that somebody scanned them. Leaking either across a tenant boundary would hand one

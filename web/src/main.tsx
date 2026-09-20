@@ -42,6 +42,7 @@ import {
   DiscoveryRunsPage,
 } from "./discoverypages";
 import { MapPage } from "./map";
+import { TopologyPage } from "./topology";
 import { ResourcePage, ResourcesPage } from "./resources";
 import { ShellProvider, validateShellSearch } from "./shell";
 import "./styles.css";
@@ -154,6 +155,12 @@ const channelsRoute = createRoute({
   component: ChannelsPage,
 });
 
+const topologyRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/topology",
+  component: TopologyPage,
+});
+
 const discoveryRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/discovery",
@@ -200,6 +207,7 @@ const routeTree = rootRoute.addChildren([
     alertsRoute,
     rulesRoute,
     channelsRoute,
+    topologyRoute,
     discoveryRoute,
     discoveryRunsRoute,
     discoveryCandidatesRoute,

@@ -32,6 +32,7 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
     heading: "Network",
     items: [
       { to: "/resources", label: "Resources" },
+      { to: "/topology", label: "Topology" },
       { to: "/discovery", label: "Discovery", exact: true },
       { to: "/map", label: "Map" },
     ],

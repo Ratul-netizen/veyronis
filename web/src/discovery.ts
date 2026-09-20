@@ -210,3 +210,35 @@ export function sourceWeight(source: CandidateSource): string {
       return "answered a sweep of its address";
   }
 }
+
+/**
+ * The topology graph — UI-SPEC §14.
+ *
+ * Nodes are resources; edges are the `connected_to` relationships M5's neighbour walk
+ * writes. The server sends the whole graph for the tenant in one response rather than a
+ * node at a time: a topology that issues a request per node stops working at exactly the
+ * size where it starts being useful.
+ */
+export interface TopologyNode {
+  id: string;
+  name: string;
+  kind: string;
+  /** `up`, `down`, `degraded`, `unknown`, `maintenance` — the semantic five. */
+  status: string;
+}
+
+export interface TopologyEdge {
+  source: string;
+  target: string;
+  /** Which protocol last confirmed the link: `lldp`, `cdp`, `arp`, `manual`. */
+  discovered_by: string;
+}
+
+export interface Topology {
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}
+
+export function listTopology(tenant: string) {
+  return request<Topology>("/api/v1/topology", { tenant });
+}
