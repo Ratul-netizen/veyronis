@@ -131,7 +131,7 @@ pub fn resource_attributes(resource: Option<&Resource>) -> BTreeMap<String, Stri
         .unwrap_or_default()
 }
 
-/// The identifiers an OTLP resource offers identity resolution.
+/// The identifiers that say which **host** sent this.
 ///
 /// In descending order of what a match proves, which is SPEC §M0.2's ranking:
 ///
@@ -140,13 +140,23 @@ pub fn resource_attributes(resource: Option<&Resource>) -> BTreeMap<String, Stri
 ///   `resourcedetection` processor is on, this is present and everything else is
 ///   corroboration.
 /// * **`host.name`** — 0.65. Whatever the machine is called, with all the usual problems.
-/// * **`service.name`** — 0.60, and deliberately last. A service name maps to *many*
-///   resources rather than one host: twenty containers running `checkout` share it, and
-///   attaching all twenty to one resource would be worse than not resolving at all.
 ///
-/// A payload carrying only `service.name` therefore resolves weakly and lands in the
-/// review queue, which is the correct outcome. The fix is `resourcedetection`, and that
-/// is a collector configuration rather than something this can infer.
+/// # `service.name` used to be here, and M8 moved it
+///
+/// It was offered last at 0.60, as a weak hint about which host sent the payload. M8 §2.1
+/// makes the service **a resource of its own**, and an identifier belongs to exactly one
+/// resource — `UNIQUE (tenant_id, kind, value)`. So a `service.name` claimed by a host is
+/// a `service.name` the service can never be resolved by: every span would find the host
+/// instead, and `service_id` would equal `resource_id` for every row.
+///
+/// The weighting was never the problem and has not changed. What changed is which
+/// question it answers: [`service_identifiers`] asks *which service*, and this asks
+/// *which host*.
+///
+/// A payload with neither host key therefore offers **nothing** here, and the caller must
+/// not resolve an empty identity — that mints a fresh resource per request. See
+/// [`service_observed`] for what to do instead, and `resourcedetection` for the fix at
+/// the source.
 #[must_use]
 pub fn identifiers(resource: &BTreeMap<String, String>) -> Vec<Identifier> {
     let mut out = Vec::new();
@@ -161,26 +171,70 @@ pub fn identifiers(resource: &BTreeMap<String, String>) -> Vec<Identifier> {
             name.to_lowercase(),
         ));
     }
-    if let Some(service) = resource
-        .get(semconv::SERVICE_NAME)
-        .filter(|s| !s.is_empty())
-    {
-        out.push(Identifier::new(
-            IdentifierKind::ServiceName,
-            service.clone(),
-        ));
-    }
     out
 }
 
-/// What identity resolution is asked about one OTLP resource.
+/// The identifier that says which **service** this is, if it says at all.
+///
+/// One identifier, never more. That is what makes it resolvable: the resolver treats an
+/// observation whose every identifier matches one resource as a repeat sighting, so the
+/// second export of a service is a match rather than a 0.60 review item — see
+/// `uops_identity::resolver::exclusive_match`, which exists for exactly this shape.
+///
+/// The value is `namespace/name` when `service.namespace` is set and the bare name when
+/// it is not, because that is `OTel`'s own disambiguator and two teams really do both run a
+/// `checkout`. A namespace that appears later produces a *different* identifier and
+/// therefore a second resource, which is honest: nothing here can know the two were the
+/// same service, and a merge is a decision for the review queue rather than for a
+/// decoder.
 #[must_use]
-pub fn observed(resource: &BTreeMap<String, String>) -> ObservedIdentity {
-    ObservedIdentity {
-        identifiers: identifiers(resource),
+pub fn service_identifiers(resource: &BTreeMap<String, String>) -> Vec<Identifier> {
+    let Some(name) = resource
+        .get(semconv::SERVICE_NAME)
+        .filter(|s| !s.is_empty())
+    else {
+        return Vec::new();
+    };
+    let value = match resource
+        .get(semconv::SERVICE_NAMESPACE)
+        .filter(|s| !s.is_empty())
+    {
+        Some(namespace) => format!("{namespace}/{name}"),
+        None => name.clone(),
+    };
+    vec![Identifier::new(IdentifierKind::ServiceName, value)]
+}
+
+/// What identity resolution is asked about the host one OTLP resource describes.
+///
+/// `None` when the payload named no host at all. A caller must not turn that into a
+/// resolution: an `ObservedIdentity` with no identifiers creates a resource every time it
+/// is resolved, so an SDK with no `resourcedetection` would mint one per export request.
+#[must_use]
+pub fn observed(resource: &BTreeMap<String, String>) -> Option<ObservedIdentity> {
+    let identifiers = identifiers(resource);
+    (!identifiers.is_empty()).then(|| ObservedIdentity {
+        identifiers,
         source: SOURCE_KIND.to_owned(),
         site_hint: None,
-    }
+    })
+}
+
+/// What identity resolution is asked about the service, or `None` when there is no
+/// `service.name` to ask about.
+///
+/// The `OTel` SDKs set one on everything — an application that does not configure it gets
+/// `unknown_service:<process>` — so `None` here means a hand-rolled exporter, and a
+/// hand-rolled exporter with no host keys either is the one payload this can say nothing
+/// about.
+#[must_use]
+pub fn service_observed(resource: &BTreeMap<String, String>) -> Option<ObservedIdentity> {
+    let identifiers = service_identifiers(resource);
+    (!identifiers.is_empty()).then(|| ObservedIdentity {
+        identifiers,
+        source: SOURCE_KIND.to_owned(),
+        site_hint: None,
+    })
 }
 
 /// Nanoseconds since the epoch, as the wire carries them.
@@ -291,11 +345,9 @@ mod tests {
     }
 
     #[test]
-    fn the_identifiers_put_the_machine_id_first_and_the_service_last() {
+    fn the_identifiers_put_the_machine_id_first() {
         // host.id is tier 1 at 1.00 and is the strongest identifier any collector
-        // produces. service.name is 0.60 and last on purpose: twenty containers running
-        // `checkout` share it, and attaching all twenty to one resource would be worse
-        // than not resolving at all.
+        // produces; a hostname is 0.65 and corroborates it.
         let resource: BTreeMap<String, String> = [
             (semconv::SERVICE_NAME.to_owned(), "checkout".to_owned()),
             (semconv::HOST_NAME.to_owned(), "APP-01".to_owned()),
@@ -305,11 +357,49 @@ mod tests {
         .collect();
 
         let ids = identifiers(&resource);
-        assert_eq!(ids.len(), 3);
+        assert_eq!(ids.len(), 2);
         assert_eq!(ids[0].kind, IdentifierKind::OtelHostId);
         assert_eq!(ids[1].kind, IdentifierKind::Hostname);
         assert_eq!(ids[1].value, "app-01", "a hostname is case-insensitive");
-        assert_eq!(ids[2].kind, IdentifierKind::ServiceName);
+    }
+
+    #[test]
+    fn the_host_does_not_claim_the_service_name() {
+        // M8 §2.1, and the reason `service_id` can exist at all. An identifier belongs to
+        // exactly one resource, so a `service.name` claimed by a host is a `service.name`
+        // the service can never be resolved by — every span would find the host instead.
+        let resource: BTreeMap<String, String> = [
+            (semconv::SERVICE_NAME.to_owned(), "checkout".to_owned()),
+            (semconv::HOST_ID.to_owned(), "fa4d...".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+
+        assert!(
+            !identifiers(&resource)
+                .iter()
+                .any(|i| i.kind == IdentifierKind::ServiceName)
+        );
+        let service = service_identifiers(&resource);
+        assert_eq!(service.len(), 1, "one identifier, so a repeat is a match");
+        assert_eq!(service[0].kind, IdentifierKind::ServiceName);
+        assert_eq!(service[0].value, "checkout");
+    }
+
+    #[test]
+    fn a_namespaced_service_is_a_different_service() {
+        // Two teams really do both run a `checkout`, and `service.namespace` is OTel's
+        // own answer. Nothing here can know that a namespace appearing later belongs to
+        // the same service as the bare name did, so it becomes a second resource and a
+        // human decides — which is the review queue's whole job.
+        let mut resource: BTreeMap<String, String> =
+            [(semconv::SERVICE_NAME.to_owned(), "checkout".to_owned())]
+                .into_iter()
+                .collect();
+        assert_eq!(service_identifiers(&resource)[0].value, "checkout");
+
+        resource.insert(semconv::SERVICE_NAMESPACE.to_owned(), "payments".to_owned());
+        assert_eq!(service_identifiers(&resource)[0].value, "payments/checkout");
     }
 
     #[test]
@@ -317,10 +407,35 @@ mod tests {
         // An exporter that sets `host.name: ""` would otherwise mint one resource that
         // every unnamed host in the estate resolves to — a single bucket that looks like
         // a working join and is not.
-        let resource: BTreeMap<String, String> = [(semconv::HOST_NAME.to_owned(), String::new())]
-            .into_iter()
-            .collect();
+        let resource: BTreeMap<String, String> = [
+            (semconv::HOST_NAME.to_owned(), String::new()),
+            (semconv::SERVICE_NAME.to_owned(), String::new()),
+        ]
+        .into_iter()
+        .collect();
         assert!(identifiers(&resource).is_empty());
+        assert!(service_identifiers(&resource).is_empty());
+    }
+
+    #[test]
+    fn an_identity_with_nothing_in_it_is_never_offered_for_resolution() {
+        // Resolving an empty `ObservedIdentity` creates a resource, every time — so an
+        // SDK with no `resourcedetection` and no service name would mint one per export
+        // request. `None` is the only safe answer, and it is the caller's cue to attribute
+        // the rows to the service or to nothing.
+        let empty = BTreeMap::new();
+        assert!(observed(&empty).is_none());
+        assert!(service_observed(&empty).is_none());
+
+        let service: BTreeMap<String, String> =
+            [(semconv::SERVICE_NAME.to_owned(), "checkout".to_owned())]
+                .into_iter()
+                .collect();
+        assert!(
+            observed(&service).is_none(),
+            "a service name says nothing about which host"
+        );
+        assert!(service_observed(&service).is_some());
     }
 
     #[test]

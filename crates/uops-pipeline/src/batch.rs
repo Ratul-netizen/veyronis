@@ -46,7 +46,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
-use uops_store_ch::{LogRow, MetricRow};
+use uops_store_ch::{LogRow, MetricRow, SpanRow};
 
 use crate::wal::Wal;
 
@@ -104,6 +104,21 @@ impl Sink<LogRow> for uops_store_ch::ChStore {
 impl Sink<MetricRow> for uops_store_ch::ChStore {
     async fn write(&self, rows: &[MetricRow]) -> Result<(), String> {
         uops_store_ch::MetricStore::insert_metrics(self, rows)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// The same batching, the same spill, a third table.
+///
+/// Spans arrive in the shape logs do rather than the shape metrics do — an instrumented
+/// service emits them per request, not per scrape — so this is the batcher that matters
+/// under load, and the durability argument is the same one: a `ClickHouse` outage loses a
+/// span exactly as permanently as it loses a log.
+#[async_trait]
+impl Sink<SpanRow> for uops_store_ch::ChStore {
+    async fn write(&self, rows: &[SpanRow]) -> Result<(), String> {
+        uops_store_ch::TraceStore::insert_spans(self, rows)
             .await
             .map_err(|e| e.to_string())
     }

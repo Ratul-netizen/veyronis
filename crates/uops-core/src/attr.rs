@@ -138,6 +138,10 @@ pub mod semconv {
     pub const HOST_ID: &str = "host.id";
     pub const SERVICE_NAME: &str = "service.name";
     pub const SERVICE_VERSION: &str = "service.version";
+    /// What keeps two teams' `checkout` apart, and the reason a service identifier is
+    /// `namespace/name` rather than a bare name. `OTel`'s own disambiguator: optional,
+    /// rarely set, and the only thing there is when it is.
+    pub const SERVICE_NAMESPACE: &str = "service.namespace";
 
     pub const SERVER_ADDRESS: &str = "server.address";
     pub const SERVER_PORT: &str = "server.port";

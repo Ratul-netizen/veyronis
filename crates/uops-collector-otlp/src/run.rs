@@ -3,17 +3,24 @@
 //! ```text
 //!   axum /v1/logs    ─► resolve ─► convert ─► mpsc<LogRow>    ─► batch ─► logs
 //!   axum /v1/metrics ─► resolve ─► convert ─► mpsc<MetricRow> ─► batch ─► metrics
-//!   axum /v1/traces  ─► counted, discarded
+//!   axum /v1/traces  ─► resolve ×2 ─► convert ─► mpsc<SpanRow> ─► batch ─► spans
 //!   (one server per tenant)                  (one batcher each, shared by all tenants)
 //! ```
 //!
-//! # Two batchers, not one, and not one per tenant
+//! # Three batchers, not one, and not one per tenant
 //!
-//! Two because they write different tables and `ClickHouse` wants each insert to be one
+//! Three because they write different tables and `ClickHouse` wants each insert to be one
 //! table's rows. Not one per tenant, because a batcher's whole purpose is to make inserts
 //! **few and large**, and splitting by tenant would divide every batch by the number of
 //! customers — an MSP with forty tenants would get forty small inserts where it wants one.
 //! A row carries its own `tenant_id` and the sort key leads with it.
+//!
+//! # Why traces resolve twice
+//!
+//! M8 §2.1: a span ran on a **host** and is work done by a **service**, and the row
+//! carries both. They are two resources and therefore two resolutions — of two *different*
+//! identities, which is the part that took a schema change to get right. See
+//! [`Listener::subjects`].
 //!
 //! # Where backpressure comes from
 //!
@@ -30,11 +37,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::metrics::v1::ResourceMetrics;
+use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use tokio::sync::mpsc;
-use uops_core::TenantId;
+use uops_core::{ObservedIdentity, ResourceId, SiteId, TenantId};
 use uops_identity::Resolver;
-use uops_pipeline::{Enrichment, Pipeline, batch};
-use uops_store_ch::{ChStore, LogRow, MetricRow};
+use uops_pipeline::{Attribution, Enrichment, Pipeline, batch};
+use uops_store_ch::{ChStore, LogRow, MetricRow, SpanRow};
 use uops_store_pg::{PgEnricher, PgStore};
 
 use crate::config::Config;
@@ -59,14 +67,15 @@ pub enum Stopped {
 pub struct Metrics {
     pub log_records: AtomicU64,
     pub data_points: AtomicU64,
-    /// Spans accepted and discarded. See `routes::traces`.
-    pub spans_discarded: AtomicU64,
+    /// Spans stored. It counted discards until M8 gave them somewhere to go.
+    pub spans: AtomicU64,
     /// Data points in a metric type this build does not convert, plus points with no
     /// timestamp. Reported to the exporter as well; counted here so an operator can see
     /// it without reading their collector's logs.
     pub unsupported: AtomicU64,
     pub logs_batch: std::sync::Mutex<batch::Stats>,
     pub metrics_batch: std::sync::Mutex<batch::Stats>,
+    pub spans_batch: std::sync::Mutex<batch::Stats>,
 }
 
 /// One tenant's endpoint: everything a handler needs.
@@ -76,6 +85,7 @@ pub struct Listener {
     pipeline: Arc<Pipeline<PgStore, PgEnricher>>,
     logs: mpsc::Sender<LogRow>,
     metrics: mpsc::Sender<MetricRow>,
+    spans: mpsc::Sender<SpanRow>,
     stats: Arc<Metrics>,
 }
 
@@ -88,6 +98,81 @@ impl std::fmt::Debug for Listener {
 }
 
 impl Listener {
+    /// Resolve one identity, and fill in the listener's vendor if enrichment had none.
+    async fn attributed(&self, observed: &ObservedIdentity) -> Attribution {
+        let mut attribution = self.pipeline.attribute(self.tenant_id, observed).await;
+        if attribution.vendor.is_empty() {
+            attribution.vendor.clone_from(&self.vendor);
+        }
+        attribution
+    }
+
+    /// A payload that said nothing about who sent it.
+    ///
+    /// The nil resource rather than a new one. `Pipeline::attribute` on an empty identity
+    /// creates a resource *every time it is called*, so a hand-rolled exporter with no
+    /// host keys and no service name would mint one per export request and fill an
+    /// inventory with them. The row is still stored — §M0.2 rule 1 — and the identifiers
+    /// it lacks are exactly why nothing could be done with it.
+    fn unattributed(&self) -> Attribution {
+        Attribution {
+            tenant_id: self.tenant_id,
+            resource_id: ResourceId::nil(),
+            site_id: SiteId::nil(),
+            vendor: self.vendor.clone(),
+        }
+    }
+
+    /// Which host sent this, for the two signals whose rows have one subject.
+    async fn host(&self, resource: &std::collections::BTreeMap<String, String>) -> Attribution {
+        if let Some(observed) = uops_otlp::observed(resource) {
+            return self.attributed(&observed).await;
+        }
+        // No host keys at all. Falling back to the service is what keeps M3's behaviour:
+        // before M8, `service.name` was the host identity's own last-resort identifier and
+        // the resource it produced was already a `ResourceKind::Service`. The rows land
+        // where they always did; what changed is that the identifier now belongs to the
+        // service openly instead of being filed under the host.
+        match uops_otlp::service_observed(resource) {
+            Some(observed) => self.attributed(&observed).await,
+            None => self.unattributed(),
+        }
+    }
+
+    /// Both of a span's subjects — M8 §2.1.
+    ///
+    /// Two resolutions of two different identities, and the second is only possible
+    /// because `uops_otlp::identifiers` stopped offering `service.name` as a host
+    /// identifier: `UNIQUE (tenant_id, kind, value)` means a name claimed by a host could
+    /// never afterwards resolve to a service, and every span would carry
+    /// `service_id == resource_id` while looking perfectly healthy.
+    ///
+    /// Once per *resource*, not per span — a request from one service carries hundreds of
+    /// spans that all resolve identically.
+    async fn subjects(
+        &self,
+        resource: &std::collections::BTreeMap<String, String>,
+    ) -> (Attribution, ResourceId) {
+        let service = match uops_otlp::service_observed(resource) {
+            Some(observed) => Some(self.attributed(&observed).await),
+            None => None,
+        };
+
+        let host = match uops_otlp::observed(resource) {
+            Some(observed) => self.attributed(&observed).await,
+            // The degenerate payload: a service that did not say which machine it runs on.
+            // The two columns then hold the same id, which is the honest answer — there is
+            // one thing here and it is the service — rather than a host invented to fill a
+            // column.
+            None => service.clone().unwrap_or_else(|| self.unattributed()),
+        };
+
+        (
+            host,
+            service.map_or_else(ResourceId::nil, |a| a.resource_id),
+        )
+    }
+
     /// Resolve, convert and queue one export request's logs.
     ///
     /// # Errors
@@ -104,11 +189,7 @@ impl Listener {
             // Once per *resource*, not per record. A request from one host carries
             // hundreds of records that all resolve identically, and asking per record
             // would turn one cache lookup into hundreds.
-            let observed = uops_otlp::observed(&batch.resource);
-            let mut attribution = self.pipeline.attribute(self.tenant_id, &observed).await;
-            if attribution.vendor.is_empty() {
-                attribution.vendor.clone_from(&self.vendor);
-            }
+            let attribution = self.host(&batch.resource).await;
 
             for row in uops_otlp::logs::to_rows(batch, &attribution, received_at) {
                 if self.logs.send(row).await.is_err() {
@@ -136,11 +217,7 @@ impl Listener {
         let mut unsupported = 0u64;
 
         for batch in &batches {
-            let observed = uops_otlp::observed(&batch.resource);
-            let mut attribution = self.pipeline.attribute(self.tenant_id, &observed).await;
-            if attribution.vendor.is_empty() {
-                attribution.vendor.clone_from(&self.vendor);
-            }
+            let attribution = self.host(&batch.resource).await;
 
             let converted = uops_otlp::metrics::to_rows(batch, &attribution, received_at);
             unsupported += converted.unsupported;
@@ -164,11 +241,37 @@ impl Listener {
         ))
     }
 
-    /// Count spans this build will not store. See `routes::traces`.
-    pub fn count_spans(&self, spans: u64) {
-        self.stats
-            .spans_discarded
-            .fetch_add(spans, Ordering::Relaxed);
+    /// Resolve, convert and queue one export request's spans.
+    ///
+    /// The endpoint has accepted and discarded since M3, because SPEC asked it to: an
+    /// application whose exporter gets a 404 logs an error every batch forever, and
+    /// "traces are not stored yet" must not look like "the endpoint is broken". M8 is
+    /// where the discarding stops.
+    ///
+    /// # Errors
+    ///
+    /// As [`ingest_logs`](Self::ingest_logs).
+    pub async fn ingest_traces(&self, request: &[ResourceSpans]) -> Result<Rejected, Stopped> {
+        let received_at = chrono::Utc::now();
+        let batches = uops_otlp::traces::batches(request);
+        let mut queued = 0u64;
+
+        for batch in &batches {
+            let (attribution, service_id) = self.subjects(&batch.resource).await;
+
+            for row in uops_otlp::traces::to_rows(batch, &attribution, service_id, received_at) {
+                if self.spans.send(row).await.is_err() {
+                    return Err(Stopped::ShuttingDown);
+                }
+                queued += 1;
+            }
+        }
+
+        self.stats.spans.fetch_add(queued, Ordering::Relaxed);
+        // Nothing about a span is unconvertible. A backwards duration or a missing
+        // timestamp is recorded in the row's attributes and stored — the same rule the
+        // log path holds, for the same reason.
+        Ok(Rejected::default())
     }
 }
 
@@ -256,9 +359,11 @@ pub async fn serve_with_metrics(
     // same place.
     let logs_wal = open_spill(config, "logs")?;
     let metrics_wal = open_spill(config, "metrics")?;
+    let spans_wal = open_spill(config, "spans")?;
 
     let (logs_tx, logs_rx) = mpsc::channel::<LogRow>(config.queue);
     let (metrics_tx, metrics_rx) = mpsc::channel::<MetricRow>(config.queue);
+    let (spans_tx, spans_rx) = mpsc::channel::<SpanRow>(config.queue);
 
     let logs_batcher = tokio::spawn(batch::run_with_wal(
         telemetry.clone(),
@@ -282,7 +387,7 @@ pub async fn serve_with_metrics(
     ));
 
     let metrics_batcher = tokio::spawn(batch::run_with_wal(
-        telemetry,
+        telemetry.clone(),
         metrics_rx,
         batch::Config::default(),
         metrics_wal,
@@ -302,6 +407,27 @@ pub async fn serve_with_metrics(
         },
     ));
 
+    let spans_batcher = tokio::spawn(batch::run_with_wal(
+        telemetry,
+        spans_rx,
+        batch::Config::default(),
+        spans_wal,
+        {
+            let metrics = Arc::clone(&metrics);
+            move |stats| {
+                if let Ok(mut held) = metrics.spans_batch.lock() {
+                    *held = stats;
+                }
+                if stats.rows_dropped > 0 {
+                    eprintln!(
+                        "uops-collector-otlp: {} span row(s) LOST to a ClickHouse outage",
+                        stats.rows_dropped
+                    );
+                }
+            }
+        },
+    ));
+
     let (stop_tx, _) = tokio::sync::broadcast::channel::<()>(1);
     let mut servers = Vec::new();
 
@@ -312,6 +438,7 @@ pub async fn serve_with_metrics(
             pipeline: Arc::clone(&pipeline),
             logs: logs_tx.clone(),
             metrics: metrics_tx.clone(),
+            spans: spans_tx.clone(),
             stats: Arc::clone(&metrics),
         });
 
@@ -346,6 +473,7 @@ pub async fn serve_with_metrics(
     // shutdown that hangs forever holding a sender nobody will use.
     drop(logs_tx);
     drop(metrics_tx);
+    drop(spans_tx);
 
     shutdown.await;
     println!("uops-collector-otlp: stopping, draining what is in flight");
@@ -354,7 +482,11 @@ pub async fn serve_with_metrics(
     for server in servers {
         let _ = server.await;
     }
-    for (what, handle) in [("logs", logs_batcher), ("metrics", metrics_batcher)] {
+    for (what, handle) in [
+        ("logs", logs_batcher),
+        ("metrics", metrics_batcher),
+        ("spans", spans_batcher),
+    ] {
         match handle.await {
             Ok(stats) => println!(
                 "uops-collector-otlp: {what} — {} row(s) in {} insert(s), {} spilled, \

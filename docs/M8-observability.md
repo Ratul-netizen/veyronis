@@ -65,6 +65,26 @@ rather than one host. That weighting is correct and stays. What changes is that 
 becomes a resource *of its own*, resolved separately, rather than a weak hint about which
 host sent the payload.
 
+**What that cost, found while building it.** An identifier belongs to exactly one
+resource — `UNIQUE (tenant_id, kind, value)`, which is the constraint the whole resolver
+is shaped around. So `service.name` could not stay on the host identity *and* become the
+service's: whichever resolved first would claim it, and the other would match it at 0.60,
+land under the auto-merge bar, and arrive as a provisional resource with a review item.
+Every machine in a fleet, from its own traffic.
+
+So there are now two identities rather than one: `identifiers()` asks which **host** and
+offers `host.id` and `host.name`; `service_identifiers()` asks which **service** and
+offers exactly one identifier, which is what lets a repeat export match instead of
+scoring. The consequences, both tested:
+
+* A payload with **no host keys** — an SDK without `resourcedetection` — offers no host
+  identity at all, and an identity with no identifiers must never be resolved, because
+  that creates a resource on every call. The rows attribute to the service and both
+  columns hold it: one thing was described, and inventing a host to fill a column is
+  worse than saying so.
+* The service identifier is `namespace/name` when `service.namespace` is set, because two
+  teams really do both run a `checkout`.
+
 ### 2.2 The sort key cannot answer "show me this trace", and a skip index is the answer.
 
 The commonest trace query is a lookup by `trace_id`, and the sort key leads with the
@@ -172,10 +192,11 @@ what promoting a deferred file is for.
 
 ## 4. Acceptance criteria
 
-- [ ] An OTLP trace export produces one row per span, with the host resolved to a resource
+- [x] An OTLP trace export produces one row per span, with the host resolved to a resource
       and the service resolved to a *separate* resource
-- [ ] Two hosts running one service resolve to two host resources and one service resource
-- [ ] `POST /v1/traces` stops reporting partial success, because the spans are now stored
+- [x] Two hosts running one service resolve to two host resources and one service resource
+      — and raise nothing for review, which is the assertion that makes §2.1 load-bearing
+- [x] `POST /v1/traces` stops reporting partial success, because the spans are now stored
 - [ ] A trace is retrievable by `trace_id`, and the granules read for that lookup are
       measured and recorded rather than assumed — §2.2
 - [ ] The logs emitted during a trace are retrievable by joining on `trace_id`, using the
@@ -186,7 +207,7 @@ what promoting a deferred file is for.
 - [ ] A span count is never presented as a total; the screen says it is a sample — §2.3
 - [ ] A service map edge appears because a parent span in one service has a child in
       another, and disappears when the calls stop
-- [ ] Spans from tenant A are unreachable from tenant B, by the same adversarial test M7
+- [x] Spans from tenant A are unreachable from tenant B, by the same adversarial test M7
       used
 - [ ] The suite runs against the live ClickHouse, on a server whose timezone is not UTC
 

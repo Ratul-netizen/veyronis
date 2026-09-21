@@ -398,11 +398,35 @@ async fn metrics_are_stored_and_what_cannot_be_is_reported() {
     running.serving.await.expect("join").expect("serve");
 }
 
+/// One span, with everything a trace view needs to draw it.
+fn span(trace: &str, id: &str, parent: &str, name: &str) -> Span {
+    let start = now_nanos();
+    Span {
+        trace_id: hex(trace),
+        span_id: hex(id),
+        parent_span_id: hex(parent),
+        name: name.to_owned(),
+        kind: 2, // SPAN_KIND_SERVER
+        start_time_unix_nano: start,
+        end_time_unix_nano: start + 12_000_000,
+        ..Span::default()
+    }
+}
+
+/// Ids arrive as raw bytes and come back as lower-case hex, so the fixtures are written
+/// the way they will be read.
+fn hex(s: &str) -> Vec<u8> {
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex"))
+        .collect()
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn traces_are_accepted_and_said_to_be_discarded() {
-    // SPEC: accept and drop with a counter, so instrumented apps do not error. An
-    // exporter that got a 404 would retry, back off and log an error every batch forever
-    // — "traces are not stored yet" and "the endpoint is broken" must not look the same.
+async fn an_otlp_trace_export_becomes_spans_carrying_both_of_their_subjects() {
+    // The endpoint accepted and discarded from M3 until M8, because SPEC asked it to: an
+    // exporter that got a 404 would retry, back off and log an error every batch forever,
+    // and "traces are not stored yet" must not look like "the endpoint is broken". This
+    // is the test that it stopped.
     let store = infra_or_skip!(
         PgStore::connect(&PgConfig {
             url: database_url(),
@@ -414,14 +438,22 @@ async fn traces_are_accepted_and_said_to_be_discarded() {
     let telemetry = ChStore::new(ChClient::new(uops_store_ch::ChConfig::from_env()));
     infra_or_skip!(telemetry.health().await.map_err(|e| e.to_string()));
 
-    let (_tenant_id, slug) = tenant(&store, "traces").await;
+    let (tenant_id, slug) = tenant(&store, "traces").await;
     let running = start(&store, &telemetry, &slug).await;
 
+    let trace = uuid::Uuid::now_v7().simple().to_string();
     let request = ExportTraceServiceRequest {
         resource_spans: vec![ResourceSpans {
             resource: Some(resource("app-03")),
             scope_spans: vec![ScopeSpans {
-                spans: vec![Span::default(), Span::default()],
+                scope: Some(InstrumentationScope {
+                    name: "io.opentelemetry.grpc".to_owned(),
+                    ..InstrumentationScope::default()
+                }),
+                spans: vec![
+                    span(&trace, "0000000000000001", "", "GET /checkout"),
+                    span(&trace, "0000000000000002", "0000000000000001", "charge"),
+                ],
                 ..ScopeSpans::default()
             }],
             ..ResourceSpans::default()
@@ -431,16 +463,227 @@ async fn traces_are_accepted_and_said_to_be_discarded() {
     let (status, body) = post(running.address, "/v1/traces", request.encode_to_vec()).await;
     assert_eq!(status, 200, "an exporter must not see an error");
 
+    // No partial success at all. A receiver that kept apologising for spans it now stores
+    // would be lying in the other direction, and an exporter told its spans were rejected
+    // would be right to stop sending them.
     let response = ExportTraceServiceResponse::decode(&body[..]).expect("a valid response");
-    let partial = response
-        .partial_success
-        .expect("spans that were discarded must be reported as such");
-    assert_eq!(partial.rejected_spans, 2, "spans are counted, not requests");
     assert!(
-        partial.error_message.contains("not stored"),
-        "{:?}",
-        partial.error_message
+        response.partial_success.is_none(),
+        "the spans were stored: {:?}",
+        response.partial_success
     );
+
+    let sql = format!(
+        "SELECT name, scope_name, toString(resource_id), toString(service_id),          toString(duration_ns), parent_span_id FROM spans          WHERE tenant_id = '{}' AND trace_id = '{trace}' ORDER BY name FORMAT TabSeparated",
+        tenant_id.into_uuid()
+    );
+    let found = wait_for(&telemetry, &sql).await;
+    let rows: Vec<&str> = found.trim().lines().collect();
+    assert_eq!(rows.len(), 2, "one row per span: {found:?}");
+
+    let columns: Vec<Vec<&str>> = rows.iter().map(|r| r.split('\t').collect()).collect();
+    assert_eq!(columns[0][0], "GET /checkout");
+    assert_eq!(columns[1][0], "charge");
+    assert_eq!(columns[0][1], "io.opentelemetry.grpc", "the scope survives");
+    assert_eq!(columns[0][4], "12000000", "the duration is end minus start");
+    assert_eq!(columns[0][5], "", "the root span has no parent");
+    assert_eq!(
+        columns[1][5], "0000000000000001",
+        "and the child points at it, which is what draws a trace"
+    );
+
+    // §2.1, the whole reason the table has two id columns: the host and the service are
+    // different resources, resolved separately, and a row that conflated them would show
+    // one id twice.
+    let (host_id, service_id) = (columns[0][2], columns[0][3]);
+    assert_ne!(host_id, service_id, "a span has two subjects, not one");
+    assert_ne!(host_id, uops_core::ResourceId::nil().to_string());
+    assert_ne!(service_id, uops_core::ResourceId::nil().to_string());
+    assert_eq!(columns[1][2], host_id, "both spans ran on the one host");
+    assert_eq!(columns[1][3], service_id, "and are the one service's work");
+
+    // Two resources in the inventory, and the service is recorded as a service. The kind
+    // is what stops a service map from drawing machines.
+    let resources = store
+        .resources(
+            &uops_core::TenantScope::system(tenant_id),
+            &uops_store_pg::ResourceFilter::default(),
+        )
+        .await
+        .expect("resources");
+    assert_eq!(resources.items.len(), 2, "one host and one service");
+    let service = resources
+        .items
+        .iter()
+        .find(|r| r.id.to_string() == service_id)
+        .expect("the service is in the inventory");
+    assert_eq!(service.kind, uops_core::ResourceKind::Service);
+    assert_eq!(service.name, "checkout");
+
+    let _ = running.stop.send(());
+    running.serving.await.expect("join").expect("serve");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_hosts_running_one_service_are_two_hosts_and_one_service() {
+    // M8 §2.1's acceptance criterion, and the reason `service.name` had to stop being one
+    // of the *host's* identifiers. `UNIQUE (tenant_id, kind, value)` means an identifier
+    // belongs to exactly one resource: while a host claimed the service name, the second
+    // host running `checkout` matched the first at 0.60 and the service could never be
+    // resolved as itself.
+    let store = infra_or_skip!(
+        PgStore::connect(&PgConfig {
+            url: database_url(),
+            ..PgConfig::default()
+        })
+        .await
+        .map_err(|e| e.to_string())
+    );
+    let telemetry = ChStore::new(ChClient::new(uops_store_ch::ChConfig::from_env()));
+    infra_or_skip!(telemetry.health().await.map_err(|e| e.to_string()));
+
+    let (tenant_id, slug) = tenant(&store, "fleet").await;
+    let running = start(&store, &telemetry, &slug).await;
+
+    let trace = uuid::Uuid::now_v7().simple().to_string();
+    for (i, host) in ["app-10", "app-11"].into_iter().enumerate() {
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(resource(host)),
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![span(
+                        &trace,
+                        &format!("00000000000000a{i}"),
+                        "",
+                        "GET /checkout",
+                    )],
+                    ..ScopeSpans::default()
+                }],
+                ..ResourceSpans::default()
+            }],
+        };
+        let (status, _) = post(running.address, "/v1/traces", request.encode_to_vec()).await;
+        assert_eq!(status, 200);
+    }
+
+    let sql = format!(
+        "SELECT toString(uniqExact(resource_id)), toString(uniqExact(service_id)) FROM spans          WHERE tenant_id = '{}' AND trace_id = '{trace}' HAVING count() = 2 FORMAT TabSeparated",
+        tenant_id.into_uuid()
+    );
+    let found = wait_for(&telemetry, &sql).await;
+    assert_eq!(
+        found.trim(),
+        "2\t1",
+        "two hosts, one service — got {found:?}"
+    );
+
+    // Three resources, not four and not two: each machine is itself, and the service they
+    // both run is one thing.
+    let resources = store
+        .resources(
+            &uops_core::TenantScope::system(tenant_id),
+            &uops_store_pg::ResourceFilter::default(),
+        )
+        .await
+        .expect("resources");
+    assert_eq!(
+        resources.items.len(),
+        3,
+        "two hosts and one service: {:?}",
+        resources
+            .items
+            .iter()
+            .map(|r| (&r.name, r.kind))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        resources
+            .items
+            .iter()
+            .filter(|r| r.kind == uops_core::ResourceKind::Service)
+            .count(),
+        1
+    );
+
+    // And nobody has to adjudicate any of it. This is the assertion that makes the
+    // identity split load-bearing rather than tidy: while a host claimed the service
+    // name, the *second* machine running `checkout` matched the first one on it at 0.60 —
+    // under the auto-merge bar — so it arrived as a provisional resource with a queue item
+    // asking whether it was itself. Every machine in a fleet, from its own traffic.
+    let reviews = uops_identity::IdentityStore::pending_reviews(&store, tenant_id, 10)
+        .await
+        .expect("the review queue");
+    assert!(
+        reviews.is_empty(),
+        "a fleet must not fill the review queue by existing: {reviews:?}"
+    );
+
+    let _ = running.stop.send(());
+    running.serving.await.expect("join").expect("serve");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_service_that_does_not_say_which_host_it_runs_on_is_still_stored() {
+    // The degenerate payload, and the one the identity split could have broken: an SDK
+    // with no `resourcedetection` sends `service.name` and nothing else. Before M8 that
+    // resolved weakly *as a host*; now it resolves as the service and both columns hold
+    // it — one thing was described, and inventing a host to fill a column would be worse
+    // than saying so.
+    //
+    // What must not happen is a resource per export request, which is what resolving an
+    // empty identity does.
+    let store = infra_or_skip!(
+        PgStore::connect(&PgConfig {
+            url: database_url(),
+            ..PgConfig::default()
+        })
+        .await
+        .map_err(|e| e.to_string())
+    );
+    let telemetry = ChStore::new(ChClient::new(uops_store_ch::ChConfig::from_env()));
+    infra_or_skip!(telemetry.health().await.map_err(|e| e.to_string()));
+
+    let (tenant_id, slug) = tenant(&store, "hostless").await;
+    let running = start(&store, &telemetry, &slug).await;
+
+    let trace = uuid::Uuid::now_v7().simple().to_string();
+    for i in 0..3 {
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![attribute(uops_core::semconv::SERVICE_NAME, "cart")],
+                    ..Resource::default()
+                }),
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![span(&trace, &format!("00000000000000b{i}"), "", "work")],
+                    ..ScopeSpans::default()
+                }],
+                ..ResourceSpans::default()
+            }],
+        };
+        let (status, _) = post(running.address, "/v1/traces", request.encode_to_vec()).await;
+        assert_eq!(status, 200);
+    }
+
+    let sql = format!(
+        "SELECT toString(uniqExact(resource_id)), toString(uniqExact(service_id)) FROM spans          WHERE tenant_id = '{}' AND trace_id = '{trace}' HAVING count() = 3 FORMAT TabSeparated",
+        tenant_id.into_uuid()
+    );
+    assert_eq!(wait_for(&telemetry, &sql).await.trim(), "1\t1");
+
+    let resources = store
+        .resources(
+            &uops_core::TenantScope::system(tenant_id),
+            &uops_store_pg::ResourceFilter::default(),
+        )
+        .await
+        .expect("resources");
+    assert_eq!(
+        resources.items.len(),
+        1,
+        "three exports, one resource — not one per request"
+    );
+    assert_eq!(resources.items[0].kind, uops_core::ResourceKind::Service);
 
     let _ = running.stop.send(());
     running.serving.await.expect("join").expect("serve");

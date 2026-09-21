@@ -121,37 +121,31 @@ pub async fn metrics(State(listener): State<Arc<Listener>>, body: Bytes) -> Resp
     }
 }
 
-/// `POST /v1/traces` — accepted, counted, discarded.
+/// `POST /v1/traces`
 ///
-/// SPEC §M3: *"trace accepts and stores nothing until M8 — accept and drop with a counter,
-/// so instrumented apps don't error."*
+/// Until M8 this counted the spans and reported them all as `rejected_spans`, because
+/// SPEC §M3 asked for exactly that: *"trace accepts and stores nothing until M8 — accept
+/// and drop with a counter, so instrumented apps don't error."*
 ///
-/// The spans are **counted**, not the requests, and the count is reported as
-/// `rejected_spans` with a message saying why. That is the honest reading of
-/// `partial_success`: they were received and they were not stored, and an exporter that
-/// is told so can stop sending them. A `200 {}` would claim they were kept.
+/// They are stored now, so the apology goes. An exporter that kept being told its spans
+/// were rejected would be right to stop sending them, and a `partial_success` that
+/// outlives the thing it was reporting is worse than none at all — it is a receiver
+/// lying about itself in the other direction.
 pub async fn traces(State(listener): State<Arc<Listener>>, body: Bytes) -> Response {
     let request = match ExportTraceServiceRequest::decode(body) {
         Ok(r) => r,
         Err(e) => return undecodable("trace", &e),
     };
 
-    let spans: usize = request
-        .resource_spans
-        .iter()
-        .flat_map(|rs| rs.scope_spans.iter())
-        .map(|ss| ss.spans.len())
-        .sum();
-    listener.count_spans(spans as u64);
-
-    protobuf(&ExportTraceServiceResponse {
-        partial_success: (spans > 0).then(|| ExportTracePartialSuccess {
-            rejected_spans: i64::try_from(spans).unwrap_or(i64::MAX),
-            error_message: "traces are accepted but not stored until M8; the endpoint is \
-                            working and the spans were discarded"
-                .to_owned(),
+    match listener.ingest_traces(&request.resource_spans).await {
+        Ok(rejected) => protobuf(&ExportTraceServiceResponse {
+            partial_success: partial(rejected).map(|(count, message)| ExportTracePartialSuccess {
+                rejected_spans: count,
+                error_message: message,
+            }),
         }),
-    })
+        Err(_) => unavailable(),
+    }
 }
 
 /// Turn a rejected count into the `partial_success` an exporter should see.
