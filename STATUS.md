@@ -1,17 +1,24 @@
 # Status — pick up from here
 
-Last updated: 2026-09-18 · repo: `github.com/Ratul-netizen/veyronis`
+Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
 
-> **M5 Discovery is in progress and is nearly done.** SPEC stops at M4 deliberately, so
-> M5 has its own pair of documents: [`docs/M5-discovery.md`](./docs/M5-discovery.md) is
-> the specification with its decisions closed, and
-> [`docs/M5-state.md`](./docs/M5-state.md) is where it stands — what is built, the one
-> piece left (the scheduler and runner), the two decisions that are open on it, and the
-> four things worth knowing before touching any of it. Read that second file before
-> resuming M5.
+> **M0–M7 are complete. M8 Observability is at eight of its ten acceptance criteria**,
+> and the two that are left are *measurements* rather than features — see
+> [`docs/M8-observability.md`](./docs/M8-observability.md) §4. SPEC stops at M4
+> deliberately, so each milestone past it has its own document with its decisions closed
+> before anything was built: [`M5-discovery.md`](./docs/M5-discovery.md),
+> [`M7-flow.md`](./docs/M7-flow.md), [`M8-observability.md`](./docs/M8-observability.md).
+> Read the M8 one before touching traces; it records two things that turned out to be
+> wrong in it and were amended rather than quietly worked around.
+
+> **There is no Docker on this machine.** The hypervisor is disabled for a nested
+> virtualisation stack, so PostgreSQL runs portable on the host and `ClickHouse` runs in
+> a VM. Every command in this file that says `docker compose` has a Docker-free
+> equivalent in [`docs/dev-environment.md`](./docs/dev-environment.md), which is the file
+> to read before trying to bring the databases up.
 
 ---
 
@@ -23,11 +30,19 @@ model**, rather than an NMS bolted to a log stack. Rust/Axum + React, PostgreSQL
 control plane and ClickHouse for telemetry, OpenTelemetry Collector instead of a bespoke
 agent. Both on-premise and hosted are first-class; buyers are unrestricted, including
 government and defence, which is why on-prem is not a downgrade. The W1 storage
-benchmark is **complete and validated the architecture**. M0 is under way: the workspace,
-**M0 is complete** — every component built, and the W1 go/no-go written up at
-[`docs/benchmarks/w1.md`](./docs/benchmarks/w1.md). M1 has started: `uops-store-pg`
-puts the resource repository and the query layer's `ResourceCatalog` over real
-PostgreSQL.
+benchmark is **complete and validated the architecture**, written up at
+[`docs/benchmarks/w1.md`](./docs/benchmarks/w1.md).
+
+**Nine of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
+NMS, M3 logs, M4 metrics and alerting, M5 discovery, M6 topology, M7 flow, and M8
+observability at eight of ten. All five telemetry signals — metrics, logs, events and
+state, flows, traces — land on **one** resource identity and are read through **one**
+query AST, which was the whole bet. What remains on the roadmap (M9 incident, M10
+automation, M11 security analytics, M12 enterprise, M13 AI) is what PLAN §10 calls
+*direction, not commitments*.
+
+Against PLAN's own yardstick — *"something valuable exists at month 9"* — the product is
+past that line.
 
 ---
 
@@ -43,15 +58,15 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M0 — all acceptance criteria met** | ✅ |
 | `uops-core` | ✅ 36 tests, incl. 5 `compile_fail` |
 | `uops-secrets` | ✅ 51 |
-| `uops-query` | ✅ 49, 12 golden fixtures |
+| `uops-query` | ✅ 98, 17 golden fixtures — the AST, the planner, both correlation entry points |
 | `uops-bus` | ✅ 29, incl. an 11-case conformance suite |
 | PostgreSQL migrations | ✅ 16 migrations, asserted invariants per table |
-| `uops-ch-migrate` | ✅ 34, applied against ClickHouse 26.8 |
+| `uops-ch-migrate` | ✅ 34, applied against ClickHouse 26.8 — 8 migrations now |
 | **M1 — all acceptance criteria met** | ✅ |
 | `uops-store-pg` | ✅ 74 |
 | `uops-identity` | ✅ 24 on the rules, more against PostgreSQL |
 | `uops-api` | ✅ 83 — auth, resources, query, audit, cross-tenant |
-| `uops-store-ch` | ✅ 25, against real ClickHouse |
+| `uops-store-ch` | ✅ 36, against real ClickHouse — logs, metrics, states, flows, spans |
 | `uops-server` | ✅ 5 — it runs, and you can log into it |
 | web shell | ✅ shell, auth, tenant switcher, inventory, detail, explorer |
 | 10 000-resource p95 | ✅ measured through the router, worst 75 ms |
@@ -110,6 +125,21 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | UI · a native desktop shell | ⬜ **decided: Tauri, not Electron, and a window rather than a second UI** — [`docs/UI-SPEC.md`](./docs/UI-SPEC.md) §9a |
 | **Brand clearance: `Veyronis` has a conflict** | ⬜ **`veyronis.com` is an active software consultancy**, and *Varonis Systems* holds a registered US mark (4592747) in an adjacent field. A rename is likely; the branding rule means it costs documentation, not code |
 | Naming: first-pass screen done | ⬜ Rejected on conflicts: *Veyronis*, *Sentryl*, *Lumenwatch*, *Corvane*, *Helvara*. Clear so far: **Northwarden**. A screen is not clearance — the checklist in SPEC's branding rule still applies |
+| **M5 — all 12 acceptance criteria met** | ✅ [`docs/M5-discovery.md`](./docs/M5-discovery.md) |
+| `uops-discover` · `uops-sweeper` | ✅ CIDR sweep, SNMP classification, LLDP/CDP/ARP neighbours, the scheduler that runs them |
+| **M6 · topology** | ✅ the `connected_to` graph, impact analysis, the topology screen — edges are evidence from a device naming its neighbour, never drawn by hand |
+| **M7 — all 10 acceptance criteria met** | ✅ [`docs/M7-flow.md`](./docs/M7-flow.md) |
+| `uops-flow` | ✅ 83 — NetFlow v5, NetFlow v9, IPFIX and sFlow v5, hand-written, with a structure-aware fuzzer |
+| `uops-collector-flow` | ✅ one listener per tenant, template caches per exporter, the flow screen with its `≈` mark |
+| **M8 — 8 of 10 acceptance criteria met** | 🟡 [`docs/M8-observability.md`](./docs/M8-observability.md) |
+| M8 · spans and the service aggregate | ✅ migration 0008 — `spans` keyed on the host, `service_5m` keyed on the service |
+| M8 · the OTLP span decoder | ✅ `uops_otlp::traces` — and the identity split that made `service_id` possible at all |
+| M8 · the planner learns traces | ✅ `spans` for an investigation, `service_5m` for the APM screen |
+| M8 · log↔trace correlation | ✅ one predicate on a column populated since M3, proven end to end through the receiver |
+| M8 · the service map | ✅ derived from parent/child spans, with the tenant filtered on **both** sides of the join |
+| M8 · the Services screen | ✅ every count named `sampled*`, in the API and in the client |
+| **M8 · the two measurements** | ⬜ granules for a `trace_id` lookup, and the map join's cost. Both need a populated table — W1's method — and §2.2 says assuming does not count |
+| M8 · a trace waterfall | ⬜ the queries exist (`uops_query::correlate`) and the API runs them; no screen draws the tree |
 
 ## Resume in three commands
 
@@ -118,12 +148,14 @@ git clone https://github.com/Ratul-netizen/veyronis && cd veyronis
 docker compose -f deploy/docker-compose.yml up -d postgres clickhouse
 bash scripts/db.sh migrate && bash scripts/ch.sh apply
 
+# On the machine this was last built on there is no Docker. Bring both databases up the
+# way docs/dev-environment.md describes instead, then set CLICKHOUSE_URL to the VM.
 # uops-store-pg reads DATABASE_URL and refuses to guess one, so the suite is short by
 # about eighty tests without it — and they fail with instructions rather than passing.
 export DATABASE_URL=postgres://uops:uops@localhost:5432/uops
 export CLICKHOUSE_USER=uops CLICKHOUSE_PASSWORD=uops
-cargo test --workspace --all-targets && cargo test --workspace --doc   # 962 tests, green
-cd web && npm ci && npm test                                            # 59 more
+cargo test --workspace --all-targets && cargo test --workspace --doc   # 1 242 tests, green
+cd web && npm ci && npm test                                            # 127 more
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
@@ -594,64 +626,76 @@ because it reads as covered.
 
 ---
 
+crates/uops-discover/  ·  crates/uops-sweeper/      M5
+├── sweep.rs      CIDR expansion, concurrency, the refusal to scan what was not asked
+├── classify.rs   SNMP sysObjectID → vendor and kind, LLDP/CDP/ARP neighbours
+└── sweeper       the scheduler: one turn per tick, leases, and what a dead run means
+
+crates/uops-flow/  ·  crates/uops-collector-flow/        M7
+├── v5.rs v9.rs ipfix.rs sflow.rs   four decoders, hand-written, no vendor crate
+├── templates.rs  the per-exporter template cache — a v9 record is meaningless without it
+└── tests/fuzz.rs structure-aware mutation; it found two real panics on its first run
+
+crates/uops-otlp/traces.rs  ·  the M8 decoder
+├── span kind and status mapping, where `unset` is NOT an error
+├── the sampling probability, read from `tracestate` and never applied
+└── identifiers()/service_identifiers() — two identities, because one span has two subjects
+
+crates/uops-query/
+├── plan.rs       …and `spans` / `service_5m`, added in M8
+├── correlate.rs  the trace↔log predicate, written once so the two sides cannot drift
+└── servicemap.rs the one physical query the AST cannot express: a self-join on spans
+
 ## Next, in dependency order
 
-0. **M3 · the syslog daemon.** Every piece from the wire to a batched insert now
-   exists and is tested; what is missing is the process that joins them, and the one
-   decision it needs is **how a message is attributed to a tenant**. A syslog message
-   carries no tenant and cannot be made to. My proposal is a listener per tenant —
-   address or port identifies the tenant, which is how every multi-tenant collector
-   does it — with `create_provisional` for a sender that resolves to nothing, so the
-   logs are kept and land in the review queue rather than being dropped. That is a
-   product decision about what an unknown sender means, so it is named here rather
-   than chosen quietly.
-1. **The review queue has no way to say "no"** — found while writing the scenario
-   above. A case leaves the queue when the provisional is merged away, and that is the
-   only way out. An operator who decides two resources are genuinely *different* has no
-   action to take: the question comes back tomorrow and every day after. This needs a
-   dismissal — a decision outcome, a store method and a route — and it is a product
-   decision about what "not the same" means for a provisional resource that already has
-   telemetry attached, so it is not something to invent silently.
-2. **No UI for the review queue.** `pending_reviews` exists and is tested; nothing
-   surfaces it. Blocked on the above, since a queue you can only agree with is worse
+1. **M8's two measurements.** Both acceptance criteria that are still open are numbers,
+   not code, and both want W1's method: a populated table and a real query, not a plan.
+   * **Granules read for a `trace_id` lookup at 100M spans** — §2.2. The sort key leads
+     with the resource and cannot help, so a bloom filter on `trace_id` is doing the
+     pruning. That is a *bet*, and the fallback if it disappoints is a `trace_id`-ordered
+     projection, the same shape W1 added to `logs`.
+   * **The service map's join cost** over an hour at the same scale — §2.6. The fallback
+     is a view keyed on `parent_span_id` maintained at insert time, which is not free
+     because a child span can arrive before its parent.
+
+   `bench/scripts/load.sh` and `bench/scripts/run.sh` are the harness W1 used. Loading
+   spans needs a generator that `load.sh` does not have yet.
+
+2. **A trace waterfall.** The last piece of M8 that is a feature rather than a number,
+   and it needs **nothing new from the backend**: `uops_query::correlate` already builds
+   the three queries (the spans of a trace, the logs during it, the children of a span)
+   and `POST /api/v1/query` already runs them. The Services screen answers *which
+   service*; this answers *what was this one request waiting for*.
+
+3. **The review queue still has no way to say "no".** Unchanged since it was found, and
+   it has outlived three milestones. A case leaves the queue only when the provisional is
+   merged away, so an operator who decides two resources are genuinely *different* has no
+   action to take and the question returns tomorrow. It needs a dismissal — a decision
+   outcome, a store method and a route — and it is a product decision about what "not the
+   same" means for a provisional that already has telemetry attached.
+
+4. **No UI for the review queue.** `pending_reviews` exists and is tested; nothing
+   surfaces it. Blocked on the above, because a queue you can only agree with is worse
    than no queue.
-3. ~~**M2 · the real transport.**~~ Done: `UdpTransport`, `snmp2`-backed, one pooled
-   session per device. Two request shapes — a `GETBULK` run for walks and a `GET` for a
-   scalar set — which is what `Work::Scalars`' "one request" actually needs.
-4. **M2 · the poller binary.** Every part exists and is tested; what
-   is missing is the process that joins them. In order:
-   1. ~~Load profiles.~~ Done: `seed_builtin_profiles`, `profiles_for`, `put_profile`.
-   2. ~~The loop.~~ Done: `uops_poll::poller::{Schedule, tasks, run_tick}`.
-   3. ~~Samples.~~ Done: `uops_poll::sample::{scalars, interface_columns}`.
-   3a. ~~Credentials that survive a restart.~~ Done: `PgSealedStore`. Found while
-      starting the binary — the `credential` table and the `SealedStore` trait both
-      existed, but nothing joined them, so the poller could not have read a real
-      credential.
-   3b. ~~The binary.~~ Done: `uops-poller`. Connects, seeds profiles, loads every
-      tenant's devices on an interval, ticks once a second, and wires a task to
-      `UdpTransport` + `walk` + `sample` + ClickHouse. `tests/live.rs` asserts the whole
-      path against real infrastructure and CI runs it; a mutation guard breaks the
-      `mgmt_ip` join and requires it to fail.
-      **Not done inside it:** the availability check. `generic-snmp` asks for ICMP,
-      which needs a raw socket and therefore a privilege this process should not hold
-      by default; TCP needs a port no built-in profile sets. The job is scheduled and
-      counted as unsupported rather than silently succeeding — a check that always
-      "passed" would report every device permanently up, which is worse than no
-      availability at all.
-      **Also not done:** a lease. Two pollers against one database would both schedule
-      every device, doubling the load on the fleet and writing each sample twice. One
-      process for now, said out loud in `main.rs`.
-   4. ~~Discovery.~~ Done. Each named row of the interface walk becomes a child
-      resource plus a `member_of` edge, in one transaction — a child with no edge is
-      unreachable from the device it belongs to, which is what the **and** in the
-      acceptance criterion is about. Matched across runs on the *name*, not `ifIndex`:
-      the MIB promises an index is stable only "between re-initializations", so an
-      index-keyed child would be re-created on every reboot. Migration 0008 is the
-      partial unique index that makes it repeatable.
-      **Not done:** an interface that stops appearing is left alone. Deleting it would
-      orphan the telemetry that references it, and one missed walk is not proof a port
-      was removed. `last_seen` stops advancing, which is the signal; acting on it is a
-      product decision.
+
+5. **M9 Incident** is the next milestone. It is where the Investigation Workspace lands,
+   and PLAN has wanted it since §6 — every signal for one resource in one window, which
+   is the promise the sort key was chosen for in M0 and which nothing has yet collected
+   into a screen. Alerting on a trace percentile belongs here too, because a p99 from
+   `service_5m` is an ordinary metric rule once the aggregate exists.
+
+### Carried forward, still true
+
+* **The poller has no lease.** Two pollers against one database would both schedule every
+  device, doubling the load on the fleet and writing each sample twice. One process for
+  now, said out loud in `main.rs`.
+* **An interface that stops appearing is left alone.** Deleting it would orphan the
+  telemetry that references it, and one missed walk is not proof a port was removed.
+  `last_seen` stops advancing; acting on it is a product decision.
+* **Availability is not checked inside the poller binary.** `generic-snmp` asks for ICMP,
+  which needs a privilege this process should not hold by default. The job is scheduled
+  and counted as unsupported rather than silently succeeding — a check that always
+  "passed" would report every device permanently up.
 
 ## M2 acceptance criteria, where they actually stand
 
@@ -669,9 +713,9 @@ because it reads as covered.
 ```bash
 docker compose -f deploy/docker-compose.yml up -d          # postgres + clickhouse
 bash scripts/db.sh migrate && bash scripts/db.sh test      # 22 schema invariants
-bash scripts/ch.sh apply && bash scripts/ch.sh verify      # 6 migrations, 12 golden
+bash scripts/ch.sh apply && bash scripts/ch.sh verify      # 8 migrations, 14 golden
 DATABASE_URL=postgres://uops:uops@localhost:5432/uops   CLICKHOUSE_USER=uops CLICKHOUSE_PASSWORD=uops   bash scripts/serve.sh                                      # http://127.0.0.1:8080
-DATABASE_URL=postgres://uops:uops@localhost:5432/uops   CLICKHOUSE_USER=uops CLICKHOUSE_PASSWORD=uops   cargo test --workspace --all-targets                     # 527, all green
+DATABASE_URL=postgres://uops:uops@localhost:5432/uops   CLICKHOUSE_USER=uops CLICKHOUSE_PASSWORD=uops   cargo test --workspace --all-targets                     # 1 242, all green
 ```
 
 The integration tests need both containers. The unit tests do not, and the workspace
@@ -695,6 +739,10 @@ M1 is where they start.
 | Buyer focus: MSP-first? | credential scoping depth in M1 | My recommendation was MSP-first; your read on Bangladesh/SEA overrides mine |
 | Metrics + rollup ingest cost | M4, not M0 | The one W1 measurement not run |
 | **Many tenants rather than many rules** | a hosted deployment | The alert cycle is measured at 1 000 rules in **one** tenant. The suppression cache is per tenant, so a thousand tenants read a thousand maintenance maps a cycle rather than one — a different constant, and an unmeasured one. `docs/benchmarks/alert-cycle.md` says what it does not cover |
+| **Two M8 measurements** | closing M8 | The granules a `trace_id` lookup reads (§2.2) and the service map join's cost (§2.6). Both are bets that the code makes and the tests do not check: the lookup is *correct* and its cost is assumed. §2.2 sets the standard and says assuming is not enough. Each has a named fallback — a `trace_id`-ordered projection, and a view keyed on `parent_span_id` — so the decision is bounded either way |
+| **`Pipeline::attribute` mints a resource per call on an empty identity** | nothing today | An `ObservedIdentity` with no identifiers goes straight to `create_for`, so a caller that resolved one per request would fill an inventory with them. Found while splitting the OTLP host and service identities; `uops-collector-otlp` routes around it and returns the nil resource instead. No other caller can reach it — syslog always has a source address — but the hazard is in the shared pipeline rather than in the collector that noticed it |
+| **A trace id is shaped exactly like a UUID** | handled, recorded | 32 hex characters is a UUID without its dashes, and the AST's `Value` is `untagged`, so one off the wire deserialises as `Value::Uuid` and would bind as `{p:UUID}` against a `String` column. The compiler now binds by the *column*. Worth keeping visible because it was already wrong for `logs.trace_id`, which has been a `String` since M3 — nothing hit it because there were no spans to look up |
+| **No Docker on the development machine** | the documented bring-up | The hypervisor is off for a nested virtualisation stack, so `docker compose` cannot run here. PostgreSQL runs portable and `ClickHouse` runs in a VM — [`docs/dev-environment.md`](./docs/dev-environment.md). The dev `ClickHouse` is deliberately left on a **non-UTC** timezone, because that is what exposed the `DateTime64(3)` parameter bug that returned an empty window silently |
 | **Tiered storage policy** | deployment profiles | SPEC §M0.6 shows `TTL … TO VOLUME 'warm'/'cold'` against a `tiered` policy that does not exist on a default install — those migrations would fail outright. Retention is a plain `DELETE` TTL for now; tiering is a later migration, written alongside the profile that configures the policy |
 
 ## Decided since the last update
@@ -1400,6 +1448,11 @@ fixing something by hand.
 | [REVIEW.md](./REVIEW.md) | the architecture review gate: what must change before M4, what waits, what still blocks |
 | [RENAME_AUDIT.md](./RENAME_AUDIT.md) | Aegisora → Veyronis, and why the code keeps `uops` |
 | [docs/UI.md](./docs/UI.md) | the UI direction — cockpit, context mode, investigation workspace, 2D/3D topology |
+| [docs/UI-SPEC.md](./docs/UI-SPEC.md) | the UI contract: tokens, the semantic five, what colour may and may not carry |
+| [docs/M5-discovery.md](./docs/M5-discovery.md) | M5's decisions, closed before anything was built |
+| [docs/M7-flow.md](./docs/M7-flow.md) | M7's, including why the decoders are hand-written |
+| [docs/M8-observability.md](./docs/M8-observability.md) | M8's, including the two things in it that turned out to be wrong |
+| [docs/dev-environment.md](./docs/dev-environment.md) | how to run both databases with no Docker, and why the dev `ClickHouse` is not UTC |
 | this file | where we are |
 
 ---
@@ -1418,6 +1471,12 @@ keeping, because each one changed how something is built.
 | M1 core platform | ✅ | API, auth, inventory, telemetry, web shell, 10 000-resource p95 75 ms |
 | M2 NMS | ✅ | all six acceptance criteria met **and measured**, each with a CI mutation guard |
 | M5 device identity, M6 map, OUI | ✅ | taken out of order because they were asked for |
+| M3 logs | ✅ | syslog at ~100 000 msg/s with the drop counter at zero, OTLP, the Explorer, the tail |
+| M4 metrics, dashboards, alerting | ✅ | 1 000 rules in 12.09 s of a 60 s cycle; 20 panels over 30 days in 0.42 s |
+| M5 discovery | ✅ | all 12 criteria — sweep, classify, neighbours, and the scheduler that runs them |
+| M6 topology | ✅ | the graph, impact analysis, and edges that are evidence rather than assertion |
+| M7 flow | ✅ | all 10 criteria — four decoders written by hand, and a fuzzer that found two real panics |
+| M8 observability | 🟡 | 8 of 10; the two open ones are measurements, and each has a named fallback |
 | M3 logs | 🟡 | wire → row is done; the daemon, OTLP and the Explorer are not |
 | M4 dashboards & alerting | ⬜ | |
 
@@ -1451,6 +1510,12 @@ integration suites.
 | **My own documentation was false** | checking the claim against the data | I wrote that a 24-bit-only OUI lookup returns the *wrong* vendor. The data shows zero MA-M/MA-S nesting inside listed MA-L blocks, so it returns *nothing*. The wrong version was the intuitive one, which is why it survived review |
 | **A runaway Python process** | 86 000 s of CPU over 25 hours | an orphan from a malformed heredoc. Heredocs through this shell are now written with a file tool instead |
 | **Two test fixtures had arithmetic errors** | writing the assertions | a framed length off by one, and `<189>` asserted as `error` when it is `notice`. Both mine, both in the tests rather than the code |
+| **Every timestamp parameter was parsed in the server's timezone** | running the suite against a `ClickHouse` that was not UTC | `{p:DateTime64(3)}` takes the *server's* zone; the columns are `DateTime64(3, 'UTC')`. Same bounds, 0 rows against 21. No error — an empty window, during an incident. It had survived because the pinned image runs UTC. The dev instance is now deliberately left on `America/New_York` as a regression detector |
+| **A fuzzer found two panics in its first run** | M7, `tests/fuzz.rs` | `bytes += truncating(slice)` overflowed in both the v9 and IPFIX decoders. Worse than a panic: release builds do not check overflow, so it *wraps* — a byte counter that silently went backwards. The soak runs in debug for that reason |
+| **`service.name` could not be both a host identifier and a service's** | M8, trying to fill `service_id` | `UNIQUE (tenant_id, kind, value)` means an identifier belongs to exactly one resource, so whichever resolved first claimed the name and the other matched it at 0.60 — under the auto-merge bar. Every machine in a fleet would have arrived as a provisional with a review item, from its own traffic. The fix is two identities; the test that catches it is the one asserting the review queue is **empty** |
+| **A service map that trusted a span id would have crossed tenants** | writing the join | A span id is eight bytes chosen by whoever instrumented the application, so a tenant can pick one that collides with another's deliberately. The join's parent side carries its own tenant predicate, and the adversarial test writes that collision from both directions |
+| **§2.6 was wrong about where the map comes from** | building it | It said the map is computed from the aggregate. `service_5m` groups per service per operation, which throws the parent away — and an edge is a relationship between two *rows*. Amended in the document rather than worked around in the code |
+| **Stale tests that passed for the wrong reason** | M8 landing | Three tests used "a trace query" as their example of something the compiler refuses. M8 made trace queries legal, so all three would have kept passing while asserting nothing. They now name a logs column on a trace query, which is still refused and still for a reason |
 
 The pattern that catches most of these: implement → test against real infrastructure →
 **mutate the code and require the suite to fail** → add that mutation as a CI guard.
