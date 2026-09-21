@@ -512,6 +512,14 @@ select {
   color: var(--text-dim);
 }
 
+/* A numeric cell. Right-aligned so that magnitudes line up down the column: "4.2 MB"
+   above "15 MB" reads as smaller only when the units share an edge. Paired with `.mono`
+   at every call site, which is what makes the digits the same width. */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .nav {
   grid-area: nav;
   padding: 12px 8px;

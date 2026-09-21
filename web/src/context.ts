@@ -107,6 +107,7 @@ const UNSCOPED: { prefix: string; because: string }[] = [
   // which is the lie §13.3 exists to prevent, and it does not become less of a lie
   // because the reason for it is that we have not finished.
   { prefix: "/topology", because: "the topology view is still the whole tenant's graph" },
+  { prefix: "/flow", because: "flow is grouped by exporter, and narrowing it is not wired yet" },
   { prefix: "/alerts", because: "the alert list is not yet narrowed by resource" },
   { prefix: "/alerts/rules", because: "a rule's own selector decides what it watches" },
   { prefix: "/alerts/channels", because: "channels belong to the tenant" },

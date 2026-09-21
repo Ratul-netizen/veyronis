@@ -79,7 +79,7 @@ const TEXT_MODES: { value: TextMode; label: string; hint: string }[] = [
  * columns in `logs` and `events`, so grouping on them reads a column rather than parsing
  * a map.
  */
-const SIDEBAR: Record<Signal, { label: string; field: Field }[]> = {
+const SIDEBAR: Partial<Record<Signal, { label: string; field: Field }[]>> = {
   log: [
     { label: "Severity", field: { field: "severity" } },
     { label: "Source", field: { field: "source_kind" } },

@@ -32,6 +32,7 @@ import { createRoot } from "react-dom/client";
 import { ApiError, api } from "./api";
 import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
+import { FlowPage } from "./flowpage";
 import { OverviewPage } from "./overview";
 import { LoginPage } from "./pages";
 import { AlertsPage, ChannelsPage, RulesPage } from "./alerts";
@@ -131,6 +132,12 @@ const mapRoute = createRoute({
   component: MapPage,
 });
 
+const flowRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/flow",
+  component: FlowPage,
+});
+
 const exploreRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/explore",
@@ -203,6 +210,7 @@ const routeTree = rootRoute.addChildren([
     mapRoute,
     resourcesRoute,
     resourceRoute,
+    flowRoute,
     exploreRoute,
     alertsRoute,
     rulesRoute,

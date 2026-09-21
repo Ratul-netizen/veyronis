@@ -13,9 +13,16 @@
 
 import { ApiError, request } from "./api";
 
-export type Signal = "metric" | "log" | "event" | "state";
+export type Signal = "metric" | "log" | "event" | "state" | "flow";
 
-/** The signals the Explorer offers. `trace` and `flow` are deferred — SPEC §M0.5. */
+/**
+ * The signals the Explorer offers.
+ *
+ * Flow is deliberately not among them. It is a signal the AST can carry and the planner
+ * can answer, but the Explorer's controls — severity, a text search over a body — are
+ * built for records with a message in them, and a flow has none. Flow has its own screen
+ * because it has its own questions. `trace` is still deferred, SPEC §M0.5.
+ */
 export const SIGNALS: { value: Signal; label: string }[] = [
   { value: "log", label: "Logs" },
   { value: "event", label: "Events" },
@@ -37,6 +44,15 @@ export type Field =
   | { field: "value" }
   | { field: "resource_id" }
   | { field: "observed_at" }
+  // Flows only. Mirrors `uops_query::ast::Field`, which grew these in M7.
+  | { field: "src_address" }
+  | { field: "dst_address" }
+  | { field: "src_port" }
+  | { field: "dst_port" }
+  | { field: "protocol" }
+  | { field: "bytes" }
+  | { field: "packets" }
+  | { field: "sampling_rate" }
   | { field: "attr"; key: string }
   | { field: "time_bucket"; seconds: number };
 
