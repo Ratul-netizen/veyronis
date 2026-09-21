@@ -210,6 +210,60 @@ pub struct FlowRow {
     pub attributes: std::collections::BTreeMap<String, String>,
 }
 
+/// One row of `spans` — one span, which is not one trace.
+///
+/// Mirrors `ch-migrations/0008_spans.sql` column for column. The two that carry the
+/// decisions are worth reading before the rest:
+///
+/// * **`resource_id` is the host and `service_id` is the service.** M8 §2.1: a span has
+///   both subjects, the sort key leads with the host so that a span sits beside that
+///   machine's logs and metrics, and the service is reached through `service_5m`.
+/// * **`sampling_probability` is stored and never applied.** §2.3: flow could multiply
+///   its counts up because sFlow states its rate; tracing cannot, because an unsampled
+///   span is simply absent. A screen may show this; nothing may extrapolate from it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpanRow {
+    pub tenant_id: TenantId,
+    /// The host the span ran on.
+    pub resource_id: ResourceId,
+    /// The service whose work it was. Nil when the payload named none.
+    pub service_id: ResourceId,
+    pub site_id: SiteId,
+
+    /// When the span *started* — a span is an interval and `duration_ns` measures from
+    /// here.
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub observed_at: DateTime<Utc>,
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub ingested_at: DateTime<Utc>,
+
+    pub trace_id: String,
+    pub span_id: String,
+    /// Empty for a root span, which is how a trace's entry point is recognised.
+    pub parent_span_id: String,
+    /// The operation.
+    pub name: String,
+    /// `server`, `client`, `internal`, `producer` or `consumer`.
+    pub kind: String,
+    pub duration_ns: u64,
+    /// `unset`, `ok` or `error`. `unset` is the default and is not a failure.
+    pub status_code: String,
+    pub status_message: String,
+
+    /// What the exporter said it sampled at, or 0 for "it did not say".
+    pub sampling_probability: f32,
+
+    /// The instrumentation library.
+    pub scope_name: String,
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
 /// One row of `states` — an availability or status transition.
 ///
 /// Written on a *change*, never on every check. A device polled every 30 seconds for a

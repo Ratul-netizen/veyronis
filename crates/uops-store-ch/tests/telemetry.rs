@@ -20,7 +20,7 @@ use uops_query::{
 };
 use uops_store_ch::{
     ChClient, ChConfig, ChStore, FlowRow, FlowStore, LogRow, LogStore, MetricRow, MetricStore,
-    TelemetryStore,
+    SpanRow, TelemetryStore, TraceStore,
 };
 
 fn store() -> ChStore {
@@ -81,7 +81,8 @@ fn window_start() -> chrono::DateTime<Utc> {
 
 /// The shortest retention any table these fixtures write to has.
 ///
-/// `flows` is 7 days, `metrics` 30, and `logs`, `events` and the pre-aggregates 365 or
+/// `flows` and `spans` are 7 days, `metrics` 30, and `logs`, `events` and the
+/// pre-aggregates 365 or
 /// more. The shortest one is what binds, because a fixture outside it is removed from
 /// that table and left in the others — which is precisely the half-present state that
 /// made this hard to see. Keep it in step with `ch-migrations/`.
@@ -1104,5 +1105,352 @@ async fn the_aggregate_keeps_differently_sampled_traffic_apart() {
     assert_eq!(
         scalar(&format!("SELECT sum(bytes * sampling_rate) {where_tenant}")).await,
         "10000100"
+    );
+}
+
+// --- spans, M8 -------------------------------------------------------------------
+//
+// The same seam as the flow block above, for the same reason: the rows go in through
+// `SpanRow` rather than hand-written JSON, so a column renamed in `ch-migrations/` and
+// not here fails on the ingestion path in this file instead of in production.
+//
+// `SignalType::Trace` still compiles to a refusal, so these read through raw SQL too.
+
+#[allow(clippy::too_many_arguments)]
+fn span(
+    tenant: TenantId,
+    host: ResourceId,
+    service: ResourceId,
+    name: &str,
+    status: &str,
+    duration_ns: u64,
+    trace: &str,
+    parent: &str,
+) -> SpanRow {
+    SpanRow {
+        tenant_id: tenant,
+        resource_id: host,
+        service_id: service,
+        site_id: SiteId::nil(),
+        observed_at: window().start + Duration::seconds(10),
+        ingested_at: window().start + Duration::seconds(11),
+        trace_id: trace.to_owned(),
+        span_id: format!("{duration_ns:016x}"),
+        parent_span_id: parent.to_owned(),
+        name: name.to_owned(),
+        kind: "server".to_owned(),
+        duration_ns,
+        status_code: status.to_owned(),
+        status_message: String::new(),
+        sampling_probability: 0.0,
+        scope_name: "io.opentelemetry.grpc".to_owned(),
+        attributes: BTreeMap::new(),
+    }
+}
+
+#[tokio::test]
+async fn a_span_goes_in_and_comes_back_out() {
+    let store = store();
+    let tenant = TenantId::new();
+    let host = ResourceId::new();
+    let service = ResourceId::new();
+
+    let mut row = span(
+        tenant,
+        host,
+        service,
+        "GET /checkout",
+        "error",
+        12_000_000,
+        &"4b".repeat(16),
+        "",
+    );
+    row.status_message = "upstream timeout".to_owned();
+    row.sampling_probability = 1.0 / 1024.0;
+    row.attributes
+        .insert("http.route".to_owned(), "/checkout".to_owned());
+
+    store.insert_spans(&[row]).await.unwrap();
+
+    // §2.1 read back as one string: the host and the service are *different* columns and
+    // a row that conflated them would show the same id twice.
+    let got = scalar(&format!(
+        "SELECT concat(toString(resource_id), '|', toString(service_id), '|', name, '|', \
+         status_code, '|', status_message, '|', toString(duration_ns), '|', \
+         toString(sampling_probability), '|', scope_name, '|', attributes['http.route']) \
+         FROM spans WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+
+    assert_eq!(
+        got,
+        format!(
+            "{host}|{service}|GET /checkout|error|upstream timeout|12000000|\
+             0.0009765625|io.opentelemetry.grpc|/checkout"
+        )
+    );
+}
+
+#[tokio::test]
+async fn one_service_on_two_hosts_is_one_service() {
+    // §2.1's whole reason for two columns. The aggregate is keyed on the service, so
+    // "the checkout service's p99" spans both machines without a scan — and the raw rows
+    // still sit beside each host's own logs and metrics.
+    let store = store();
+    let tenant = TenantId::new();
+    let service = ResourceId::new();
+
+    store
+        .insert_spans(&[
+            span(
+                tenant,
+                ResourceId::new(),
+                service,
+                "GET /checkout",
+                "unset",
+                1_000_000,
+                &"01".repeat(16),
+                "",
+            ),
+            span(
+                tenant,
+                ResourceId::new(),
+                service,
+                "GET /checkout",
+                "unset",
+                2_000_000,
+                &"02".repeat(16),
+                "",
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let got = scalar(&format!(
+        "SELECT concat(toString(uniqExact(resource_id)), '/', toString(uniqExact(service_id))) \
+         FROM spans WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+    assert_eq!(got, "2/1", "two hosts, one service");
+}
+
+#[tokio::test]
+async fn the_aggregate_counts_only_error_as_a_failure() {
+    // The decision `0008_spans.sql` exists to make, and the one that would quietly ruin
+    // every error rate in the product. `unset` is OTel's default and is what a healthy
+    // span carries when nobody said otherwise; counting it as a failure would show every
+    // service at a 100% error rate, and calling it `ok` would erase the difference
+    // between "it succeeded" and "nobody checked".
+    let store = store();
+    let tenant = TenantId::new();
+    let service = ResourceId::new();
+    let host = ResourceId::new();
+
+    store
+        .insert_spans(&[
+            span(
+                tenant,
+                host,
+                service,
+                "op",
+                "unset",
+                1_000_000,
+                &"aa".repeat(16),
+                "",
+            ),
+            span(
+                tenant,
+                host,
+                service,
+                "op",
+                "ok",
+                2_000_000,
+                &"bb".repeat(16),
+                "",
+            ),
+            span(
+                tenant,
+                host,
+                service,
+                "op",
+                "error",
+                3_000_000,
+                &"cc".repeat(16),
+                "",
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let got = scalar(&format!(
+        "SELECT concat(toString(sum(requests)), '/', toString(sum(errors))) \
+         FROM service_5m WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+    assert_eq!(got, "3/1");
+}
+
+#[tokio::test]
+async fn a_percentile_survives_the_aggregate() {
+    // §2.4: a p99 cannot be summed, averaged or re-bucketed, so the column holds a
+    // t-digest *state* and the reader merges it. This is the check that the state really
+    // is mergeable and really does agree with the raw spans — if the view had stored a
+    // number, this would be the test that found out.
+    let store = store();
+    let tenant = TenantId::new();
+    let service = ResourceId::new();
+    let host = ResourceId::new();
+
+    let rows: Vec<SpanRow> = (1..=100)
+        .map(|i| {
+            span(
+                tenant,
+                host,
+                service,
+                "op",
+                "unset",
+                i * 1_000_000,
+                &format!("{i:032x}"),
+                "",
+            )
+        })
+        .collect();
+    store.insert_spans(&rows).await.unwrap();
+
+    let merged = scalar(&format!(
+        "SELECT toUInt64(quantilesTDigestMerge(0.5, 0.95, 0.99)(latency)[2]) \
+         FROM service_5m WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+    let raw = scalar(&format!(
+        "SELECT toUInt64(quantileTDigest(0.95)(duration_ns)) \
+         FROM spans WHERE tenant_id = '{tenant}'"
+    ))
+    .await;
+
+    let (merged, raw): (f64, f64) = (merged.parse().unwrap(), raw.parse().unwrap());
+    assert!(
+        (merged - raw).abs() <= raw * 0.01,
+        "a merged p95 of {merged} should agree with the raw {raw} within what a t-digest allows"
+    );
+}
+
+#[tokio::test]
+async fn a_trace_is_retrievable_across_the_hosts_it_ran_on() {
+    // §2.2, and the query the sort key cannot help with: the spans of one trace are
+    // scattered across services on as many hosts, so nothing about
+    // `(tenant, resource, observed_at)` narrows it. The bloom filter on `trace_id` is
+    // what prunes it, and this is the test that the lookup is correct — the *cost* is
+    // §2.2's separate measurement at scale, which a three-row fixture cannot make.
+    let store = store();
+    let tenant = TenantId::new();
+    let trace = "7f".repeat(16);
+    let root = format!("{:016x}", 1_000_000u64);
+
+    store
+        .insert_spans(&[
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "GET /checkout",
+                "unset",
+                1_000_000,
+                &trace,
+                "",
+            ),
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "charge",
+                "unset",
+                2_000_000,
+                &trace,
+                &root,
+            ),
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "SELECT",
+                "unset",
+                3_000_000,
+                &trace,
+                &root,
+            ),
+            // A second trace on the same tenant, to prove the filter is doing something.
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "unrelated",
+                "unset",
+                4_000_000,
+                &"11".repeat(16),
+                "",
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let got = scalar(&format!(
+        "SELECT concat(toString(count()), '/', toString(countIf(parent_span_id = '')), '/', \
+         toString(uniqExact(resource_id))) \
+         FROM spans WHERE tenant_id = '{tenant}' AND trace_id = '{trace}'"
+    ))
+    .await;
+    // Three spans, exactly one root, on three hosts — which is the shape a trace view
+    // needs before it can draw anything.
+    assert_eq!(got, "3/1/3");
+}
+
+#[tokio::test]
+async fn spans_from_one_tenant_are_unreachable_from_another() {
+    // The same adversarial test M7 used, asked of the new table. Tenancy is the one
+    // property that has to hold for every signal, and a table added without it looks
+    // fine until the first shared deployment.
+    let store = store();
+    let victim = TenantId::new();
+    let attacker = TenantId::new();
+    let trace = "9c".repeat(16);
+
+    store
+        .insert_spans(&[span(
+            victim,
+            ResourceId::new(),
+            ResourceId::new(),
+            "secret",
+            "error",
+            5_000_000,
+            &trace,
+            "",
+        )])
+        .await
+        .unwrap();
+
+    // Knowing the trace id exactly — the strongest position an attacker could be in — is
+    // still not enough, because the tenant is the first thing every predicate carries.
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM spans WHERE tenant_id = '{attacker}' AND trace_id = '{trace}'"
+        ))
+        .await,
+        "0"
+    );
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM service_5m WHERE tenant_id = '{attacker}'"
+        ))
+        .await,
+        "0"
+    );
+    assert_eq!(
+        scalar(&format!(
+            "SELECT count() FROM spans WHERE tenant_id = '{victim}' AND trace_id = '{trace}'"
+        ))
+        .await,
+        "1",
+        "and the row really was written, so the zeros above mean something"
     );
 }

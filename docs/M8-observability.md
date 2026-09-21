@@ -180,8 +180,9 @@ what promoting a deferred file is for.
       measured and recorded rather than assumed — §2.2
 - [ ] The logs emitted during a trace are retrievable by joining on `trace_id`, using the
       column that has been populated since M3
-- [ ] A p99 read from `service_5m` over a week agrees with the same p99 computed from raw
+- [x] A p99 read from `service_5m` over a week agrees with the same p99 computed from raw
       spans over an hour of that week, within the tolerance a t-digest allows
+      — `a_percentile_survives_the_aggregate`, against the live server
 - [ ] A span count is never presented as a total; the screen says it is a sample — §2.3
 - [ ] A service map edge appears because a parent span in one service has a child in
       another, and disappears when the calls stop

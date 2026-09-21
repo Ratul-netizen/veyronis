@@ -28,7 +28,7 @@ use uops_query::{Compiled, Query, ResolvedResources, compile, compile_tail};
 
 use crate::client::ChClient;
 use crate::error::{Error, Result};
-use crate::rows::{FlowRow, LogRow, MetricRow, ResultSet, StateRow};
+use crate::rows::{FlowRow, LogRow, MetricRow, ResultSet, SpanRow, StateRow};
 
 /// Reading telemetry.
 #[async_trait]
@@ -82,6 +82,16 @@ pub trait StateStore: TelemetryStore {
 #[async_trait]
 pub trait FlowStore: TelemetryStore {
     async fn insert_flows(&self, rows: &[FlowRow]) -> Result<()>;
+}
+
+/// Writing spans. Declared in M0 alongside `FlowStore`; M8 fills it.
+///
+/// Named for traces and taking spans, which is the distinction SPEC drew in M0 and the
+/// table now matches: a trace is the set of spans sharing a `trace_id`, and is never a
+/// row.
+#[async_trait]
+pub trait TraceStore: TelemetryStore {
+    async fn insert_spans(&self, rows: &[SpanRow]) -> Result<()>;
 }
 
 /// What `/api/v1/health` reports about telemetry storage.
@@ -217,6 +227,14 @@ impl FlowStore for ChStore {
         // `flows_5m` is a materialised view on this table, so it is filled by this
         // insert and never written to directly.
         self.insert("flows", rows).await
+    }
+}
+
+#[async_trait]
+impl TraceStore for ChStore {
+    async fn insert_spans(&self, rows: &[SpanRow]) -> Result<()> {
+        // `service_5m` is filled by the view on this insert, the same way.
+        self.insert("spans", rows).await
     }
 }
 

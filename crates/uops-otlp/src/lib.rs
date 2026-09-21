@@ -34,13 +34,18 @@
 //! the same functions in this file, not a rewrite — and it is a decision about carrying
 //! three more dependencies, which in this project is a decision rather than a default.
 //!
-//! # What is not converted
+//! # Traces, and why they were late
 //!
-//! Traces. SPEC is explicit and the reason is good: *"trace accepts and stores nothing
-//! until M8 — accept and drop with a counter, so instrumented apps don't error."* An
-//! application whose exporter gets a 404 logs an error every batch forever. Accepting and
-//! counting is the difference between "traces are not stored yet" and "the endpoint is
-//! broken", and only one of those is true.
+//! SPEC was explicit that they should be: *"trace accepts and stores nothing until M8 —
+//! accept and drop with a counter, so instrumented apps don't error."* An application
+//! whose exporter gets a 404 logs an error every batch forever, so accepting and counting
+//! was the difference between "traces are not stored yet" and "the endpoint is broken",
+//! and only one of those was true.
+//!
+//! M8 arrived, so [`traces`] is here and the counter can stop. It is the same shape as
+//! [`logs`] with one addition the other two do not have: a span belongs to a **host** and
+//! a **service**, and the caller resolves both. See that module and
+//! `docs/M8-observability.md` §2.1.
 
 use std::collections::BTreeMap;
 
@@ -49,10 +54,11 @@ use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use uops_core::{Identifier, IdentifierKind, ObservedIdentity, semconv};
 use uops_pipeline::Attribution;
-use uops_store_ch::{LogRow, MetricRow};
+use uops_store_ch::{LogRow, MetricRow, SpanRow};
 
 pub mod logs;
 pub mod metrics;
+pub mod traces;
 
 /// What the `source_kind` column says about anything from here.
 pub const SOURCE_KIND: &str = "otlp";
@@ -213,6 +219,7 @@ pub fn hex(bytes: &[u8]) -> String {
 pub struct Converted {
     pub logs: Vec<LogRow>,
     pub metrics: Vec<MetricRow>,
+    pub spans: Vec<SpanRow>,
 }
 
 /// What an attribution is for, restated: the caller resolves, this fills in.
