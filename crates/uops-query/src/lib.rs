@@ -52,6 +52,7 @@ pub mod correlate;
 pub mod error;
 pub mod plan;
 pub mod resolve;
+pub mod servicemap;
 pub mod sql;
 pub mod warning;
 
@@ -64,6 +65,7 @@ pub use correlate::{children_of, trace_logs, trace_spans};
 pub use error::{Error, Result};
 pub use plan::{TableKind, TablePlan};
 pub use resolve::{ResolvedResources, ResourceCatalog, resolve};
+pub use servicemap::{MAX_EDGES, compile_service_map};
 pub use sql::{Param, Sql};
 pub use warning::{QueryWarning, WarningView};
 

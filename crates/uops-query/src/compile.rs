@@ -937,10 +937,10 @@ fn rollup_refuses(func: AggFunc, table: &'static str) -> Error {
 ///
 /// `fmt_ts` renders an instant that is already UTC, so naming UTC here is not a
 /// conversion — it is telling the server what the digits already mean.
-const TS_PARAM: &str = "DateTime64(3, 'UTC')";
+pub(crate) const TS_PARAM: &str = "DateTime64(3, 'UTC')";
 
 /// `ClickHouse` parses a [`TS_PARAM`] from this form.
-fn fmt_ts(t: chrono::DateTime<chrono::Utc>) -> String {
+pub(crate) fn fmt_ts(t: chrono::DateTime<chrono::Utc>) -> String {
     t.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 

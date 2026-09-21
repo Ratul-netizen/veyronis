@@ -176,6 +176,32 @@ That also keeps it honest in the way M6's topology is: the edges are evidence, n
 assertion, and an edge disappears when the calls stop rather than when somebody remembers
 to delete it.
 
+**It is not computed from the aggregate, and this section was wrong to say it would be.**
+`service_5m` groups per service per operation, which throws the parent away — and an edge
+is a relationship between two *rows*. So it is a self-join on `spans`, and because the AST
+has no joins it is a second compiler entry point beside `compile_tail`, which exists for
+the same reason. Growing `JOIN` into the AST would make the planner, the golden files, the
+saved searches and the alert rules all inherit a construct exactly one screen needs.
+
+**The tenant appears twice in that statement, and it is a security property.** A span id is
+eight bytes chosen by whoever instrumented the application, so a tenant can deliberately
+pick one that collides with another tenant's — it costs them nothing and nothing rejects
+it. If the join's right-hand side were not itself restricted to the tenant, that crafted
+id would attach one customer's service to another customer's map. The parent side is
+therefore a subquery carrying its own tenant predicate, and the adversarial test writes
+exactly that collision.
+
+Two things are excluded from the map and both would otherwise mislead. A span whose parent
+is in the *same* service is the service calling itself, which is a flame graph; drawn, it
+is a loop on every node. And every service that did not resolve shares the nil uuid, so
+one node would be the union of all of them — looking like a real service with an
+implausible number of edges.
+
+**The cost is not measured.** A hash join over the window, which is the screen's rather
+than the retention period's; §2.2 sets the standard for claims like this and this does not
+meet it yet. If it disappoints, the answer is a view keyed on `parent_span_id` maintained
+at insert time — and it is not free, because a child can arrive before its parent.
+
 ---
 
 ## 3. Schema
@@ -224,8 +250,9 @@ what promoting a deferred file is for.
       spans over an hour of that week, within the tolerance a t-digest allows
       — `a_percentile_survives_the_aggregate`, against the live server
 - [ ] A span count is never presented as a total; the screen says it is a sample — §2.3
-- [ ] A service map edge appears because a parent span in one service has a child in
-      another, and disappears when the calls stop
+- [x] A service map edge appears because a parent span in one service has a child in
+      another, and disappears when the calls stop — both halves tested against the live
+      server, along with the adversarial case in §2.6 below
 - [x] Spans from tenant A are unreachable from tenant B, by the same adversarial test M7
       used
 - [ ] The suite runs against the live ClickHouse, on a server whose timezone is not UTC

@@ -1750,3 +1750,287 @@ async fn a_resource_scoped_trace_query_reads_the_raw_table() {
     // either table — reading it as `!= 'ok'` would make the other span an error too.
     assert_eq!(count("errors"), 1, "{:?}", result.rows);
 }
+
+// --- the service map, M8 §2.6 -------------------------------------------------------
+
+/// One span with an explicit id, so a test can make a parent of it.
+#[allow(clippy::too_many_arguments)]
+fn linked(
+    tenant: TenantId,
+    service: ResourceId,
+    span_id: &str,
+    parent: &str,
+    name: &str,
+    status: &str,
+    duration_ns: u64,
+    trace: &str,
+) -> SpanRow {
+    let mut row = span(
+        tenant,
+        ResourceId::new(),
+        service,
+        name,
+        status,
+        duration_ns,
+        trace,
+        parent,
+    );
+    span_id.clone_into(&mut row.span_id);
+    row
+}
+
+/// The map's rows as `(from, to, calls, errors)`, whatever shape `ClickHouse` returned
+/// the numbers in.
+fn edges(result: &uops_store_ch::ResultSet) -> Vec<(String, String, u64, u64)> {
+    let number = |i: usize, name: &str| -> u64 {
+        let v = result.value(i, name).unwrap_or_else(|| panic!("{name}"));
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            .unwrap_or_else(|| panic!("{name} is not a count: {v:?}"))
+    };
+    (0..result.len())
+        .map(|i| {
+            (
+                result
+                    .value(i, "from_service")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                result
+                    .value(i, "to_service")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                number(i, "calls"),
+                number(i, "errors"),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn an_edge_exists_because_a_parent_in_one_service_has_a_child_in_another() {
+    // §2.6's acceptance criterion, and the whole of the map: nothing is configured,
+    // nothing is stored, and the edge is what the spans already say.
+    let store = store();
+    let tenant = TenantId::new();
+    let scope = TenantScope::system(tenant);
+    let (web, checkout, database) = (ResourceId::new(), ResourceId::new(), ResourceId::new());
+    let trace = "d0".repeat(16);
+
+    store
+        .insert_spans(&[
+            // web → checkout → database, plus a span checkout makes of itself.
+            linked(
+                tenant,
+                web,
+                "0000000000000001",
+                "",
+                "GET /",
+                "unset",
+                9_000_000,
+                &trace,
+            ),
+            linked(
+                tenant,
+                checkout,
+                "0000000000000002",
+                "0000000000000001",
+                "charge",
+                "unset",
+                5_000_000,
+                &trace,
+            ),
+            linked(
+                tenant,
+                checkout,
+                "0000000000000003",
+                "0000000000000002",
+                "validate",
+                "unset",
+                1_000_000,
+                &trace,
+            ),
+            linked(
+                tenant,
+                database,
+                "0000000000000004",
+                "0000000000000003",
+                "SELECT",
+                "error",
+                2_000_000,
+                &trace,
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let result = store
+        .service_map(&scope, window().start, window().end, 50)
+        .await
+        .unwrap();
+
+    let mut found = edges(&result);
+    found.sort();
+    let mut expected = vec![
+        (web.to_string(), checkout.to_string(), 1, 0),
+        (checkout.to_string(), database.to_string(), 1, 1),
+    ];
+    expected.sort();
+
+    // Two edges, not three: `checkout → checkout` is the service calling itself, which is
+    // a flame graph and drawn on a map would be a loop on every node.
+    assert_eq!(found, expected, "{:?}", result.rows);
+}
+
+#[tokio::test]
+async fn an_edge_disappears_when_the_calls_stop() {
+    // The other half of §2.6, and the reason the map is derived: an edge stops existing
+    // when the calls stop, rather than when somebody remembers to delete it.
+    let store = store();
+    let tenant = TenantId::new();
+    let scope = TenantScope::system(tenant);
+    let (front, back) = (ResourceId::new(), ResourceId::new());
+    let trace = "d1".repeat(16);
+
+    store
+        .insert_spans(&[
+            linked(
+                tenant,
+                front,
+                "0000000000000011",
+                "",
+                "GET /",
+                "unset",
+                9_000_000,
+                &trace,
+            ),
+            linked(
+                tenant,
+                back,
+                "0000000000000012",
+                "0000000000000011",
+                "work",
+                "unset",
+                1_000_000,
+                &trace,
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let present = store
+        .service_map(&scope, window().start, window().end, 50)
+        .await
+        .unwrap();
+    assert_eq!(edges(&present).len(), 1);
+
+    // A later window, in which those services said nothing. No configuration changed and
+    // nothing was deleted; there is simply no evidence in it.
+    let quiet = store
+        .service_map(&scope, window().end, window().end + Duration::hours(1), 50)
+        .await
+        .unwrap();
+    assert!(edges(&quiet).is_empty(), "{:?}", quiet.rows);
+}
+
+#[tokio::test]
+async fn a_crafted_span_id_cannot_attach_one_tenant_to_another() {
+    // The adversarial test the module docs promise, and the reason the tenant predicate
+    // appears twice in the statement.
+    //
+    // A span id is eight bytes chosen by whoever instrumented the application, so a
+    // tenant can pick one that collides with another tenant's deliberately — it costs
+    // nothing and nothing rejects it. A join whose right-hand side was not itself scoped
+    // would read the collision as a parent and draw an edge from the victim's service
+    // into the attacker's.
+    let store = store();
+    let (victim, attacker) = (TenantId::new(), TenantId::new());
+    let (victim_service, attacker_service) = (ResourceId::new(), ResourceId::new());
+    let shared = "00000000000000ff";
+
+    store
+        .insert_spans(&[
+            // The victim's parent span, with an id the attacker will guess.
+            linked(
+                victim,
+                victim_service,
+                shared,
+                "",
+                "GET /",
+                "unset",
+                9_000_000,
+                &"d2".repeat(16),
+            ),
+            // The attacker's child, claiming it as its parent.
+            linked(
+                attacker,
+                attacker_service,
+                "00000000000000fe",
+                shared,
+                "steal",
+                "unset",
+                1_000_000,
+                &"d3".repeat(16),
+            ),
+        ])
+        .await
+        .unwrap();
+
+    for tenant in [victim, attacker] {
+        let scope = TenantScope::system(tenant);
+        let result = store
+            .service_map(&scope, window().start, window().end, 50)
+            .await
+            .unwrap();
+        assert!(
+            edges(&result).is_empty(),
+            "a span id chosen by one tenant must not reach another's map: {:?}",
+            result.rows
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unidentified_service_is_not_drawn_as_a_node() {
+    // Every service that did not resolve carries the nil uuid, so one node would be the
+    // union of all of them — and it would look like a real service with an implausible
+    // number of edges.
+    let store = store();
+    let tenant = TenantId::new();
+    let scope = TenantScope::system(tenant);
+    let known = ResourceId::new();
+    let trace = "d4".repeat(16);
+
+    store
+        .insert_spans(&[
+            linked(
+                tenant,
+                ResourceId::nil(),
+                "0000000000000021",
+                "",
+                "GET /",
+                "unset",
+                9_000_000,
+                &trace,
+            ),
+            linked(
+                tenant,
+                known,
+                "0000000000000022",
+                "0000000000000021",
+                "work",
+                "unset",
+                1_000_000,
+                &trace,
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let result = store
+        .service_map(&scope, window().start, window().end, 50)
+        .await
+        .unwrap();
+    assert!(edges(&result).is_empty(), "{:?}", result.rows);
+}

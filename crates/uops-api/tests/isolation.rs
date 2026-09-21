@@ -326,6 +326,19 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Scoped,
         body: None,
     },
+    // The service map -- M8 §2.6. Scoped, and the interesting attack is not this one: the
+    // statement's join has a *second* tenant predicate on its parent side, because a span
+    // id is chosen by whoever instrumented the application and a tenant can pick one that
+    // collides with another tenant's. That attack needs spans in both tenants and lives
+    // with the rest of the telemetry tests; this case is the header-level check every
+    // route gets.
+    RouteCase {
+        path: "/api/v1/service-map",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     // Discovery -- M5. Every one of these is Scoped, and the second attack is the one
     // that matters here: a discovery job names a customer's networks, and a run records
     // that somebody scanned them. Leaking either across a tenant boundary would hand one

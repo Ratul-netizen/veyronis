@@ -24,7 +24,7 @@
 use async_trait::async_trait;
 use serde::Serialize;
 use uops_core::TenantScope;
-use uops_query::{Compiled, Query, ResolvedResources, compile, compile_tail};
+use uops_query::{Compiled, Query, ResolvedResources, compile, compile_service_map, compile_tail};
 
 use crate::client::ChClient;
 use crate::error::{Error, Result};
@@ -92,6 +92,23 @@ pub trait FlowStore: TelemetryStore {
 #[async_trait]
 pub trait TraceStore: TelemetryStore {
     async fn insert_spans(&self, rows: &[SpanRow]) -> Result<()>;
+
+    /// The service map for one window — M8 §2.6.
+    ///
+    /// One row per ordered pair of services that called each other, with how often, how
+    /// often it failed, and how slow the calls were.
+    ///
+    /// Not a `Query`, because an edge is a relationship between two rows and the AST has
+    /// no joins. See `uops_query::servicemap` for why it is a second entry point rather
+    /// than a new construct in the AST, and for the reason the tenant appears twice in
+    /// the statement.
+    async fn service_map(
+        &self,
+        scope: &TenantScope,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+        limit: u32,
+    ) -> Result<ResultSet>;
 }
 
 /// What `/api/v1/health` reports about telemetry storage.
@@ -235,6 +252,20 @@ impl TraceStore for ChStore {
     async fn insert_spans(&self, rows: &[SpanRow]) -> Result<()> {
         // `service_5m` is filled by the view on this insert, the same way.
         self.insert("spans", rows).await
+    }
+
+    async fn service_map(
+        &self,
+        scope: &TenantScope,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+        limit: u32,
+    ) -> Result<ResultSet> {
+        // The tenant predicates are written by the compiler, from the scope — both of
+        // them. Nothing in this file can produce SQL, which is what makes that hold all
+        // the way to the wire.
+        self.execute(compile_service_map(scope, start, end, limit)?)
+            .await
     }
 }
 

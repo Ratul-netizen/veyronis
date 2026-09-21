@@ -26,7 +26,7 @@ use tower::ServiceExt as _;
 use uops_api::{AppState, CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE, TENANT_HEADER};
 use uops_core::{OrgId, ResourceId, Role, Secret, SiteId, TenantId};
 use uops_secrets::password;
-use uops_store_ch::{ChClient, ChConfig, ChStore, LogRow, LogStore};
+use uops_store_ch::{ChClient, ChConfig, ChStore, LogRow, LogStore, SpanRow, TraceStore};
 use uops_store_pg::{Config, NewResource, PgStore};
 
 fn telemetry() -> ChStore {
@@ -860,4 +860,111 @@ fn bodies(page: &serde_json::Value) -> Vec<String> {
         .iter()
         .map(|row| row[at].as_str().unwrap_or_default().to_owned())
         .collect()
+}
+
+#[tokio::test]
+async fn the_service_map_is_reachable_and_says_its_counts_are_a_sample() {
+    // The route exists so the map is something a client can fetch, and this is the whole
+    // chain: a session proves a role, the compiler writes both tenant predicates from the
+    // scope, ClickHouse runs the join, and the access log records that it happened.
+    //
+    // The field names are part of the assertion. §2.3: a count of spans is a count of
+    // *sampled* spans with an unknown denominator, so `sampled_calls` is named for what
+    // it is — a client cannot render it as a total by accident.
+    let f = fixture("map", Role::Viewer).await;
+
+    let (web, checkout) = (ResourceId::new(), ResourceId::new());
+    let at = window().0 + Duration::seconds(30);
+    let trace = "e0".repeat(16);
+
+    let span = |service: ResourceId, span_id: &str, parent: &str, status: &str| SpanRow {
+        tenant_id: f.tenant,
+        resource_id: ResourceId::new(),
+        service_id: service,
+        site_id: SiteId::nil(),
+        observed_at: at,
+        ingested_at: at,
+        trace_id: trace.clone(),
+        span_id: span_id.to_owned(),
+        parent_span_id: parent.to_owned(),
+        name: "op".to_owned(),
+        kind: "server".to_owned(),
+        duration_ns: 4_000_000,
+        status_code: status.to_owned(),
+        status_message: String::new(),
+        sampling_probability: 0.0,
+        scope_name: String::new(),
+        attributes: BTreeMap::new(),
+    };
+
+    f.telemetry
+        .insert_spans(&[
+            span(web, "00000000000000e1", "", "unset"),
+            span(checkout, "00000000000000e2", "00000000000000e1", "error"),
+        ])
+        .await
+        .expect("spans");
+
+    let (start, end) = window();
+    let request = Request::builder()
+        .method("GET")
+        // `Z`, not `+00:00`. A `+` in a URL query is a space, so an offset-form timestamp
+        // arrives at the server with a hole in it and the route answers 400 — which is
+        // correct of it, and took a minute to see.
+        .uri(format!(
+            "/api/v1/service-map?start={}&end={}",
+            start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            end.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        ))
+        .header(
+            header::COOKIE,
+            format!("{SESSION_COOKIE}={}; {CSRF_COOKIE}={}", f.session, f.csrf),
+        )
+        .header(TENANT_HEADER, f.tenant.to_string())
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = f.call(request).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let edges = body["edges"].as_array().expect("edges");
+    assert_eq!(edges.len(), 1, "{body}");
+    assert_eq!(edges[0]["from"], web.to_string());
+    assert_eq!(edges[0]["to"], checkout.to_string());
+    assert_eq!(edges[0]["sampled_calls"], 1);
+    assert_eq!(edges[0]["sampled_errors"], 1);
+    assert_eq!(body["truncated"], false);
+
+    // The window is echoed, because a caller that named neither end gets the default and
+    // should be able to see which one it read.
+    assert!(
+        body["start"].is_string() && body["end"].is_string(),
+        "{body}"
+    );
+
+    let log = f.access_log().await;
+    assert!(
+        log.iter().any(|(action, _, _)| action == "service_map.get"),
+        "{log:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_service_map_needs_no_csrf_token_because_it_is_a_get() {
+    // The query endpoint is a POST and therefore carries one. This is a GET: there is no
+    // state to change and no cookie-authenticated write to forge, so requiring a token
+    // would be ceremony that teaches nobody anything.
+    let f = fixture("map-csrf", Role::Viewer).await;
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/service-map")
+        .header(header::COOKIE, format!("{SESSION_COOKIE}={}", f.session))
+        .header(TENANT_HEADER, f.tenant.to_string())
+        .body(Body::empty())
+        .unwrap();
+
+    let (status, body) = f.call(request).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // And with no window named it reads the default one rather than everything.
+    assert!(body["start"].is_string(), "{body}");
 }

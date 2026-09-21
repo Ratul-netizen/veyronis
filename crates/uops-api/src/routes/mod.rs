@@ -19,6 +19,7 @@ pub mod maintenance;
 pub mod query;
 pub mod resources;
 pub mod searches;
+pub mod servicemap;
 pub mod sites;
 pub mod topology;
 
@@ -138,6 +139,11 @@ pub fn router(state: AppState) -> Router {
         // wired. Read-only: edges come from a device naming its neighbour, not from
         // anybody drawing a line.
         .route("/api/v1/topology", get(topology::get))
+        // The service map -- M8 §2.6. The same posture as the topology above and for the
+        // same reason: the edges are evidence rather than assertion, so there is nothing
+        // to write. A GET rather than a POST because a window and a limit fit in a URL,
+        // which the query AST does not.
+        .route("/api/v1/service-map", get(servicemap::get))
         // Finding devices -- M5. Reading is Viewer; writing a job or dismissing a
         // candidate is Operator, because a discovery job is an instruction to send
         // packets across somebody's network and the ranges describe their estate.
