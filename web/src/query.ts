@@ -13,7 +13,7 @@
 
 import { ApiError, request } from "./api";
 
-export type Signal = "metric" | "log" | "event" | "state" | "flow";
+export type Signal = "metric" | "log" | "event" | "state" | "flow" | "trace";
 
 /**
  * The signals the Explorer offers.
@@ -51,6 +51,15 @@ export type Field =
   | { field: "value" }
   | { field: "resource_id" }
   | { field: "observed_at" }
+  // Traces only. Mirrors `uops_query::ast::Field`, which grew these in M8. `errors` is
+  // the derived one: `status_code = 'error'` on raw spans, a stored column on the
+  // aggregate, and the same question on either.
+  | { field: "service_id" }
+  | { field: "span_name" }
+  | { field: "duration_ns" }
+  | { field: "status_code" }
+  | { field: "trace_id" }
+  | { field: "errors" }
   // Flows only. Mirrors `uops_query::ast::Field`, which grew these in M7.
   | { field: "src_address" }
   | { field: "dst_address" }
@@ -73,8 +82,15 @@ export type Expr =
   | { op: "text"; field: Field; mode: TextMode; terms: string[] }
   | { op: "exists"; field: Field };
 
-/** The aggregate functions the Explorer asks for. The Rust AST has more. */
-export type AggFunc = "count" | "sum" | "avg" | "min" | "max";
+/**
+ * The aggregate functions this app asks for. The Rust AST has one more —
+ * `count_distinct` — and nothing here builds it.
+ *
+ * The percentiles are the services screen's, and they are fixed at these three because
+ * the `service_5m` column's *type* declares them: `quantilesTDigest(0.5, 0.95, 0.99)`.
+ * A p90 is not a missing feature, it is a number the stored state does not contain.
+ */
+export type AggFunc = "count" | "sum" | "avg" | "min" | "max" | "p50" | "p95" | "p99";
 
 export interface Aggregation {
   func: AggFunc;

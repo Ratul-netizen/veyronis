@@ -40,7 +40,13 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       { to: "/map", label: "Map" },
     ],
   },
-  { heading: "Observability", items: [{ to: "/explore", label: "Explore" }] },
+  {
+    heading: "Observability",
+    items: [
+      { to: "/explore", label: "Explore" },
+      { to: "/services", label: "Services" },
+    ],
+  },
   {
     heading: "Operations",
     items: [

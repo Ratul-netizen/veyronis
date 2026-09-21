@@ -108,6 +108,10 @@ const UNSCOPED: { prefix: string; because: string }[] = [
   // because the reason for it is that we have not finished.
   { prefix: "/topology", because: "the topology view is still the whole tenant's graph" },
   { prefix: "/flow", because: "flow is grouped by exporter, and narrowing it is not wired yet" },
+  // Not "not wired yet": a service runs on many hosts and `service_5m` has no
+  // `resource_id` at all, so narrowing by resource would move the query onto raw spans
+  // and answer a different question — M8 §2.1.
+  { prefix: "/services", because: "a service runs on many hosts, so this is the tenant's" },
   { prefix: "/alerts", because: "the alert list is not yet narrowed by resource" },
   { prefix: "/alerts/rules", because: "a rule's own selector decides what it watches" },
   { prefix: "/alerts/channels", because: "channels belong to the tenant" },

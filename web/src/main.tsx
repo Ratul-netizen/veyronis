@@ -33,6 +33,7 @@ import { ApiError, api } from "./api";
 import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
+import { ServicesPage } from "./servicespage";
 import { OverviewPage } from "./overview";
 import { LoginPage } from "./pages";
 import { AlertsPage, ChannelsPage, RulesPage } from "./alerts";
@@ -138,6 +139,12 @@ const flowRoute = createRoute({
   component: FlowPage,
 });
 
+const servicesRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/services",
+  component: ServicesPage,
+});
+
 const exploreRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/explore",
@@ -211,6 +218,7 @@ const routeTree = rootRoute.addChildren([
     resourcesRoute,
     resourceRoute,
     flowRoute,
+    servicesRoute,
     exploreRoute,
     alertsRoute,
     rulesRoute,

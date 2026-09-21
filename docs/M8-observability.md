@@ -122,6 +122,13 @@ not.** A p99 over sampled spans is a good estimate of the p99 over all spans; a 
 sampled spans is a fraction of the truth with an unknown denominator. Screens may present
 the first as a measurement and must present the second as a sample.
 
+**A failure rate sits between the two, and the screen says so.** A ratio of two sampled
+counts estimates the true ratio only if the sampling did not care which spans failed. Head
+sampling does not care. Tail samplers routinely keep every error on purpose — it is the
+sensible thing for them to do — and under one of those the rate reads high, sometimes
+much too high. Nothing in the payload says which was used, so there is no correction to
+apply and the honest move is to name the caveat rather than invent one.
+
 ### 2.4 Raw spans keep days; the service aggregate keeps the long window.
 
 The `flows` lesson, unchanged and for the same reason. `ch-migrations/deferred/traces.sql`
@@ -249,7 +256,10 @@ what promoting a deferred file is for.
 - [x] A p99 read from `service_5m` over a week agrees with the same p99 computed from raw
       spans over an hour of that week, within the tolerance a t-digest allows
       — `a_percentile_survives_the_aggregate`, against the live server
-- [ ] A span count is never presented as a total; the screen says it is a sample — §2.3
+- [x] A span count is never presented as a total; the screen says it is a sample — §2.3.
+      Carried by the *names* as well as the copy: `sampled_calls` on the wire,
+      `sampledRequests` in the client, and a test that asserts the field names, because a
+      field called `requests` is one a component renders as a total without deciding to
 - [x] A service map edge appears because a parent span in one service has a child in
       another, and disappears when the calls stop — both halves tested against the live
       server, along with the adversarial case in §2.6 below
@@ -269,6 +279,12 @@ this was written.
 auto-instrumentation. An application is instrumented by its own team with the vendor's SDK,
 and a monitoring product that insists on its own agent is one that gets refused at the
 first security review.
+
+**A trace waterfall.** `uops_query::correlate` builds the queries — the spans of one
+trace, the logs emitted during it, the children of one span — and `GET /api/v1/query`
+runs them, but no screen draws the tree yet. The Services screen answers *which service*;
+the view that answers *what was this one request waiting for* is the next piece of UI and
+needs nothing new from the backend.
 
 **Trace-based alerting.** M9 territory. Alerting on a p99 from `service_5m` is an ordinary
 metric rule once the aggregate exists, and that is where it belongs.
