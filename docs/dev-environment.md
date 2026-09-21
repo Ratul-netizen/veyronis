@@ -24,6 +24,30 @@ bash scripts/db.sh migrate
 Trust auth, loopback only, user `uops`. Development defaults, deliberately obvious — the
 same argument `deploy/docker-compose.yml` makes about its own.
 
+### The schema tests need `psql` directly
+
+`bash scripts/db.sh test` runs `migrations/tests/invariants.sql` through
+`docker compose exec`, so it cannot work here. The portable install ships the client:
+
+```bash
+PSQL=pgtmp/x/pgsql/bin/psql.exe
+"$PSQL" "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/tests/invariants.sql
+```
+
+**Run it against a scratch database, not the dev one.** Two of the invariants insert
+fixtures and assert on what comes back, so they fail against a database that has
+accumulated rows from interrupted integration tests — which is the contamination item
+STATUS.md has been carrying since M2. A clean run is three commands:
+
+```bash
+"$PSQL" "postgres://uops@127.0.0.1:5432/postgres" -tAc "CREATE DATABASE uops_inv OWNER uops"
+DATABASE_URL="postgres://uops@127.0.0.1:5432/uops_inv" sqlx migrate run --source migrations
+"$PSQL" "postgres://uops@127.0.0.1:5432/uops_inv" -v ON_ERROR_STOP=1 -f migrations/tests/invariants.sql
+```
+
+It caught a real defect in migration 0021 that way: a composite `ON DELETE SET NULL` that
+would have nulled `tenant_id`.
+
 ---
 
 ## ClickHouse — a Linux VM
