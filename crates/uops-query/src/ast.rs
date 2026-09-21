@@ -164,6 +164,30 @@ pub enum Field {
     Bytes,
     /// Flows only, as observed.
     Packets,
+    /// Traces only. The service whose work the span is — M8 §2.1, and **not** the same
+    /// thing as `resource_id`, which is the host it ran on.
+    ServiceId,
+    /// Traces only. The operation: `GET /checkout`, `SELECT`.
+    SpanName,
+    /// Traces only: `server`, `client`, `internal`, `producer` or `consumer`.
+    SpanKind,
+    /// Traces only. End minus start, in nanoseconds.
+    DurationNs,
+    /// Traces only: `unset`, `ok` or `error`. `unset` is the default and is not a failure.
+    StatusCode,
+    /// Traces only. Empty on a root span, which is how a trace's entry point is found.
+    ParentSpanId,
+    /// Traces only. The instrumentation library.
+    ScopeName,
+    /// Traces only, and derived rather than stored: 1 when a span failed, 0 otherwise.
+    ///
+    /// A field rather than a filter because it has to survive the pre-aggregate. On raw
+    /// spans it is `status_code = 'error'`; on `service_5m` it is the `errors` column the
+    /// materialised view maintains, and `sum` of it means the same thing on both. Without
+    /// it that column is unreachable through the AST and every error rate in the product
+    /// would have to scan raw spans.
+    Errors,
+
     /// Flows only. One in how many packets was sampled.
     ///
     /// Stored beside the counts rather than applied to them, so a caller that wants an
@@ -223,6 +247,14 @@ impl Field {
             Self::Bytes => "bytes".into(),
             Self::Packets => "packets".into(),
             Self::SamplingRate => "sampling_rate".into(),
+            Self::ServiceId => "service_id".into(),
+            Self::SpanName => "name".into(),
+            Self::SpanKind => "kind".into(),
+            Self::DurationNs => "duration_ns".into(),
+            Self::StatusCode => "status_code".into(),
+            Self::ParentSpanId => "parent_span_id".into(),
+            Self::ScopeName => "scope_name".into(),
+            Self::Errors => "errors".into(),
             Self::Attr { key } => format!("attributes[{key}]"),
             Self::TimeBucket { seconds } => format!("time_bucket({seconds}s)"),
             Self::Rate => "rate".into(),

@@ -34,6 +34,13 @@ pub const FIVE_MINUTE_SPAN: chrono::TimeDelta = chrono::TimeDelta::days(30);
 /// like a month.
 pub const RAW_FLOW_SPAN: chrono::TimeDelta = chrono::TimeDelta::days(7);
 
+/// Longest window still answered from raw spans.
+///
+/// Seven days, which is `spans`' TTL in `ch-migrations/0008_spans.sql` — the same number
+/// `flows` has and for the same reason M8 §2.4 gives: raw spans answer *"show me this
+/// trace"*, which is an investigation and therefore recent.
+pub const RAW_SPAN_SPAN: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
 /// The bucket width of `logs_counts_5m` and `metrics_5m`. A histogram finer than this
 /// cannot be served from them.
 pub const PREAGGREGATE_BUCKET_SECONDS: u32 = 300;
@@ -52,6 +59,16 @@ pub enum TableKind {
     /// `SimpleAggregateFunction(sum)` rather than aggregate states, so a reader writes
     /// `sum(bytes)` and never `sumMerge(bytes)`.
     FlowAggregate,
+    /// `service_5m` — requests, errors and a latency state per service per operation.
+    ///
+    /// Both of the other two at once, which is why it is its own kind: `requests` and
+    /// `errors` are `SimpleAggregateFunction(sum)` and read with a plain `sum`, while
+    /// `latency` is an `AggregateFunction` state and read with a merge.
+    ///
+    /// It is also the only pre-aggregate with **no `resource_id`**. M8 §2.1 ordered it
+    /// service-first because every question it answers starts with a service, and the
+    /// host is simply not in it — see [`serves_from_service_5m`].
+    ServiceAggregate,
 }
 
 /// Which table, and the handful of facts codegen needs about its shape.
@@ -78,10 +95,22 @@ pub(crate) enum Col {
     Attr { map: &'static str, key: String },
     /// `toStartOfInterval` over the plan's time column.
     Bucket { seconds: u32, base: &'static str },
+    /// A fixed SQL expression standing in for a column that is not stored.
+    ///
+    /// `&'static str` and nothing else, for the same reason [`Col::Plain`] is: this is
+    /// emitted verbatim, so it must never be able to carry caller text. The only one so
+    /// far is `Field::Errors`, which is a column on the aggregate and a comparison on the
+    /// raw table.
+    Expr(&'static str),
 }
 
 /// Pick the table, and say what was given up to get there.
-pub(crate) fn plan(q: &Query) -> Result<(TablePlan, Vec<QueryWarning>)> {
+///
+/// `whole_tenant` is whether the query's resource selector resolved to everything. It
+/// matters to exactly one table — `service_5m`, which has no `resource_id` column at all —
+/// and the alternative was letting the compiler emit `resource_id IN (…)` against a table
+/// that does not have it.
+pub(crate) fn plan(q: &Query, whole_tenant: bool) -> Result<(TablePlan, Vec<QueryWarning>)> {
     let mut warnings = Vec::new();
 
     let base = |table: &'static str, attr_map: &'static str| TablePlan {
@@ -94,7 +123,35 @@ pub(crate) fn plan(q: &Query) -> Result<(TablePlan, Vec<QueryWarning>)> {
     };
 
     let plan = match q.signal {
-        SignalType::Trace => return Err(Error::Unsupported("trace queries (M8)")),
+        SignalType::Trace => {
+            if serves_from_service_5m(q, whole_tenant) {
+                if q.time.span() > RAW_SPAN_SPAN {
+                    warnings.push(QueryWarning::Downsampled {
+                        table: "service_5m".into(),
+                        bucket_seconds: PREAGGREGATE_BUCKET_SECONDS,
+                    });
+                }
+                TablePlan {
+                    table: "service_5m",
+                    kind: TableKind::ServiceAggregate,
+                    signal: q.signal,
+                    time_col: "bucket",
+                    attr_map: "attributes",
+                    stored_bucket_seconds: PREAGGREGATE_BUCKET_SECONDS,
+                }
+            } else {
+                // The flow rule, unchanged: a window past what raw keeps is answered and
+                // said out loud, because a truncated answer the caller knows about beats
+                // no answer — and beats one that looks complete.
+                if q.time.span() > RAW_SPAN_SPAN {
+                    warnings.push(QueryWarning::BeyondRetention {
+                        table: "spans".into(),
+                        days: RAW_SPAN_SPAN.num_days(),
+                    });
+                }
+                base("spans", "attributes")
+            }
+        }
         SignalType::Flow => {
             if serves_from_flows_5m(q) {
                 if q.time.span() > RAW_FLOW_SPAN {
@@ -213,9 +270,21 @@ fn serves_from_log_counts(q: &Query) -> bool {
 /// the thing they did not choose and cannot see.
 fn preaggregate_column(f: &Field, p: &TablePlan) -> Result<Col> {
     match (p.kind, f) {
-        (_, Field::ResourceId) => Ok(Col::Plain("resource_id")),
+        // Not `(_, ResourceId)`: `service_5m` is keyed by service and has no host column,
+        // so the blanket arm would have compiled to SQL naming a column that is not there.
+        (
+            TableKind::LogCounts | TableKind::MetricRollup | TableKind::FlowAggregate,
+            Field::ResourceId,
+        ) => Ok(Col::Plain("resource_id")),
         (TableKind::LogCounts, Field::Severity) => Ok(Col::Plain("severity")),
         (TableKind::MetricRollup, Field::Metric) => Ok(Col::Plain("metric")),
+
+        // Exactly what `0008_spans.sql` gave `service_5m`. `errors` is absent here on
+        // purpose: it is only ever an aggregation's field, and the compiler reads it
+        // straight off the stored column without asking for a reference to it.
+        (TableKind::ServiceAggregate, Field::ServiceId) => Ok(Col::Plain("service_id")),
+        (TableKind::ServiceAggregate, Field::SpanName) => Ok(Col::Plain("name")),
+        (TableKind::ServiceAggregate, Field::SpanKind) => Ok(Col::Plain("kind")),
 
         // Exactly the columns `0007_flows.sql` gave `flows_5m`, and no others.
         // `src_port` is deliberately absent — it is ephemeral, and the aggregate drops it
@@ -275,6 +344,94 @@ fn flow_column(f: &Field, signal: SignalType) -> Option<Col> {
         Field::Packets => Col::Plain("packets"),
         Field::SamplingRate => Col::Plain("sampling_rate"),
         _ => return None,
+    })
+}
+
+/// The `spans` column a trace-only field names, on a trace query.
+///
+/// `None` on any other signal, which the caller turns into the same `FieldNotAvailable`
+/// every other mismatched field gets.
+fn span_column(f: &Field, signal: SignalType) -> Option<Col> {
+    if signal != SignalType::Trace {
+        return None;
+    }
+    Some(match f {
+        Field::ServiceId => Col::Plain("service_id"),
+        Field::SpanName => Col::Plain("name"),
+        Field::SpanKind => Col::Plain("kind"),
+        Field::DurationNs => Col::Plain("duration_ns"),
+        Field::StatusCode => Col::Plain("status_code"),
+        Field::ParentSpanId => Col::Plain("parent_span_id"),
+        Field::ScopeName => Col::Plain("scope_name"),
+        // The derived one. `unset` is OTel's default and is not a failure, so this is an
+        // equality against `error` and never `!= 'ok'` — the difference is every healthy
+        // span in the estate.
+        Field::Errors => Col::Expr("status_code = 'error'"),
+        _ => return None,
+    })
+}
+
+/// Whether `service_5m` can answer this, rather than the raw table.
+///
+/// The aggregate holds request count, error count and a latency state per service per
+/// operation per five minutes — which is every question an APM screen asks, and nothing
+/// else. Anything naming a trace, a host, a status or an individual duration is an
+/// investigation and belongs on raw spans.
+///
+/// # The host is not in this table
+///
+/// `service_5m` is ordered `(tenant_id, service_id, name, kind, bucket)` and carries no
+/// `resource_id`, because M8 §2.1 put the host in the *base* table's sort key and the
+/// service in this one's. So a resource-scoped query cannot be served here at all, and
+/// the refusal has to happen in the planner: by the time the compiler is writing
+/// `resource_id IN (…)` it is too late, and the alternative — quietly answering a
+/// host-scoped question with the whole tenant's traffic — is the kind of wrong that looks
+/// right on a screen.
+fn serves_from_service_5m(q: &Query, whole_tenant: bool) -> bool {
+    if !q.is_aggregate() || !whole_tenant {
+        return false;
+    }
+
+    // Three shapes, which are the three columns. A `sum(duration_ns)` is not among them:
+    // the table stores a t-digest, and a total latency cannot be recovered from one.
+    let servable = q.aggregations.iter().all(|a| {
+        matches!(
+            (a.func, &a.field),
+            (AggFunc::Count, None)
+                | (AggFunc::Sum, Some(Field::Errors))
+                | (
+                    AggFunc::P50 | AggFunc::P95 | AggFunc::P99,
+                    Some(Field::DurationNs)
+                )
+        )
+    });
+    if !servable {
+        return false;
+    }
+
+    let available = |f: &Field| match f {
+        Field::ServiceId | Field::SpanName | Field::SpanKind => true,
+        Field::TimeBucket { seconds } => {
+            *seconds >= PREAGGREGATE_BUCKET_SECONDS && seconds % PREAGGREGATE_BUCKET_SECONDS == 0
+        }
+        _ => false,
+    };
+
+    if !q.group_by.iter().all(available) {
+        return false;
+    }
+
+    if let Some(f) = &q.filter {
+        let mut fields = Vec::new();
+        fields_of(f, &mut fields);
+        if !fields.iter().all(available) {
+            return false;
+        }
+    }
+
+    q.order_by.iter().all(|s| match &s.key {
+        SortKey::Field { field } => available(field),
+        SortKey::Alias { .. } => true,
     })
 }
 
@@ -456,11 +613,14 @@ pub(crate) fn column_of(f: &Field, p: &TablePlan, warnings: &mut Vec<QueryWarnin
             S::Log | S::Event => Col::Plain("source_vendor"),
             _ => return unavailable(),
         },
+        // The two columns that exist on both signals, which is what makes correlation a
+        // join rather than a second identity model — M8 §2.5. `logs.trace_id` has been
+        // populated since M3; until M8 the other end of it was missing.
         Field::Facility | Field::Body | Field::TraceId | Field::SpanId => match (p.signal, f) {
             (S::Log, Field::Facility) => Col::Plain("facility"),
             (S::Log, Field::Body) => Col::Plain("body"),
-            (S::Log, Field::TraceId) => Col::Plain("trace_id"),
-            (S::Log, Field::SpanId) => Col::Plain("span_id"),
+            (S::Log | S::Trace, Field::TraceId) => Col::Plain("trace_id"),
+            (S::Log | S::Trace, Field::SpanId) => Col::Plain("span_id"),
             _ => return unavailable(),
         },
         Field::Metric | Field::Value | Field::Unit => match (p.signal, f) {
@@ -478,6 +638,18 @@ pub(crate) fn column_of(f: &Field, p: &TablePlan, warnings: &mut Vec<QueryWarnin
         | Field::Bytes
         | Field::Packets
         | Field::SamplingRate => match flow_column(f, p.signal) {
+            Some(c) => c,
+            None => return unavailable(),
+        },
+
+        Field::ServiceId
+        | Field::SpanName
+        | Field::SpanKind
+        | Field::DurationNs
+        | Field::StatusCode
+        | Field::ParentSpanId
+        | Field::ScopeName
+        | Field::Errors => match span_column(f, p.signal) {
             Some(c) => c,
             None => return unavailable(),
         },
@@ -534,7 +706,7 @@ fn materialised_column(key: &str, p: &TablePlan) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expr, TimeRange};
+    use crate::ast::{CompareOp, Expr, TimeRange, Value};
     use chrono::{Duration, TimeZone, Utc};
 
     fn at(secs: i64) -> chrono::DateTime<Utc> {
@@ -565,7 +737,7 @@ mod tests {
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 300 }];
 
-        let (p, _) = plan(&q).unwrap();
+        let (p, _) = plan(&q, true).unwrap();
         assert_eq!(p.table, "logs_counts_5m");
         assert_eq!(p.kind, TableKind::LogCounts);
     }
@@ -575,7 +747,7 @@ mod tests {
         let mut q = logs(Duration::hours(1));
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 60 }];
-        assert_eq!(plan(&q).unwrap().0.table, "logs");
+        assert_eq!(plan(&q, true).unwrap().0.table, "logs");
     }
 
     #[test]
@@ -590,7 +762,7 @@ mod tests {
             mode: crate::ast::TextMode::AnyToken,
             terms: vec!["bgp".into()],
         });
-        assert_eq!(plan(&q).unwrap().0.table, "logs");
+        assert_eq!(plan(&q, true).unwrap().0.table, "logs");
     }
 
     #[test]
@@ -608,7 +780,7 @@ mod tests {
             (Duration::days(90), "metrics_1h"),
         ] {
             q.time = TimeRange::new(at(0), at(span.num_seconds()));
-            assert_eq!(plan(&q).unwrap().0.table, table, "span {span}");
+            assert_eq!(plan(&q, true).unwrap().0.table, table, "span {span}");
         }
     }
 
@@ -623,7 +795,7 @@ mod tests {
             field: Some(Field::Value),
             alias: "v".into(),
         }];
-        let (_, warnings) = plan(&q).unwrap();
+        let (_, warnings) = plan(&q, true).unwrap();
         assert!(
             warnings.contains(&QueryWarning::Downsampled {
                 table: "metrics_5m".into(),
@@ -640,7 +812,7 @@ mod tests {
             SignalType::Metric,
             TimeRange::new(at(0), at(Duration::days(90).num_seconds())),
         );
-        assert_eq!(plan(&q).unwrap().0.table, "metrics");
+        assert_eq!(plan(&q, true).unwrap().0.table, "metrics");
     }
 
     #[test]
@@ -654,7 +826,7 @@ mod tests {
             field: Some(Field::Value),
             alias: "p95".into(),
         }];
-        let err = plan(&q).unwrap_err();
+        let err = plan(&q, true).unwrap_err();
         assert!(
             matches!(err, Error::RollupCannotServe { .. }),
             "a p95 of hourly averages is not a p95: {err}"
@@ -676,14 +848,14 @@ mod tests {
             key: "interface".into(),
         }];
         assert!(matches!(
-            plan(&q).unwrap_err(),
+            plan(&q, true).unwrap_err(),
             Error::RollupCannotServe { .. }
         ));
     }
 
     #[test]
     fn materialised_attributes_become_real_columns() {
-        let (p, _) = plan(&logs(Duration::hours(1))).unwrap();
+        let (p, _) = plan(&logs(Duration::hours(1)), true).unwrap();
         let mut w = Vec::new();
         let col = column_of(
             &Field::Attr {
@@ -699,7 +871,7 @@ mod tests {
 
     #[test]
     fn an_unmaterialised_attribute_is_allowed_but_flagged() {
-        let (p, _) = plan(&logs(Duration::hours(1))).unwrap();
+        let (p, _) = plan(&logs(Duration::hours(1)), true).unwrap();
         let mut w = Vec::new();
         let col = column_of(
             &Field::Attr {
@@ -715,16 +887,223 @@ mod tests {
 
     #[test]
     fn a_field_from_another_signal_is_rejected() {
-        let (p, _) = plan(&logs(Duration::hours(1))).unwrap();
+        let (p, _) = plan(&logs(Duration::hours(1)), true).unwrap();
         let err = column_of(&Field::Value, &p, &mut Vec::new()).unwrap_err();
         assert!(matches!(err, Error::FieldNotAvailable { .. }), "{err}");
     }
 
+    // --- traces, M8 --------------------------------------------------------------
+    //
+    // This block used to be one test asserting that trace queries refused to compile,
+    // the way flows did before M7.
+
+    fn traces(span: Duration) -> Query {
+        Query::new(
+            SignalType::Trace,
+            TimeRange::new(at(0), at(span.num_seconds())),
+        )
+    }
+
+    fn counted(alias: &str) -> Aggregation {
+        Aggregation {
+            func: AggFunc::Count,
+            field: None,
+            alias: alias.into(),
+        }
+    }
+
+    fn quantile(func: AggFunc, alias: &str) -> Aggregation {
+        Aggregation {
+            func,
+            field: Some(Field::DurationNs),
+            alias: alias.into(),
+        }
+    }
+
+    /// The shape an APM screen asks: latency and volume per service per bucket.
+    fn apm(span: Duration) -> Query {
+        let mut q = traces(span);
+        q.aggregations = vec![
+            counted("requests"),
+            sum(Field::Errors, "errors"),
+            quantile(AggFunc::P99, "p99"),
+        ];
+        q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::ServiceId];
+        q
+    }
+
     #[test]
-    fn traces_are_declared_but_refuse_to_compile() {
-        // Flows used to be here too. M7 built them.
-        let q = Query::new(SignalType::Trace, TimeRange::new(at(0), at(60)));
-        assert!(matches!(plan(&q).unwrap_err(), Error::Unsupported(_)));
+    fn a_trace_lookup_reads_the_raw_spans() {
+        // "Show me this trace" is an investigation: it wants individual spans, and no
+        // aggregate has them. §2.2 — and the bloom filter, not the planner, is what makes
+        // it cheap.
+        let mut q = traces(Duration::hours(1));
+        q.filter = Some(Expr::Compare {
+            field: Field::TraceId,
+            cmp: CompareOp::Eq,
+            value: Value::Str("4b".repeat(16)),
+        });
+        let (p, warnings) = plan(&q, true).unwrap();
+        assert_eq!(p.table, "spans");
+        assert_eq!(p.kind, TableKind::Base);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn the_apm_screen_is_answered_from_the_aggregate() {
+        let (p, _) = plan(&apm(Duration::days(1)), true).unwrap();
+        assert_eq!(p.table, "service_5m");
+        assert_eq!(p.kind, TableKind::ServiceAggregate);
+        assert_eq!(p.time_col, "bucket");
+    }
+
+    #[test]
+    fn a_resource_scoped_trace_query_never_reaches_the_aggregate() {
+        // The one that would have been a silent wrong answer. `service_5m` is ordered
+        // service-first and carries no `resource_id` at all, so a host-scoped question
+        // compiled against it would either name a column that is not there or — worse —
+        // quietly answer with the whole tenant's traffic.
+        let q = apm(Duration::days(1));
+        let (p, _) = plan(&q, false).unwrap();
+        assert_eq!(p.table, "spans", "a scoped query belongs on the raw table");
+        assert_eq!(p.kind, TableKind::Base);
+    }
+
+    #[test]
+    fn a_question_about_one_operations_status_reads_raw_spans() {
+        // `status_code` is not a column on the aggregate — the view folded it into a
+        // count of errors. Filtering on it is therefore a raw question.
+        let mut q = apm(Duration::hours(1));
+        q.filter = Some(Expr::Compare {
+            field: Field::StatusCode,
+            cmp: CompareOp::Eq,
+            value: Value::Str("error".into()),
+        });
+        assert_eq!(plan(&q, true).unwrap().0.table, "spans");
+    }
+
+    #[test]
+    fn a_percentile_the_state_does_not_hold_is_not_offered() {
+        // The quantiles are part of the column's type. A p90 is not in the t-digest and
+        // interpolating between p50 and p95 would be a number wearing a percentile's
+        // name, so the query goes to raw spans where a real p90 can be computed.
+        let mut q = apm(Duration::days(1));
+        q.aggregations = vec![Aggregation {
+            func: AggFunc::Avg,
+            field: Some(Field::DurationNs),
+            alias: "mean".into(),
+        }];
+        assert_eq!(
+            plan(&q, true).unwrap().0.table,
+            "spans",
+            "an average is not recoverable from a t-digest"
+        );
+    }
+
+    #[test]
+    fn a_window_past_what_raw_spans_keep_is_said_out_loud() {
+        // `spans` has a 7-day TTL, so a month-long raw query returns the last week and
+        // looks like a month. The flow rule, and the same refusal to answer silently.
+        let mut q = traces(Duration::days(30));
+        q.filter = Some(Expr::Compare {
+            field: Field::TraceId,
+            cmp: CompareOp::Eq,
+            value: Value::Str("4b".repeat(16)),
+        });
+        let (p, warnings) = plan(&q, true).unwrap();
+        assert_eq!(p.table, "spans");
+        assert!(
+            matches!(
+                warnings.as_slice(),
+                [QueryWarning::BeyondRetention { days: 7, .. }]
+            ),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn the_aggregate_is_flagged_as_downsampled_past_the_raw_window() {
+        let (p, warnings) = plan(&apm(Duration::days(30)), true).unwrap();
+        assert_eq!(p.table, "service_5m");
+        assert!(
+            matches!(
+                warnings.as_slice(),
+                [QueryWarning::Downsampled {
+                    bucket_seconds: 300,
+                    ..
+                }]
+            ),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn the_host_column_is_not_offered_on_the_service_aggregate() {
+        // The blanket `resource_id` arm that every other pre-aggregate shares would have
+        // compiled to SQL naming a column `service_5m` does not have.
+        let (p, _) = plan(&apm(Duration::days(1)), true).unwrap();
+        let err = column_of(&Field::ResourceId, &p, &mut Vec::new()).unwrap_err();
+        assert!(matches!(err, Error::FieldNotAvailable { .. }), "{err}");
+    }
+
+    #[test]
+    fn a_spans_two_subjects_are_two_different_columns() {
+        // §2.1 reaching the query layer: the host is `resource_id` and the service is
+        // `service_id`, and a caller asking for one must never silently get the other.
+        let (p, _) = plan(&traces(Duration::hours(1)), true).unwrap();
+        let mut w = Vec::new();
+        assert_eq!(
+            column_of(&Field::ResourceId, &p, &mut w).unwrap(),
+            Col::Plain("resource_id")
+        );
+        assert_eq!(
+            column_of(&Field::ServiceId, &p, &mut w).unwrap(),
+            Col::Plain("service_id")
+        );
+    }
+
+    #[test]
+    fn errors_are_the_same_question_on_both_tables() {
+        // The field exists so that one query shape survives the choice of table. On raw
+        // spans it compares against OTel's status; on the aggregate it is the column the
+        // view maintains. `unset` is not an error on either — that is the comparison the
+        // expression has to be, and `!= 'ok'` would make every healthy span a failure.
+        let (raw, _) = plan(&traces(Duration::hours(1)), true).unwrap();
+        assert_eq!(
+            column_of(&Field::Errors, &raw, &mut Vec::new()).unwrap(),
+            Col::Expr("status_code = 'error'")
+        );
+
+        // And on the aggregate it never becomes a column reference at all: the compiler
+        // reads `errors` straight off the stored row.
+        let (agg, _) = plan(&apm(Duration::days(1)), true).unwrap();
+        assert!(column_of(&Field::Errors, &agg, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_trace_field_on_another_signal_is_refused() {
+        let (p, _) = plan(&logs(Duration::hours(1)), true).unwrap();
+        for f in [Field::ServiceId, Field::DurationNs, Field::Errors] {
+            let err = column_of(&f, &p, &mut Vec::new()).unwrap_err();
+            assert!(
+                matches!(err, Error::FieldNotAvailable { .. }),
+                "{f:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_log_and_a_span_agree_on_what_a_trace_id_is() {
+        // M8 §2.5: correlation is a join on a column both tables already have, not a
+        // second identity model. `logs.trace_id` has been populated since M3.
+        let (logs, _) = plan(&logs(Duration::hours(1)), true).unwrap();
+        let (spans, _) = plan(&traces(Duration::hours(1)), true).unwrap();
+        for p in [&logs, &spans] {
+            assert_eq!(
+                column_of(&Field::TraceId, p, &mut Vec::new()).unwrap(),
+                Col::Plain("trace_id")
+            );
+        }
     }
 
     // --- flows, M7 ---------------------------------------------------------------
@@ -748,7 +1127,7 @@ mod tests {
     fn a_flow_query_for_individual_conversations_reads_the_raw_table() {
         // Not an aggregate, so nothing pre-aggregated can answer it: this is somebody
         // looking at the actual conversations in a minute, which is an investigation.
-        let (p, _) = plan(&flows(Duration::hours(1))).unwrap();
+        let (p, _) = plan(&flows(Duration::hours(1)), true).unwrap();
         assert_eq!(p.table, "flows");
         assert_eq!(p.kind, TableKind::Base);
     }
@@ -766,7 +1145,7 @@ mod tests {
             Field::SamplingRate,
         ];
 
-        let (p, _) = plan(&q).unwrap();
+        let (p, _) = plan(&q, true).unwrap();
         assert_eq!(p.table, "flows_5m");
         assert_eq!(p.kind, TableKind::FlowAggregate);
     }
@@ -780,7 +1159,7 @@ mod tests {
         q.aggregations = vec![sum(Field::Bytes, "b")];
         q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::SrcAddress];
 
-        assert_eq!(plan(&q).unwrap().0.table, "flows");
+        assert_eq!(plan(&q, true).unwrap().0.table, "flows");
     }
 
     #[test]
@@ -791,7 +1170,7 @@ mod tests {
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::DstPort];
 
-        assert_eq!(plan(&q).unwrap().0.table, "flows_5m");
+        assert_eq!(plan(&q, true).unwrap().0.table, "flows_5m");
     }
 
     #[test]
@@ -802,7 +1181,7 @@ mod tests {
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 300 }, Field::SrcPort];
 
-        assert_eq!(plan(&q).unwrap().0.table, "flows");
+        assert_eq!(plan(&q, true).unwrap().0.table, "flows");
     }
 
     #[test]
@@ -811,7 +1190,7 @@ mod tests {
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 60 }];
 
-        assert_eq!(plan(&q).unwrap().0.table, "flows");
+        assert_eq!(plan(&q, true).unwrap().0.table, "flows");
     }
 
     #[test]
@@ -823,7 +1202,7 @@ mod tests {
         q.aggregations = vec![count()];
         q.group_by = vec![Field::SrcPort];
 
-        let (p, warnings) = plan(&q).unwrap();
+        let (p, warnings) = plan(&q, true).unwrap();
         assert_eq!(p.table, "flows");
         assert!(
             warnings
@@ -839,7 +1218,7 @@ mod tests {
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 300 }];
 
-        let (p, warnings) = plan(&q).unwrap();
+        let (p, warnings) = plan(&q, true).unwrap();
         assert_eq!(p.table, "flows_5m");
         assert!(
             warnings
@@ -851,7 +1230,7 @@ mod tests {
 
     #[test]
     fn a_flow_column_is_not_available_on_another_signal() {
-        let (p, _) = plan(&logs(Duration::hours(1))).unwrap();
+        let (p, _) = plan(&logs(Duration::hours(1)), true).unwrap();
         for f in [Field::SrcAddress, Field::Bytes, Field::SamplingRate] {
             let err = column_of(&f, &p, &mut Vec::new()).unwrap_err();
             assert!(matches!(err, Error::FieldNotAvailable { .. }), "{err}");
@@ -863,7 +1242,7 @@ mod tests {
         let mut q = flows(Duration::days(1));
         q.aggregations = vec![count()];
         q.group_by = vec![Field::TimeBucket { seconds: 300 }];
-        let (p, _) = plan(&q).unwrap();
+        let (p, _) = plan(&q, true).unwrap();
 
         // The planner would not have chosen flows_5m for a query naming these, but the
         // mapping has to refuse them anyway: a caller reaching column_of directly must

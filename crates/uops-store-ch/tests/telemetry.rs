@@ -16,7 +16,8 @@ use std::collections::BTreeMap;
 use chrono::{Duration, TimeZone, Utc};
 use uops_core::{ResourceId, SiteId, TenantId, TenantScope};
 use uops_query::{
-    AggFunc, Aggregation, Expr, Field, Query, ResolvedResources, SignalType, TextMode, TimeRange,
+    AggFunc, Aggregation, CompareOp, Expr, Field, Query, ResolvedResources, SignalType, TextMode,
+    TimeRange, Value,
 };
 use uops_store_ch::{
     ChClient, ChConfig, ChStore, FlowRow, FlowStore, LogRow, LogStore, MetricRow, MetricStore,
@@ -540,18 +541,26 @@ async fn metrics_go_in_and_the_rollup_answers_a_long_window() {
 
 #[tokio::test]
 async fn a_query_the_compiler_refuses_never_reaches_the_server() {
-    // A trace query is declared in the AST and unimplemented until M8. It must fail as
-    // a caller error rather than as a ClickHouse exception about a missing table.
+    // It must fail as a caller error rather than as a ClickHouse exception — the
+    // difference between "you asked for something that does not exist" and "the database
+    // is broken", which is what an operator reads off the status code.
+    //
+    // This used to be a trace query, declared in the AST and unimplemented. M8 built
+    // them, so the example is now a field from another signal: `body` is a logs column
+    // and a span does not have one.
     let store = store();
     let tenant = TenantId::new();
     let scope = scope_for(tenant);
 
+    let mut q = Query::new(SignalType::Trace, window());
+    q.filter = Some(Expr::Compare {
+        field: Field::Body,
+        cmp: CompareOp::Eq,
+        value: Value::Str("anything".into()),
+    });
+
     let err = store
-        .query(
-            &Query::new(SignalType::Trace, window()),
-            &scope,
-            &ResolvedResources::whole_tenant(&scope),
-        )
+        .query(&q, &scope, &ResolvedResources::whole_tenant(&scope))
         .await
         .unwrap_err();
 
@@ -1453,4 +1462,291 @@ async fn spans_from_one_tenant_are_unreachable_from_another() {
         "1",
         "and the row really was written, so the zeros above mean something"
     );
+}
+
+// --- traces through the planner, M8 ------------------------------------------------
+//
+// The flow block above reads with raw SQL because `SignalType::Flow` had no planner when
+// it was written. Traces do, so these go through the AST — which is the only way to find
+// out whether what the planner emits is a statement `ClickHouse` accepts. Both sides'
+// unit tests were happy about the timezone bug too.
+
+/// A query over the fixture window, whole-tenant.
+fn trace_query(tenant: TenantId) -> (Query, TenantScope) {
+    (
+        Query::new(SignalType::Trace, window()),
+        TenantScope::system(tenant),
+    )
+}
+
+#[tokio::test]
+async fn a_trace_is_looked_up_by_id_through_the_ast() {
+    // §2.2's query, compiled rather than hand-written. The one that made the planner
+    // worth having: `trace_id` is 32 hex characters, which is exactly a UUID without its
+    // dashes, so the value arrives as `Value::Uuid` and has to be bound as a `String` or
+    // the statement compares a UUID to a String column and fails.
+    let store = store();
+    let tenant = TenantId::new();
+    let trace = "4b".repeat(16);
+
+    store
+        .insert_spans(&[
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "GET /checkout",
+                "unset",
+                1_000_000,
+                &trace,
+                "",
+            ),
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "charge",
+                "error",
+                2_000_000,
+                &trace,
+                &format!("{:016x}", 1_000_000u64),
+            ),
+            span(
+                tenant,
+                ResourceId::new(),
+                ResourceId::new(),
+                "unrelated",
+                "unset",
+                3_000_000,
+                &"11".repeat(16),
+                "",
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let (mut q, scope) = trace_query(tenant);
+    // Parsed the way the API parses it, rather than constructed. That is the whole point:
+    // `Value` is untagged, so 32 hex characters deserialise into `Value::Uuid` and nothing
+    // downstream can tell them from a real UUID — and `trace_id` is a `String` column.
+    let value: Value = serde_json::from_str(&format!("\"{trace}\"")).expect("a literal");
+    assert!(
+        matches!(value, Value::Uuid(_)),
+        "the trap this test exists for: {value:?}"
+    );
+    q.filter = Some(Expr::Compare {
+        field: Field::TraceId,
+        cmp: CompareOp::Eq,
+        value,
+    });
+    let result = store
+        .query(&q, &scope, &ResolvedResources::whole_tenant(&scope))
+        .await
+        .unwrap();
+
+    assert_eq!(result.table, "spans");
+    assert_eq!(
+        result.len(),
+        2,
+        "one trace, not the tenant: {:?}",
+        result.rows
+    );
+    // And the two subjects came back as two columns, which is what a trace view draws
+    // from.
+    assert!(result.columns.iter().any(|c| c.name == "service_id"));
+    assert!(result.columns.iter().any(|c| c.name == "resource_id"));
+}
+
+#[tokio::test]
+async fn the_apm_screen_compiles_to_a_statement_clickhouse_accepts() {
+    // Count, error count and two percentiles in one query, off `service_5m` — the shape
+    // M8 §2.4 says every APM screen asks. Running it is the point: a
+    // `quantilesTDigestMerge` whose declared quantiles disagree with the column's type is
+    // a runtime error that no amount of unit testing the planner would find.
+    let store = store();
+    let tenant = TenantId::new();
+    let service = ResourceId::new();
+    let host = ResourceId::new();
+
+    let mut rows: Vec<SpanRow> = (1..=100)
+        .map(|i| {
+            span(
+                tenant,
+                host,
+                service,
+                "op",
+                "unset",
+                i * 1_000_000,
+                &format!("{i:032x}"),
+                "",
+            )
+        })
+        .collect();
+    rows.push(span(
+        tenant,
+        host,
+        service,
+        "op",
+        "error",
+        5_000_000,
+        &"ee".repeat(16),
+        "",
+    ));
+    store.insert_spans(&rows).await.unwrap();
+
+    let (mut q, scope) = trace_query(tenant);
+    q.aggregations = vec![
+        Aggregation {
+            func: AggFunc::Count,
+            field: None,
+            alias: "requests".into(),
+        },
+        Aggregation {
+            func: AggFunc::Sum,
+            field: Some(Field::Errors),
+            alias: "errors".into(),
+        },
+        Aggregation {
+            func: AggFunc::P95,
+            field: Some(Field::DurationNs),
+            alias: "p95".into(),
+        },
+    ];
+    q.group_by = vec![Field::ServiceId];
+    q.filter = Some(Expr::Compare {
+        field: Field::ServiceId,
+        cmp: CompareOp::Eq,
+        value: Value::Uuid(service.into_uuid()),
+    });
+
+    let result = store
+        .query(&q, &scope, &ResolvedResources::whole_tenant(&scope))
+        .await
+        .unwrap();
+
+    assert_eq!(result.table, "service_5m", "the aggregate answers this");
+    assert_eq!(result.len(), 1, "{:?}", result.rows);
+
+    let number = |name: &str| -> f64 {
+        let v = result.value(0, name).unwrap_or_else(|| panic!("{name}"));
+        v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            .unwrap_or_else(|| panic!("{name} is not a number: {v:?}"))
+    };
+
+    assert!(
+        (number("requests") - 101.0).abs() < f64::EPSILON,
+        "every span is a request: {:?}",
+        result.rows
+    );
+    // §2.3's other half, and the decision `0008` exists to make: `unset` is not a
+    // failure. One of the 101 is.
+    assert!(
+        (number("errors") - 1.0).abs() < f64::EPSILON,
+        "only `error` is an error: {:?}",
+        result.rows
+    );
+    // The t-digest, merged. The durations are 1ms..100ms, so a p95 lands near 95ms —
+    // and the bound is tight enough to exclude the p99 beside it in the same state,
+    // because indexing the wrong element of the merged array is exactly the mistake this
+    // is here to catch.
+    let p95 = number("p95");
+    assert!(
+        (92_000_000.0..=97_000_000.0).contains(&p95),
+        "a merged p95 should land near 95ms, not at another quantile: {p95}"
+    );
+}
+
+#[tokio::test]
+async fn a_resource_scoped_trace_query_reads_the_raw_table() {
+    // The planner rule that keeps a silent wrong answer out of the product: `service_5m`
+    // carries no `resource_id`, so a question scoped to a host cannot be answered from
+    // it. The scoped query has to land on `spans` — and this is the test that the
+    // statement it produces is one the server will actually run.
+    let store = store();
+    let tenant = TenantId::new();
+    let service = ResourceId::new();
+    let (mine, theirs) = (ResourceId::new(), ResourceId::new());
+    let scope = TenantScope::system(tenant);
+
+    store
+        .insert_spans(&[
+            span(
+                tenant,
+                mine,
+                service,
+                "op",
+                "unset",
+                1_000_000,
+                &"c1".repeat(16),
+                "",
+            ),
+            span(
+                tenant,
+                mine,
+                service,
+                "op",
+                "error",
+                1_500_000,
+                &"c3".repeat(16),
+                "",
+            ),
+            span(
+                tenant,
+                theirs,
+                service,
+                "op",
+                "unset",
+                2_000_000,
+                &"c2".repeat(16),
+                "",
+            ),
+        ])
+        .await
+        .unwrap();
+
+    let mut q = Query::new(SignalType::Trace, window());
+    q.aggregations = vec![
+        Aggregation {
+            func: AggFunc::Count,
+            field: None,
+            alias: "spans".into(),
+        },
+        Aggregation {
+            func: AggFunc::Sum,
+            field: Some(Field::Errors),
+            alias: "errors".into(),
+        },
+    ];
+    q.group_by = vec![Field::ServiceId];
+
+    let result = store
+        .query(
+            &q,
+            &scope,
+            &ResolvedResources::already_resolved(&scope, vec![mine]),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.table, "spans", "a host-scoped question is a raw one");
+    assert_eq!(result.len(), 1);
+
+    let count = |name: &str| -> u64 {
+        let v = result.value(0, name).unwrap_or_else(|| panic!("{name}"));
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            .unwrap_or_else(|| panic!("{name} is not a count: {v:?}"))
+    };
+
+    assert_eq!(
+        count("spans"),
+        2,
+        "one host's spans, not both: {:?}",
+        result.rows
+    );
+    // And `errors` means the same thing here as it does on the aggregate, which is the
+    // entire reason it is a field rather than a filter. `unset` is not a failure on
+    // either table — reading it as `!= 'ok'` would make the other span an error too.
+    assert_eq!(count("errors"), 1, "{:?}", result.rows);
 }

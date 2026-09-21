@@ -1,0 +1,20 @@
+{
+  "signal": "trace",
+  "time": {
+    "start": "2026-09-01T00:00:00Z",
+    "end": "2026-09-01T01:00:00Z"
+  },
+  "resources": {
+    "type": "all"
+  },
+  "filter": {
+    "op": "compare",
+    "field": { "field": "trace_id" },
+    "cmp": "eq",
+    "value": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"
+  },
+  "order_by": [
+    { "key": { "by": "field", "field": { "field": "observed_at" } }, "desc": false }
+  ],
+  "limit": 500
+}

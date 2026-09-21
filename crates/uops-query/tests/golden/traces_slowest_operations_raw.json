@@ -1,0 +1,28 @@
+{
+  "signal": "trace",
+  "time": {
+    "start": "2026-09-01T00:00:00Z",
+    "end": "2026-09-01T06:00:00Z"
+  },
+  "resources": {
+    "type": "ids",
+    "ids": ["018f0000-0000-7000-8000-0000000000aa"]
+  },
+  "aggregations": [
+    { "func": "count", "alias": "spans" },
+    { "func": "p95", "field": { "field": "duration_ns" }, "alias": "p95" }
+  ],
+  "group_by": [
+    { "field": "span_name" }
+  ],
+  "filter": {
+    "op": "compare",
+    "field": { "field": "status_code" },
+    "cmp": "eq",
+    "value": "error"
+  },
+  "order_by": [
+    { "key": { "by": "alias", "alias": "p95" }, "desc": true }
+  ],
+  "limit": 20
+}

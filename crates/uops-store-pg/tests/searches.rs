@@ -88,9 +88,13 @@ async fn a_search_round_trips_as_the_ast_it_was_saved_from() {
 
 #[tokio::test]
 async fn a_query_the_compiler_refuses_is_never_stored() {
-    // `trace` is in the AST and has no table until M8. Stored, it would be a search that
-    // lists, opens, and fails only when somebody runs it — during an incident, which is
-    // the only time anybody opens a saved search in a hurry.
+    // Stored, it would be a search that lists, opens, and fails only when somebody runs
+    // it — during an incident, which is the only time anybody opens a saved search in a
+    // hurry.
+    //
+    // The example used to be a bare trace query, which had no table until M8 built one.
+    // It is now a trace query naming a logs column: `body` is not on a span, and the
+    // refusal has to happen when it is saved rather than when it is run.
     let store = store().await;
     let scope = tenant(&store, "refused").await;
 
@@ -98,7 +102,12 @@ async fn a_query_the_compiler_refuses_is_never_stored() {
     let traces = Query::new(
         SignalType::Trace,
         TimeRange::new(end - Duration::minutes(15), end),
-    );
+    )
+    .with_filter(Expr::Text {
+        field: Field::Body,
+        mode: TextMode::AnyToken,
+        terms: vec!["timeout".to_owned()],
+    });
 
     assert!(matches!(
         store

@@ -685,11 +685,25 @@ async fn a_query_without_the_csrf_header_is_refused() {
 
 #[tokio::test]
 async fn a_query_the_compiler_refuses_is_the_callers_fault() {
-    // Trace queries are declared in the AST and unimplemented until M8. The caller gets
-    // a 400 explaining it, not a 500 blaming the database for a missing table.
+    // The caller gets a 400 explaining it, not a 500 blaming the database.
+    //
+    // This used to be a bare trace query, declared in the AST and unimplemented. M8 built
+    // them, so the example is now a field from another signal: `body` is a logs column,
+    // and a span does not have one.
     let f = fixture("refused", Role::Viewer).await;
     let (status, problem) = f
-        .call(f.post_query(&ast(&serde_json::json!({ "signal": "trace" })), true))
+        .call(f.post_query(
+            &ast(&serde_json::json!({
+                "signal": "trace",
+                "filter": {
+                    "op": "compare",
+                    "field": { "field": "body" },
+                    "cmp": "eq",
+                    "value": "anything"
+                }
+            })),
+            true,
+        ))
         .await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");

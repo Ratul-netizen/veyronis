@@ -177,6 +177,21 @@ pub fn compile_tail(
 
     Ok(cx.finish())
 }
+/// Which of the stored quantiles this function asks for, 1-based.
+///
+/// The quantiles are part of the column's *type* —
+/// `AggregateFunction(quantilesTDigest(0.5, 0.95, 0.99), UInt64)` — so the merge returns
+/// an array in exactly that order and this indexes into it. It is also why a p90 is not
+/// reachable and will not become reachable by adding a match arm: the state does not
+/// contain one, and interpolating between p50 and p95 would be a number wearing a
+/// percentile's name.
+const fn quantile_index(f: AggFunc) -> usize {
+    match f {
+        AggFunc::P50 => 1,
+        AggFunc::P95 => 2,
+        _ => 3,
+    }
+}
 
 /// Codegen state: the statement under construction, the chosen table, warnings so far.
 struct Cx {
@@ -202,7 +217,7 @@ impl Cx {
             return Err(Error::Invalid("limit must be at least 1".into()));
         }
 
-        let (plan, warnings) = plan(q)?;
+        let (plan, warnings) = plan(q, resources.is_whole_tenant())?;
         Ok(Self {
             b: Builder::new(),
             plan,
@@ -228,6 +243,9 @@ impl Cx {
     fn write_col(&mut self, c: &Col) {
         match c {
             Col::Plain(name) => self.b.push(name),
+            // Both of these are `&'static str` from an enum arm, never caller text —
+            // which is the property that lets them be pushed rather than bound.
+            Col::Expr(sql) => self.b.push(sql),
             Col::Attr { map, key } => {
                 self.b.push(map);
                 self.b.push("[");
@@ -276,7 +294,11 @@ impl Cx {
                      sampling_rate, tcp_flags, tos, input_if, output_if, src_as, dst_as, \
                      src_resource_id, dst_resource_id, attributes"
                 }
-                SignalType::Trace => unreachable!("refused by plan()"),
+                SignalType::Trace => {
+                    "tenant_id, resource_id, service_id, site_id, observed_at, ingested_at, \
+                     trace_id, span_id, parent_span_id, name, kind, duration_ns, status_code, \
+                     status_message, sampling_probability, scope_name, attributes"
+                }
             };
             self.b.push(cols);
             return Ok(());
@@ -333,6 +355,20 @@ impl Cx {
                 (AggFunc::Sum, Some(Field::Bytes)) => self.b.push("sum(bytes)"),
                 (AggFunc::Sum, Some(Field::Packets)) => self.b.push("sum(packets)"),
                 (other, _) => return Err(rollup_refuses(other, "flows_5m")),
+            },
+            // `service_5m` is both shapes at once. `requests` and `errors` are summable
+            // values; `latency` is a t-digest *state* and has to be merged, because a p99
+            // of p99s is not a p99.
+            TableKind::ServiceAggregate => match (a.func, &a.field) {
+                (AggFunc::Count, None) => self.b.push("sum(requests)"),
+                (AggFunc::Sum, Some(Field::Errors)) => self.b.push("sum(errors)"),
+                (func, Some(Field::DurationNs)) if func.quantile().is_some() => {
+                    self.b.push(&format!(
+                        "quantilesTDigestMerge(0.5, 0.95, 0.99)(latency)[{}]",
+                        quantile_index(func)
+                    ));
+                }
+                (other, _) => return Err(rollup_refuses(other, "service_5m")),
             },
         }
 
@@ -592,7 +628,7 @@ impl Cx {
                 if i > 0 {
                     self.b.push(", ");
                 }
-                self.bind_value(v)?;
+                self.bind_for(field, v)?;
             }
             self.b.push(")");
             return Ok(());
@@ -609,7 +645,31 @@ impl Cx {
         self.b.push(" ");
         self.b.push(cmp.as_sql());
         self.b.push(" ");
-        self.bind_value(value)
+        self.bind_for(field, value)
+    }
+
+    /// Bind a literal the way the **column** needs it, not the way JSON happened to
+    /// parse it.
+    ///
+    /// A trace id is 32 hex characters, which is exactly a UUID with its dashes removed.
+    /// `Value` is `untagged`, so `"4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b"` deserialises as
+    /// `Value::Uuid` and would be bound as `{p:UUID}` — against `trace_id`, which is a
+    /// `String` column on both `spans` and `logs`.
+    ///
+    /// Found by the first golden fixture that looked a trace up by id, and it was already
+    /// wrong for logs: `logs.trace_id` has been a `String` since M3, so the same query
+    /// against the same column has been mistypeable for as long as the column has
+    /// existed. Nobody hit it because nothing had spans to look up.
+    fn bind_for(&mut self, field: &Field, v: &Value) -> Result<()> {
+        if matches!(field, Field::TraceId | Field::SpanId | Field::ParentSpanId)
+            && let Value::Uuid(u) = v
+        {
+            // `simple()` is 32 lower-case hex digits and no dashes, which is exactly how
+            // `uops_otlp::hex` writes the column.
+            self.b.bind("String", u.simple().to_string());
+            return Ok(());
+        }
+        self.bind_value(v)
     }
 
     /// Text search. The mode decides whether the index is used, and W1 decided which

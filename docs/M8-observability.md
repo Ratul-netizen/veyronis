@@ -150,6 +150,22 @@ model and one query AST, and a trace is a signal in that AST — `SignalType::Tr
 exists and already compiles to a refusal, the same state `SignalType::Flow` was in before
 M7.
 
+### 2.5b What the planner turned up: a trace id is shaped exactly like a UUID.
+
+Found by the first golden fixture that looked a trace up by id, and worth writing down
+because it had been wrong since M3 without anyone being able to hit it.
+
+A trace id is 32 hex characters. A UUID with its dashes removed is 32 hex characters. The
+query AST's `Value` is `#[serde(untagged)]`, so `"4b4b4b4b…"` off the wire deserialises
+into `Value::Uuid` and compiles to `{p:UUID}` — against `trace_id`, which is a `String`
+column on `spans` *and* on `logs`. The statement is a type error at the server.
+
+So the compiler binds by the **column** rather than by what JSON happened to parse: a
+comparison against `trace_id`, `span_id` or `parent_span_id` binds a `Value::Uuid` as its
+32-character hex form. `logs.trace_id` has been a `String` since M3, so §2.5's join was
+mistypeable for as long as the column has existed; nothing hit it because there were no
+spans to look up.
+
 ### 2.6 A service map is derived, never configured.
 
 A service map is what the spans already say: a parent span in service A with a child in
@@ -197,8 +213,9 @@ what promoting a deferred file is for.
 - [x] Two hosts running one service resolve to two host resources and one service resource
       — and raise nothing for review, which is the assertion that makes §2.1 load-bearing
 - [x] `POST /v1/traces` stops reporting partial success, because the spans are now stored
-- [ ] A trace is retrievable by `trace_id`, and the granules read for that lookup are
-      measured and recorded rather than assumed — §2.2
+- [~] A trace is retrievable by `trace_id` — through the AST, against the live server.
+      The granules that lookup reads are **not** measured yet; that needs a populated
+      table and W1's method, and §2.2 is explicit that assuming is not enough
 - [ ] The logs emitted during a trace are retrievable by joining on `trace_id`, using the
       column that has been populated since M3
 - [x] A p99 read from `service_5m` over a week agrees with the same p99 computed from raw

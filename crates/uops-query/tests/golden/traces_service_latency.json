@@ -1,0 +1,25 @@
+{
+  "signal": "trace",
+  "time": {
+    "start": "2026-09-01T00:00:00Z",
+    "end": "2026-09-08T00:00:00Z"
+  },
+  "resources": {
+    "type": "all"
+  },
+  "aggregations": [
+    { "func": "count", "alias": "requests" },
+    { "func": "sum", "field": { "field": "errors" }, "alias": "errors" },
+    { "func": "p50", "field": { "field": "duration_ns" }, "alias": "p50" },
+    { "func": "p99", "field": { "field": "duration_ns" }, "alias": "p99" }
+  ],
+  "group_by": [
+    { "field": "time_bucket", "seconds": 300 },
+    { "field": "service_id" },
+    { "field": "span_name" }
+  ],
+  "order_by": [
+    { "key": { "by": "alias", "alias": "p99" }, "desc": true }
+  ],
+  "limit": 50
+}
