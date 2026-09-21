@@ -216,8 +216,10 @@ what promoting a deferred file is for.
 - [~] A trace is retrievable by `trace_id` — through the AST, against the live server.
       The granules that lookup reads are **not** measured yet; that needs a populated
       table and W1's method, and §2.2 is explicit that assuming is not enough
-- [ ] The logs emitted during a trace are retrievable by joining on `trace_id`, using the
-      column that has been populated since M3
+- [x] The logs emitted during a trace are retrievable by joining on `trace_id`, using the
+      column that has been populated since M3 — one export carrying both signals, read
+      back through `uops_query::correlate`, with the id compared byte for byte across
+      the two decoders
 - [x] A p99 read from `service_5m` over a week agrees with the same p99 computed from raw
       spans over an hour of that week, within the tolerance a t-digest allows
       — `a_percentile_survives_the_aggregate`, against the live server

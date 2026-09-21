@@ -2389,6 +2389,7 @@ dependencies = [
  "uops-identity",
  "uops-otlp",
  "uops-pipeline",
+ "uops-query",
  "uops-store-ch",
  "uops-store-pg",
  "uuid",

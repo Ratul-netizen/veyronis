@@ -36,6 +36,10 @@ tokio = { workspace = true, features = ["net", "signal", "time", "rt-multi-threa
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 sqlx.workspace = true
 uuid.workspace = true
+# M8 §2.5's correlation is two ordinary queries sharing a predicate, and the tests
+# build them with the helpers rather than by hand -- which is the only way to find out
+# whether the two decoders agree on what a trace id looks like.
+uops-query.workspace = true
 
 [lints]
 workspace = true

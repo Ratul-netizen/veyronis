@@ -21,7 +21,14 @@ export type Signal = "metric" | "log" | "event" | "state" | "flow";
  * Flow is deliberately not among them. It is a signal the AST can carry and the planner
  * can answer, but the Explorer's controls — severity, a text search over a body — are
  * built for records with a message in them, and a flow has none. Flow has its own screen
- * because it has its own questions. `trace` is still deferred, SPEC §M0.5.
+ * because it has its own questions.
+ *
+ * `trace` is absent for the same reason rather than because it is unbuilt: M8 gave the
+ * planner both trace tables, and a span has no body to search and no severity either. A
+ * trace is read from one end — a trace id, or a service's slowest operations — which is
+ * a screen, not a filter bar. What the Explorer *can* already do is the other half of
+ * the correlation: filtering logs by `trace_id` is an ordinary log query against a
+ * column that has been populated since M3.
  */
 export const SIGNALS: { value: Signal; label: string }[] = [
   { value: "log", label: "Logs" },

@@ -814,3 +814,184 @@ async fn two_tenants_on_two_ports_do_not_mix() {
     let _ = stop.send(());
     serving.await.expect("join").expect("serve");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn a_log_and_a_span_from_one_request_meet_on_the_trace_id() {
+    // M8 §2.5, end to end and the whole of it: `logs.trace_id` has been a column since M3
+    // and `uops_otlp::logs` has populated it for as long — the other end was simply
+    // missing. This is the test that the two ends now agree.
+    //
+    // What it is really guarding is the encoding. Both decoders turn OTLP's raw bytes
+    // into hex through the same function, so they agree today; if one ever stopped —
+    // upper case, a `0x` prefix, a dash every four bytes — every trace in the product
+    // would appear to have logged nothing. That is a plausible thing for a trace to do,
+    // which is why nobody would notice.
+    let store = infra_or_skip!(
+        PgStore::connect(&PgConfig {
+            url: database_url(),
+            ..PgConfig::default()
+        })
+        .await
+        .map_err(|e| e.to_string())
+    );
+    let telemetry = ChStore::new(ChClient::new(uops_store_ch::ChConfig::from_env()));
+    infra_or_skip!(telemetry.health().await.map_err(|e| e.to_string()));
+
+    let (tenant_id, slug) = tenant(&store, "join").await;
+    let running = start(&store, &telemetry, &slug).await;
+
+    // The same 16 bytes on the wire for both signals, which is what an SDK's log appender
+    // does: it reads the ambient span's context and stamps the record with it.
+    let trace = "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf";
+    let trace_bytes = hex(trace);
+    let root = hex("00000000000000a1");
+
+    let marker = format!("join-{}", uuid::Uuid::now_v7().simple());
+
+    let spans = ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            resource: Some(resource("app-20")),
+            scope_spans: vec![ScopeSpans {
+                spans: vec![Span {
+                    trace_id: trace_bytes.clone(),
+                    span_id: root.clone(),
+                    parent_span_id: Vec::new(),
+                    name: "GET /checkout".to_owned(),
+                    kind: 2,
+                    start_time_unix_nano: now_nanos(),
+                    end_time_unix_nano: now_nanos() + 5_000_000,
+                    ..Span::default()
+                }],
+                ..ScopeSpans::default()
+            }],
+            ..ResourceSpans::default()
+        }],
+    };
+
+    let logs = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(resource("app-20")),
+            scope_logs: vec![ScopeLogs {
+                log_records: vec![
+                    LogRecord {
+                        time_unix_nano: now_nanos(),
+                        severity_number: 17,
+                        body: Some(string(&marker)),
+                        trace_id: trace_bytes.clone(),
+                        span_id: root.clone(),
+                        ..LogRecord::default()
+                    },
+                    // And one from the same application with no span in scope. It must
+                    // not come back: `trace_id` is empty on it, and an empty id matching
+                    // everything is the failure `uops_query::correlate` refuses.
+                    LogRecord {
+                        time_unix_nano: now_nanos(),
+                        severity_number: 9,
+                        body: Some(string(&format!("{marker}-untraced"))),
+                        ..LogRecord::default()
+                    },
+                ],
+                ..ScopeLogs::default()
+            }],
+            ..ResourceLogs::default()
+        }],
+    };
+
+    for (path, body) in [
+        ("/v1/traces", spans.encode_to_vec()),
+        ("/v1/logs", logs.encode_to_vec()),
+    ] {
+        let (status, _) = post(running.address, path, body).await;
+        assert_eq!(status, 200, "{path}");
+    }
+
+    // Both queries come from the correlation helpers, so the predicate is written once.
+    let scope = uops_core::TenantScope::system(tenant_id);
+    let window = uops_query::TimeRange::new(
+        chrono::Utc::now() - chrono::Duration::minutes(10),
+        chrono::Utc::now() + chrono::Duration::minutes(10),
+    );
+    let resources = uops_query::ResolvedResources::whole_tenant(&scope);
+
+    let span_rows = wait_for_rows(
+        &telemetry,
+        &uops_query::trace_spans(trace, window).expect("a span query"),
+        &scope,
+        &resources,
+    )
+    .await;
+    assert_eq!(span_rows.len(), 1, "the span: {:?}", span_rows.rows);
+    assert_eq!(span_rows.table, "spans");
+
+    let log_rows = wait_for_rows(
+        &telemetry,
+        &uops_query::trace_logs(trace, window).expect("a log query"),
+        &scope,
+        &resources,
+    )
+    .await;
+    assert_eq!(log_rows.table, "logs");
+    assert_eq!(
+        log_rows.len(),
+        1,
+        "the traced log and not the untraced one: {:?}",
+        log_rows.rows
+    );
+    assert_eq!(
+        log_rows.value(0, "body").and_then(|v| v.as_str()),
+        Some(marker.as_str())
+    );
+
+    // The join key itself, byte for byte across two decoders and two tables. Asserted on
+    // the values that came back rather than on the ones that went in, because what the
+    // decoders wrote is the only thing a query can match on.
+    let span_trace = span_rows
+        .value(0, "trace_id")
+        .and_then(|v| v.as_str())
+        .expect("the span's trace id")
+        .to_owned();
+    let log_trace = log_rows
+        .value(0, "trace_id")
+        .and_then(|v| v.as_str())
+        .expect("the log's trace id")
+        .to_owned();
+    assert_eq!(span_trace, log_trace);
+    assert_eq!(span_trace, trace, "and both are what the exporter sent");
+
+    // And the log points at the span, which is what turns "during this trace" into
+    // "during this operation".
+    assert_eq!(
+        log_rows.value(0, "span_id").and_then(|v| v.as_str()),
+        span_rows.value(0, "span_id").and_then(|v| v.as_str())
+    );
+
+    let _ = running.stop.send(());
+    running.serving.await.expect("join").expect("serve");
+}
+
+/// Run a compiled query until it returns something, or give up.
+///
+/// The batcher flushes on a deadline, so a query issued immediately after an export is
+/// reliably empty. The existing `wait_for` does this for raw SQL; this does it for the
+/// AST, which is what the correlation helpers produce.
+async fn wait_for_rows(
+    telemetry: &ChStore,
+    query: &uops_query::Query,
+    scope: &uops_core::TenantScope,
+    resources: &uops_query::ResolvedResources,
+) -> uops_store_ch::ResultSet {
+    let mut last = None;
+    for _ in 0..60 {
+        let result = telemetry
+            .query(query, scope, resources)
+            .await
+            .expect("the statement must be one ClickHouse accepts");
+        if !result.rows.is_empty() {
+            return result;
+        }
+        last = Some(result);
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    last.expect("at least one attempt")
+}

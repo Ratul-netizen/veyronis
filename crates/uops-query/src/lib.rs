@@ -48,6 +48,7 @@
 
 pub mod ast;
 pub mod compile;
+pub mod correlate;
 pub mod error;
 pub mod plan;
 pub mod resolve;
@@ -59,6 +60,7 @@ pub use ast::{
     SortKey, TAIL_LOOKBACK, TAIL_SKEW, TextMode, TimeRange, Value, follow,
 };
 pub use compile::{Compiled, MAX_LIMIT, TAIL_LIMIT, compile, compile_tail};
+pub use correlate::{children_of, trace_logs, trace_spans};
 pub use error::{Error, Result};
 pub use plan::{TableKind, TablePlan};
 pub use resolve::{ResolvedResources, ResourceCatalog, resolve};

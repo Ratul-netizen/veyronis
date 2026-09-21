@@ -238,3 +238,45 @@ fn no_timestamp_parameter_is_left_without_a_timezone() {
         }
     }
 }
+
+/// The correlation fixture and `trace_logs` must compile to the same statement.
+///
+/// Not to the same AST — and that difference is the finding. `Value` is untagged, so the
+/// fixture's `"4b4b…"` deserialises to `Value::Uuid` while the helper constructs
+/// `Value::Str`, and the two are not equal. They compile identically because
+/// `compile::bind_for` binds by the *column*, which is exactly the repair that makes a
+/// 32-hex trace id safe to compare against a `String` column however it arrived.
+///
+/// So this asserts the property that matters. Without it the `.sql` beside the fixture
+/// is a review of the wrong statement: the file would keep passing while `trace_logs`
+/// drifted away from it, and the drift would surface as a trace that appears to have
+/// logged nothing — a plausible thing for a trace to do, and therefore the failure
+/// nobody notices.
+#[tokio::test]
+async fn the_correlation_fixture_compiles_to_what_the_helper_does() {
+    const TRACE: &str = "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b";
+
+    let path = golden_dir().join("logs_during_a_trace.json");
+    let fixture: Query = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let built = uops_query::trace_logs(TRACE, fixture.time).expect("a log query");
+
+    assert_ne!(
+        built.filter, fixture.filter,
+        "if these ever become equal, the untagged-UUID hazard is gone and this test          should say something simpler"
+    );
+
+    let scope = TenantScope::system(TenantId::from_uuid(TENANT.parse().unwrap()));
+    let resources = resolve(&built.resources, &scope, &FixedCatalog)
+        .await
+        .unwrap();
+    let statement = compile(&built, &scope, &resources).unwrap().sql.to_golden();
+
+    let golden = fs::read_to_string(path.with_extension("sql")).unwrap();
+    assert!(
+        golden.starts_with(&statement),
+        "the helper compiles to
+{statement}
+but the golden file holds
+{golden}"
+    );
+}
