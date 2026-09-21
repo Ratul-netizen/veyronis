@@ -42,6 +42,47 @@ const NEEDLES: &[(&str, u64)] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// Spans — M8. The shape matters more here than the volume.
+// ---------------------------------------------------------------------------
+
+/// Spans per trace.
+///
+/// Five, arranged as a two-level tree rather than a chain, because the service map is a
+/// self-join on `parent_span_id` and a chain would make every trace contribute the same
+/// two edges. Real traces fan out: one entry point calls two things, one of which calls
+/// two more.
+const SPANS_PER_TRACE: u64 = 5;
+
+/// Which position's span is whose child. Index is the position, value is its parent's.
+/// Position 0 is the root and has none.
+const PARENT_OF: [usize; SPANS_PER_TRACE as usize] = [0, 0, 1, 1, 0];
+
+/// How many distinct services the estate runs.
+///
+/// Forty, which is where a service map stops being readable as a picture — the number the
+/// Services screen was built around. Fewer would make the map's join implausibly cheap.
+const SERVICES: u64 = 40;
+
+const SPAN_NAMES: &[&str] = &[
+    "GET /checkout",
+    "POST /orders",
+    "GET /health",
+    "charge",
+    "validate",
+    "SELECT",
+    "INSERT",
+    "publish",
+    "consume",
+    "resolve",
+];
+
+const SPAN_KINDS: &[&str] = &["server", "client", "internal", "producer", "consumer"];
+
+const SERVICE_NS: u64 = 0x4444_4444_4444_4444;
+const TRACE_NS: u64 = 0x5555_5555_5555_5555;
+const SPAN_NS: u64 = 0x6666_6666_6666_6666;
+
+// ---------------------------------------------------------------------------
 // Realistic body templates. {N} is substituted with varying values so bodies are
 // not trivially dictionary-compressible — a pitfall that would inflate the
 // compression ratio and make the benchmark lie.
@@ -368,12 +409,147 @@ fn main() {
     match a.signal.as_str() {
         "logs" => gen_logs(&a, &mut w),
         "metrics" => gen_metrics(&a, &mut w),
+        "spans" => gen_spans(&a, &mut w),
         other => {
             eprintln!("unknown signal '{other}' (expected 'logs' or 'metrics')");
             std::process::exit(2);
         }
     }
     w.flush().expect("flush");
+}
+
+/// 32 lower-case hex characters — a trace id, as OTLP carries it and as the column
+/// stores it.
+///
+/// Deliberately **not** `uuid_at` with the dashes removed. A trace id is not a UUID, and
+/// the one place this distinction was missed cost a type error in the query compiler —
+/// see `docs/M8-observability.md` §2.5b.
+fn hex_at(ns: u64, idx: u64, bytes: usize, out: &mut String) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut x = ns.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ idx.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+    for _ in 0..bytes {
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        let b = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 24) as u8;
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0xf) as usize] as char);
+    }
+}
+
+/// Spans, in trace-shaped groups.
+///
+/// # What this is a benchmark *of*
+///
+/// `docs/M8-observability.md` §2.2 and §2.6 both make a bet that is cheap to state and
+/// expensive to be wrong about:
+///
+/// * The sort key is `(tenant_id, resource_id, observed_at)` and cannot help find one
+///   trace, so a **bloom filter on `trace_id`** does the pruning.
+/// * A **self-join on `parent_span_id`** is affordable for a service map over a window.
+///
+/// Neither is measurable without a table shaped like the real thing. Two properties are
+/// therefore not optional here:
+///
+/// 1. **A trace's spans are spread across hosts.** If they shared a `resource_id` the
+///    sort key would find them, the bloom filter would never be exercised, and the
+///    measurement would flatter it enormously.
+/// 2. **Traces interleave.** Spans are emitted trace by trace, but each trace's spans
+///    carry timestamps within a few milliseconds of each other while the stream advances
+///    — so any given granule holds spans from many traces, which is what makes the
+///    filter's granularity the question.
+fn gen_spans<W: Write>(a: &Args, w: &mut W) {
+    let mut rng = Rng::new(a.seed ^ a.skip.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let mut line = String::with_capacity(512);
+    let mut ids: [String; SPANS_PER_TRACE as usize] = Default::default();
+    let window_ms = (a.days * 86_400_000) as i64;
+    let total = if a.total > 0 { a.total } else { a.rows };
+    let step = (window_ms as f64 / total as f64).max(0.001);
+
+    for row in 0..a.rows {
+        let i = a.skip + row;
+        let trace = i / SPANS_PER_TRACE;
+        let pos = (i % SPANS_PER_TRACE) as usize;
+
+        // Every span id of this trace, recomputed when the trace starts. A child has to
+        // name its parent's id, and the parent may have been emitted in a previous batch.
+        if pos == 0 {
+            for (p, id) in ids.iter_mut().enumerate() {
+                id.clear();
+                hex_at(SPAN_NS, trace * SPANS_PER_TRACE + p as u64, 8, id);
+            }
+        }
+
+        line.clear();
+        let tenant = trace % a.tenants;
+        // A different host per position: one trace crosses machines, which is the whole
+        // reason the sort key cannot find it.
+        let host = rng.below(a.resources);
+        let service = (trace.wrapping_mul(7).wrapping_add(pos as u64 * 13)) % SERVICES;
+        let observed = a.start_ms + (i as f64 * step) as i64 + rng.below(20) as i64;
+        let lag = if rng.below(100) == 0 { rng.below(9_000) + 1_000 } else { rng.below(900) };
+
+        uuid_at(TENANT_NS, tenant, &mut line);
+        line.push('\t');
+        uuid_at(RESOURCE_NS, host, &mut line);
+        line.push('\t');
+        uuid_at(SERVICE_NS, service, &mut line);
+        line.push('\t');
+        uuid_at(SITE_NS, host % 12, &mut line);
+        line.push('\t');
+        fmt_ts(observed, &mut line);
+        line.push('\t');
+        fmt_ts(observed + lag as i64, &mut line);
+        line.push('\t');
+        hex_at(TRACE_NS, trace, 16, &mut line);
+        line.push('\t');
+        line.push_str(&ids[pos]);
+        line.push('\t');
+        if pos > 0 {
+            line.push_str(&ids[PARENT_OF[pos]]);
+        }
+        line.push('\t');
+        line.push_str(SPAN_NAMES[(service as usize + pos) % SPAN_NAMES.len()]);
+        line.push('\t');
+        line.push_str(SPAN_KINDS[pos % SPAN_KINDS.len()]);
+        line.push('\t');
+        // Log-ish durations: most fast, a tail that is slow. A uniform distribution would
+        // make every percentile the same number and the t-digest look better than it is.
+        let base = rng.below(2_000_000) + 100_000;
+        let duration = if rng.below(100) < 5 { base * 50 } else { base };
+        push_u64(&mut line, duration);
+        line.push('\t');
+        // `unset` is OTel's default and is not a failure — the distinction the whole
+        // error count rests on. About 2% fail.
+        line.push_str(match rng.below(100) {
+            0 | 1 => "error",
+            2..=20 => "ok",
+            _ => "unset",
+        });
+        line.push('\t');
+        line.push('\t'); // status_message, empty on everything that did not fail
+        line.push_str("0");
+        line.push('\t');
+        line.push_str("io.opentelemetry.instrumentation");
+        line.push('\t');
+        // attributes: a small map, because a real span carries a handful and the column
+        // is `Map(LowCardinality(String), String)` either way.
+        let mut first = true;
+        map_open(&mut line);
+        map_entry(
+            &mut line,
+            &mut first,
+            "http.route",
+            SPAN_NAMES[service as usize % SPAN_NAMES.len()],
+        );
+        map_key(&mut line, &mut first, "host.name");
+        line.push_str("dev-");
+        push_pad(&mut line, host, 5);
+        map_val_end(&mut line);
+        map_close(&mut line);
+        line.push('\n');
+        w.write_all(line.as_bytes()).expect("write");
+    }
 }
 
 fn gen_logs<W: Write>(a: &Args, w: &mut W) {

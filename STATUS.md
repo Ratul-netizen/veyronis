@@ -5,9 +5,11 @@ Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
 
-> **M0–M7 are complete. M8 Observability is at eight of its ten acceptance criteria**,
-> and the two that are left are *measurements* rather than features — see
-> [`docs/M8-observability.md`](./docs/M8-observability.md) §4. SPEC stops at M4
+> **M0–M8 are complete.** M8's last two criteria were measurements, and they are now
+> run and written up in
+> [`bench/results/m8-spans-100000000rows.md`](./bench/results/m8-spans-100000000rows.md)
+> — the trace lookup's bloom filter and the service map's join, both at 100M spans.
+> **M9 Incident is next.** SPEC stops at M4
 > deliberately, so each milestone past it has its own document with its decisions closed
 > before anything was built: [`M5-discovery.md`](./docs/M5-discovery.md),
 > [`M7-flow.md`](./docs/M7-flow.md), [`M8-observability.md`](./docs/M8-observability.md).
@@ -131,14 +133,14 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M7 — all 10 acceptance criteria met** | ✅ [`docs/M7-flow.md`](./docs/M7-flow.md) |
 | `uops-flow` | ✅ 83 — NetFlow v5, NetFlow v9, IPFIX and sFlow v5, hand-written, with a structure-aware fuzzer |
 | `uops-collector-flow` | ✅ one listener per tenant, template caches per exporter, the flow screen with its `≈` mark |
-| **M8 — 8 of 10 acceptance criteria met** | 🟡 [`docs/M8-observability.md`](./docs/M8-observability.md) |
+| **M8 — all 10 acceptance criteria met** | ✅ [`docs/M8-observability.md`](./docs/M8-observability.md) |
 | M8 · spans and the service aggregate | ✅ migration 0008 — `spans` keyed on the host, `service_5m` keyed on the service |
 | M8 · the OTLP span decoder | ✅ `uops_otlp::traces` — and the identity split that made `service_id` possible at all |
 | M8 · the planner learns traces | ✅ `spans` for an investigation, `service_5m` for the APM screen |
 | M8 · log↔trace correlation | ✅ one predicate on a column populated since M3, proven end to end through the receiver |
 | M8 · the service map | ✅ derived from parent/child spans, with the tenant filtered on **both** sides of the join |
 | M8 · the Services screen | ✅ every count named `sampled*`, in the API and in the client |
-| **M8 · the two measurements** | ⬜ granules for a `trace_id` lookup, and the map join's cost. Both need a populated table — W1's method — and §2.2 says assuming does not count |
+| **M8 · the two measurements** | ✅ at 100M spans: a trace lookup reads **9–11 granules** against 4 083 without the index, and the service map does an hour in **472–583 ms**. Both bets were right; the bloom filter's false-positive rate was the default and nobody had chosen it — `ch-migrations/0009` |
 | M8 · a trace waterfall | ⬜ the queries exist (`uops_query::correlate`) and the API runs them; no screen draws the tree |
 
 ## Resume in three commands
@@ -648,18 +650,17 @@ crates/uops-query/
 
 ## Next, in dependency order
 
-1. **M8's two measurements.** Both acceptance criteria that are still open are numbers,
-   not code, and both want W1's method: a populated table and a real query, not a plan.
-   * **Granules read for a `trace_id` lookup at 100M spans** — §2.2. The sort key leads
-     with the resource and cannot help, so a bloom filter on `trace_id` is doing the
-     pruning. That is a *bet*, and the fallback if it disappoints is a `trace_id`-ordered
-     projection, the same shape W1 added to `logs`.
-   * **The service map's join cost** over an hour at the same scale — §2.6. The fallback
-     is a view keyed on `parent_span_id` maintained at insert time, which is not free
-     because a child span can arrive before its parent.
+1. ~~**M8's two measurements.**~~ Done —
+   [`bench/results/m8-spans-100000000rows.md`](./bench/results/m8-spans-100000000rows.md).
+   Both bets held. The one thing that did not was a *parameter*: `bloom_filter` with no
+   argument takes ClickHouse's default false-positive rate of 0.025, so the lookup read a
+   hundred granules of false positives around the five it wanted. `bloom_filter(0.001)`
+   reads nine, for one per cent more storage — `ch-migrations/0009_spans_trace_index.sql`.
 
-   `bench/scripts/load.sh` and `bench/scripts/run.sh` are the harness W1 used. Loading
-   spans needs a generator that `load.sh` does not have yet.
+   The measurement trap is worth carrying to the next benchmark: **ClickHouse remembers
+   which granules matched a predicate**, so the median of five runs measures that memory
+   and not the index. The first version of the harness reported an identical, plausible,
+   wrong number for every configuration including no index at all.
 
 2. **A trace waterfall.** The last piece of M8 that is a feature rather than a number,
    and it needs **nothing new from the backend**: `uops_query::correlate` already builds
@@ -739,7 +740,6 @@ M1 is where they start.
 | Buyer focus: MSP-first? | credential scoping depth in M1 | My recommendation was MSP-first; your read on Bangladesh/SEA overrides mine |
 | Metrics + rollup ingest cost | M4, not M0 | The one W1 measurement not run |
 | **Many tenants rather than many rules** | a hosted deployment | The alert cycle is measured at 1 000 rules in **one** tenant. The suppression cache is per tenant, so a thousand tenants read a thousand maintenance maps a cycle rather than one — a different constant, and an unmeasured one. `docs/benchmarks/alert-cycle.md` says what it does not cover |
-| **Two M8 measurements** | closing M8 | The granules a `trace_id` lookup reads (§2.2) and the service map join's cost (§2.6). Both are bets that the code makes and the tests do not check: the lookup is *correct* and its cost is assumed. §2.2 sets the standard and says assuming is not enough. Each has a named fallback — a `trace_id`-ordered projection, and a view keyed on `parent_span_id` — so the decision is bounded either way |
 | **`Pipeline::attribute` mints a resource per call on an empty identity** | nothing today | An `ObservedIdentity` with no identifiers goes straight to `create_for`, so a caller that resolved one per request would fill an inventory with them. Found while splitting the OTLP host and service identities; `uops-collector-otlp` routes around it and returns the nil resource instead. No other caller can reach it — syslog always has a source address — but the hazard is in the shared pipeline rather than in the collector that noticed it |
 | **A trace id is shaped exactly like a UUID** | handled, recorded | 32 hex characters is a UUID without its dashes, and the AST's `Value` is `untagged`, so one off the wire deserialises as `Value::Uuid` and would bind as `{p:UUID}` against a `String` column. The compiler now binds by the *column*. Worth keeping visible because it was already wrong for `logs.trace_id`, which has been a `String` since M3 — nothing hit it because there were no spans to look up |
 | **No Docker on the development machine** | the documented bring-up | The hypervisor is off for a nested virtualisation stack, so `docker compose` cannot run here. PostgreSQL runs portable and `ClickHouse` runs in a VM — [`docs/dev-environment.md`](./docs/dev-environment.md). The dev `ClickHouse` is deliberately left on a **non-UTC** timezone, because that is what exposed the `DateTime64(3)` parameter bug that returned an empty window silently |
@@ -1476,7 +1476,7 @@ keeping, because each one changed how something is built.
 | M5 discovery | ✅ | all 12 criteria — sweep, classify, neighbours, and the scheduler that runs them |
 | M6 topology | ✅ | the graph, impact analysis, and edges that are evidence rather than assertion |
 | M7 flow | ✅ | all 10 criteria — four decoders written by hand, and a fuzzer that found two real panics |
-| M8 observability | 🟡 | 8 of 10; the two open ones are measurements, and each has a named fallback |
+| M8 observability | ✅ | all 10 — and the two bets it rested on are measured, not assumed |
 | M3 logs | 🟡 | wire → row is done; the daemon, OTLP and the Explorer are not |
 | M4 dashboards & alerting | ⬜ | |
 

@@ -101,6 +101,32 @@ single-trace lookup at 100M spans. The alternative if it disappoints is a
 `trace_id`-ordered projection, which is the same shape as the `p_by_time` projection W1
 already added to `logs` for the tail, and it costs storage the same way.
 
+### 2.2a Measured. The bet was right, and the parameter was never chosen.
+
+[`bench/results/m8-spans-100000000rows.md`](../bench/results/m8-spans-100000000rows.md),
+at 100M spans in 20M traces across 5 000 hosts:
+
+| index                    |    rows read | granules |
+|--------------------------|-------------:|---------:|
+| none                     |   33 447 936 |    4 083 |
+| `bloom_filter` (default) |      ~850 000 |     ~100 |
+| `bloom_filter(0.001)`    |      ~80 000 |     9–11 |
+
+**371× fewer rows than a scan**, and the projection stays unbuilt.
+
+The finding worth carrying is the middle row. `bloom_filter` with no argument takes
+ClickHouse's default false-positive rate of **0.025** — one granule in forty survives by
+accident — and 0008 took that default because nobody looked at what it was. At `0.001` the
+lookup reads nine granules instead of a hundred, for 83 MiB more index on an 8.26 GiB
+table. One per cent of the data for an order of magnitude on the query the table exists to
+answer. `ch-migrations/0009_spans_trace_index.sql`.
+
+And a warning that belongs next to the number: **ClickHouse remembers which granules
+matched a predicate**, so the second run of a lookup measures that memory rather than the
+index. The first version of the harness took the median of five runs and reported an
+identical, plausible, wrong 40 960 rows for every configuration including no index at all.
+Every trace id in the recorded run is used exactly once.
+
 ### 2.3 Traces are sampled, and unlike flow they cannot be scaled up.
 
 M7 §2.4 stored a sampling rate beside the counts and multiplied at read time. **That does
@@ -204,10 +230,17 @@ is a loop on every node. And every service that did not resolve shares the nil u
 one node would be the union of all of them — looking like a real service with an
 implausible number of edges.
 
-**The cost is not measured.** A hash join over the window, which is the screen's rather
-than the retention period's; §2.2 sets the standard for claims like this and this does not
-meet it yet. If it disappoints, the answer is a view keyed on `parent_span_id` maintained
-at insert time — and it is not free, because a child can arrive before its parent.
+**Measured, and it is affordable.** A hash join over the window, which is the screen's
+rather than the retention period's: at 100M spans an hour holding 198 415 spans produces
+its 120 edges in **472–583 ms, reading 3.2M rows**. Usable for a screen, which was the
+bar. The view keyed on `parent_span_id` that this section named as the escape hatch stays
+unbuilt, and the reason is now a number rather than optimism.
+
+One number in that is worth reading twice: it reads **16× more rows than the window
+holds**. The time filter is not leading in the sort key, so an hour costs whole granules
+of every host that was active in it. That is the M0 trade working as designed —
+contiguity for one resource, paid for by scanning for one hour — and it is the shape to
+remember before adding any other time-first question to this table.
 
 ---
 
@@ -246,9 +279,10 @@ what promoting a deferred file is for.
 - [x] Two hosts running one service resolve to two host resources and one service resource
       — and raise nothing for review, which is the assertion that makes §2.1 load-bearing
 - [x] `POST /v1/traces` stops reporting partial success, because the spans are now stored
-- [~] A trace is retrievable by `trace_id` — through the AST, against the live server.
-      The granules that lookup reads are **not** measured yet; that needs a populated
-      table and W1's method, and §2.2 is explicit that assuming is not enough
+- [x] A trace is retrievable by `trace_id`, and the granules read for that lookup are
+      measured and recorded rather than assumed — §2.2.
+      [`bench/results/m8-spans-100000000rows.md`](../bench/results/m8-spans-100000000rows.md):
+      **9–11 granules at 100M spans**, against 4 083 without the index
 - [x] The logs emitted during a trace are retrievable by joining on `trace_id`, using the
       column that has been populated since M3 — one export carrying both signals, read
       back through `uops_query::correlate`, with the id compared byte for byte across
@@ -265,7 +299,10 @@ what promoting a deferred file is for.
       server, along with the adversarial case in §2.6 below
 - [x] Spans from tenant A are unreachable from tenant B, by the same adversarial test M7
       used
-- [ ] The suite runs against the live ClickHouse, on a server whose timezone is not UTC
+- [x] The suite runs against the live ClickHouse, on a server whose timezone is not UTC
+      — `America/New_York`, kept that way on purpose. It is what exposed the
+      `DateTime64(3)` parameter bug that returned an empty window silently, and it is the
+      only reason a repeat of that bug would be caught. See `docs/dev-environment.md`
 
 ---
 

@@ -25,19 +25,23 @@
 # Usage:
 #   scripts/load.sh logs    100000000 [--truncate]
 #   scripts/load.sh metrics 100000000 [--truncate]
+#   scripts/load.sh spans   100000000 [--truncate]
 #
 # Env: BATCH (default 2000000) RESOURCES TENANTS DAYS SEED
 
 set -euo pipefail
 
-SIGNAL="${1:?usage: load.sh <logs|metrics> <rows> [--truncate]}"
-ROWS="${2:?usage: load.sh <logs|metrics> <rows> [--truncate]}"
+SIGNAL="${1:?usage: load.sh <logs|metrics|spans> <rows> [--truncate]}"
+ROWS="${2:?usage: load.sh <logs|metrics|spans> <rows> [--truncate]}"
 TRUNCATE="${3:-}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GEN="$HERE/gen/target/release/uops-bench-gen.exe"
 [ -x "$GEN" ] || GEN="$HERE/gen/target/release/uops-bench-gen"
-CH="http://localhost:8123/?user=bench&password=bench"
+# The benchmark used to run against its own compose stack. There is no Docker on the
+# machine this was last run from, so the server is wherever CH_URL says — see
+# docs/dev-environment.md. The default is still the compose stack's published port.
+CH="${CH_URL:-http://localhost:8123}/?user=${CH_USER:-bench}&password=${CH_PASSWORD:-bench}"
 
 BATCH="${BATCH:-2000000}"      # ~640 MB of TSV per request at current row width
 RESOURCES="${RESOURCES:-5000}"
@@ -53,6 +57,10 @@ case "$SIGNAL" in
   metrics)
     TABLE="bench.metrics"
     COLS="tenant_id,resource_id,site_id,metric,observed_at,ingested_at,value,unit,labels"
+    ;;
+  spans)
+    TABLE="bench.spans"
+    COLS="tenant_id,resource_id,service_id,site_id,observed_at,ingested_at,trace_id,span_id,parent_span_id,name,kind,duration_ns,status_code,status_message,sampling_probability,scope_name,attributes"
     ;;
   *) echo "unknown signal: $SIGNAL" >&2; exit 2 ;;
 esac
