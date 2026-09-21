@@ -196,12 +196,37 @@ a read out of bounds. A panic in a collector is still a denial of service, so th
 path returns `Result` and the receive loop treats a malformed packet as one dropped packet,
 never as a reason to stop.
 
-**Fuzzing would be new.** There is no `cargo fuzz` setup in this repository today, and the
-existing decoders do not have one — so this is a thing M7 introduces, not a convention it
-follows. It is worth introducing here because IPFIX is the first format in the product
-with attacker-controlled *field lengths* driving the parse, which is the shape that
-historically breaks. If it earns its keep, the other three decoders should get it too; that
-is a separate piece of work and is not smuggled into M7's acceptance.
+**Fuzzing was new, and it earned its keep on the first run.**
+
+`crates/uops-flow/tests/fuzz.rs` builds *plausible* packets — correct versions, coherent
+lengths, real template shapes — and then breaks them: flips bytes, truncates, rewrites
+length fields, repeats sections. That matters more than it sounds. Each decoder already had
+an `arbitrary_bytes_never_panic` test and those are nearly worthless alone, because a random
+buffer fails the version check in its first two bytes and never reaches a template, a
+variable-length field or a nested set. The code that breaks is the code random bytes cannot
+get to.
+
+It found two panics immediately, one in `v9` and one in `ipfix`, and they were the same
+bug: `bytes += truncating(slice)` on a template declaring two eight-byte counter fields.
+Both addends come off the wire, so a record filling both with values near `u64::MAX`
+overflows — which **panics in debug and wraps in release**, and the wrap is the worse half:
+an absurd number quietly becoming a small plausible one. An unauthenticated denial of
+service, or silent corruption, from a crafted template. Both now saturate.
+
+**It is not coverage-guided, and that is a real limit rather than a quibble.** libFuzzer
+needs a nightly toolchain and a clang with sanitizer support; the machine this was built on
+has a stable MSVC toolchain and neither — `docs/dev-environment.md` explains why that
+machine is what it is. `cargo fuzz` over these same decoders on a Linux host would explore
+paths this does not, and it is outstanding work rather than something to claim.
+
+What this form does give, and libFuzzer does not, is determinism: the same seed produces
+the same packets everywhere, so a failure found in CI reproduces on a laptop. The harness
+catches the panic and prints the seed, the iteration and the packet's bytes before
+re-raising, because a finding nobody can reproduce is not a finding.
+
+Run longer with `UOPS_FUZZ_ITERS=1000000 cargo test -p uops-flow --test fuzz`, and note
+that the soak must be a **debug** build: release does not check arithmetic overflow, which
+is the bug class this has actually caught.
 
 ---
 
@@ -243,7 +268,9 @@ column pairs to read.
       and a review item rather than a dropped packet — SPEC §M0.2 rule 1
 - [x] A packet arriving on tenant A's listener cannot produce a row in tenant B, whatever
       it claims — the isolation test, as an adversarial case
-- [ ] Each decoder survives a fuzzing run without a panic
+- [x] Each decoder survives a fuzzing run without a panic — structure-aware, in
+      `crates/uops-flow/tests/fuzz.rs`; coverage-guided is the stronger form and is
+      still outstanding, see §2.8
 - [x] The suite runs against the live ClickHouse and the flow queries return correct rows
       on a server whose timezone is not UTC — see `docs/dev-environment.md`
 

@@ -485,8 +485,14 @@ fn record(
             TCP_CONTROL_BITS => tcp_flags = narrow8(slice),
             IP_CLASS_OF_SERVICE => tos = narrow8(slice),
 
-            OCTET_DELTA_COUNT | POST_OCTET_DELTA_COUNT => bytes += truncating(slice),
-            PACKET_DELTA_COUNT | POST_PACKET_DELTA_COUNT => packets += truncating(slice),
+            // Saturating for the reason `v9` records: both addends come off the wire,
+            // and `+` on two near-maximal u64s panics in debug and wraps in release.
+            OCTET_DELTA_COUNT | POST_OCTET_DELTA_COUNT => {
+                bytes = bytes.saturating_add(truncating(slice));
+            }
+            PACKET_DELTA_COUNT | POST_PACKET_DELTA_COUNT => {
+                packets = packets.saturating_add(truncating(slice));
+            }
 
             INGRESS_INTERFACE => input_if = Some(narrow32(slice)),
             EGRESS_INTERFACE => output_if = Some(narrow32(slice)),

@@ -482,8 +482,14 @@ fn record(
             // exporter is configured, and some send both. Added rather than overwritten:
             // a template carrying IN_BYTES and OUT_BYTES describes one conversation, and
             // taking whichever came last would report half of it.
-            IN_BYTES | OUT_BYTES => bytes += truncating(slice),
-            IN_PKTS | OUT_PKTS => packets += truncating(slice),
+            //
+            // Saturating, because the addends are attacker-controlled. A template may
+            // declare both counters eight bytes wide and a record may fill both with
+            // values near u64::MAX, and `+` on that panics in debug and *wraps* in
+            // release — turning an absurd number into a small plausible one, which is the
+            // worse of the two. Found by `tests/fuzz.rs` on its first run.
+            IN_BYTES | OUT_BYTES => bytes = bytes.saturating_add(truncating(slice)),
+            IN_PKTS | OUT_PKTS => packets = packets.saturating_add(truncating(slice)),
 
             INPUT_SNMP => input_if = Some(narrow32(slice)),
             OUTPUT_SNMP => output_if = Some(narrow32(slice)),
