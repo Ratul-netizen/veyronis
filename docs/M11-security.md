@@ -328,8 +328,19 @@ a person's judgement rather than a product's guess — and an event does not.
       > the username and the address it filtered on are **absent** from the audit table,
       > which matters more here than for a log search: the values in a security query are
       > exactly the thing being protected.
-- [ ] Cross-tenant isolation holds for every new surface, by the same adversarial test
+- [x] Cross-tenant isolation holds for every new surface, by the same adversarial test
       every milestone since M7 has used
+      > **M11 adds no HTTP surface.** Every question the security screen asks is a `Query`
+      > posted to `/api/v1/query`, which `isolation.rs` has covered since M3 — so the
+      > isolation these analytics need is isolation that already exists and is already
+      > tested, rather than a new case to remember.
+      >
+      > That was a decision and not an accident. A `/api/v1/security/*` route returning
+      > pre-shaped JSON would have been quicker to write and would have been a second path
+      > to the same rows, with its own tenant check to get right, its own audit entry to
+      > remember and its own idea of what a window means. PLAN's frozen decision about the
+      > Query AST is *"never a parallel code path"*, and a bespoke analytics route is
+      > exactly that.
 
 ---
 

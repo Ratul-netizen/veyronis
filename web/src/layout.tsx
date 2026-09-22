@@ -51,6 +51,11 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
     heading: "Operations",
     items: [
       { to: "/incidents", label: "Incidents" },
+      // Under Operations rather than in a section of its own. A firewall deny and a link
+      // going down are the same kind of question — what did the estate just report — and a
+      // separate "Security" heading would suggest a separate product, which M11 §1 is
+      // explicit that this is not.
+      { to: "/security", label: "Security" },
       { to: "/alerts", label: "Alerts", exact: true },
       { to: "/alerts/rules", label: "Rules" },
       { to: "/alerts/channels", label: "Channels" },

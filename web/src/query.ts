@@ -83,14 +83,27 @@ export type Expr =
   | { op: "exists"; field: Field };
 
 /**
- * The aggregate functions this app asks for. The Rust AST has one more —
- * `count_distinct` — and nothing here builds it.
+ * The aggregate functions this app asks for.
+ *
+ * `count_distinct` is the security screen's — M11 §2.4 groups failed sign-ins by a pair,
+ * and "how many *distinct* accounts did this address try" is the number that separates
+ * somebody mistyping from somebody working through a list. It was in the Rust AST from M0
+ * and unbuilt here until there was a question that needed it.
  *
  * The percentiles are the services screen's, and they are fixed at these three because
  * the `service_5m` column's *type* declares them: `quantilesTDigest(0.5, 0.95, 0.99)`.
  * A p90 is not a missing feature, it is a number the stored state does not contain.
  */
-export type AggFunc = "count" | "sum" | "avg" | "min" | "max" | "p50" | "p95" | "p99";
+export type AggFunc =
+  | "count"
+  | "count_distinct"
+  | "sum"
+  | "avg"
+  | "min"
+  | "max"
+  | "p50"
+  | "p95"
+  | "p99";
 
 export interface Aggregation {
   func: AggFunc;

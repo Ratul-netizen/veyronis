@@ -32,6 +32,7 @@ import { createRoot } from "react-dom/client";
 import { ApiError, api } from "./api";
 import { CollectorsPage } from "./collectorspage";
 import { PlanPage, RunPage, RunbooksPage, RunsPage } from "./runbookspages";
+import { SecurityPage } from "./securitypage";
 import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
@@ -178,6 +179,14 @@ const channelsRoute = createRoute({
   component: ChannelsPage,
 });
 
+// Security — M11. Four questions, all of them Query ASTs against `events`; there is no
+// security API and this route adds no HTTP surface.
+const securityRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/security",
+  component: SecurityPage,
+});
+
 // Runbooks — M10. Three screens: what exists, what a run would do, and what it did.
 const runbooksRoute = createRoute({
   getParentRoute: () => shellRoute,
@@ -270,6 +279,7 @@ const routeTree = rootRoute.addChildren([
     alertsRoute,
     rulesRoute,
     channelsRoute,
+    securityRoute,
     runbooksRoute,
     runbookPlanRoute,
     runsRoute,
