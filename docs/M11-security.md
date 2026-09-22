@@ -248,16 +248,35 @@ a person's judgement rather than a product's guess — and an event does not.
 
 ## 3. Acceptance criteria
 
-- [ ] A firewall syslog message in a recognised shape becomes an `events` row with
+- [x] A firewall syslog message in a recognised shape becomes an `events` row with
       `event_category = 'network'`, an `event_type` of `allowed` or `denied`, and
       `source.ip` / `destination.ip` / `destination.port` as attributes
-- [ ] A message in **no** recognised shape produces no event, is still stored as a log, and
+      > `uops-syslog/src/normalize.rs`. The event is a **second** output of one message and
+      > never a replacement: `to_row` runs either way, so a customer keeps the raw text of
+      > exactly the lines this product understood best.
+- [x] A message in **no** recognised shape produces no event, is still stored as a log, and
       is still searchable — verified by a test that asserts the log count is unchanged
-- [ ] The number of normalization shapes is asserted by a test, so adding one is deliberate
+      > And nothing is logged about the absence. A product that warned about every
+      > unclassified line would be warning about almost every line.
+- [x] The number of normalization shapes is asserted by a test, so adding one is deliberate
+      > `SHAPES.len() == 4`, with the failure message saying that changing it is allowed and
+      > is a decision. The same mechanism that holds the built-in monitoring profiles at
+      > five.
 - [ ] A security event appears on the Investigation Workspace timeline beside the metrics
       and logs for the same resource, on the same axis, with no new timeline code
-- [ ] Failed authentications group by `(user.name, source.ip)` and the three shapes in
+- [x] Failed authentications group by `(user.name, source.ip)` and the three shapes in
       §2.4 are distinguishable in the output
+      > `uops-store-ch/tests/telemetry.rs`, against real `ClickHouse`, and **with no new
+      > aggregate**: `count()` and `countDistinct()` over a `Field::Attr` were both already
+      > in the AST, and nothing in `uops-query` changed.
+      >
+      > The fixture is built so the numbers have to do the work. One user with nine
+      > failures from one source, and one user with nine failures from *three* — the same
+      > count, different shapes, so a threshold on failures alone cannot tell them apart.
+      > That is the whole argument for grouping on a pair.
+      >
+      > Forty successful sign-ins sit in the same window and must not be counted, because
+      > without them the test would pass against a query with no filter at all.
 - [x] A detection is a saved query with a condition, evaluated by the **same** engine as an
       alert rule — verified by pointing an existing alert rule at `events` and getting a
       firing alert with no new evaluation path
@@ -278,8 +297,10 @@ a person's judgement rather than a product's guess — and an event does not.
       > and the source hop — see the amendment in §2.4 for why they cannot be `events`
       > rows. A detection over them needs an organization-scoped evaluation path that does
       > not exist, and that is the named precondition.
-- [ ] An `NXDOMAIN` frequency table is answerable through the Query AST with no new
+- [x] An `NXDOMAIN` frequency table is answerable through the Query AST with no new
       aggregate
+      > Fifty names that resolved sit in the same window and are absent from the table, so
+      > the filter is doing the work rather than the volume.
 - [ ] A firewall `denied` event and the flow record for the same conversation are shown
       together, joined on the resource rather than on a re-parsed address
 - [ ] Reading a security event writes an `access_log` entry, by the middleware that has

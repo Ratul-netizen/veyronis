@@ -2034,3 +2034,354 @@ async fn an_unidentified_service_is_not_drawn_as_a_node() {
         .unwrap();
     assert!(edges(&result).is_empty(), "{:?}", result.rows);
 }
+
+// ---- security events — M11 ------------------------------------------------------
+
+/// One security event, `offset_secs` into the fixture window.
+///
+/// Anchored to `window().start` like every other fixture here and **not** to now: the
+/// window is one hour, two hours back, so a row placed relative to the present falls
+/// outside it and every assertion reads an empty result. That is how the first version of
+/// these two tests failed.
+fn event_row(
+    tenant: TenantId,
+    resource: ResourceId,
+    category: &str,
+    kind: &str,
+    attributes: &[(&str, &str)],
+    offset_secs: i64,
+) -> uops_store_ch::EventRow {
+    let at = window().start + Duration::seconds(offset_secs);
+    uops_store_ch::EventRow {
+        tenant_id: tenant,
+        resource_id: resource,
+        site_id: SiteId::nil(),
+        observed_at: at,
+        ingested_at: at,
+        source_kind: "syslog".into(),
+        source_vendor: "fortinet".into(),
+        severity: "warn".into(),
+        event_category: category.into(),
+        event_type: kind.into(),
+        summary: "an event".into(),
+        attributes: attributes
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+    }
+}
+
+/// A `UInt64` from a result cell, however `ClickHouse` chose to encode it.
+///
+/// The same quoting problem [`number`] documents, and a separate function rather than a
+/// cast from it: these are **counts**, so comparing them as floats would be the wrong type
+/// for the question — `count() == 9` is exact, and writing it as `9.0` invites a clippy
+/// warning that is telling the truth.
+fn count(value: &serde_json::Value) -> u64 {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or_default()
+}
+
+/// `(group, first aggregate, second aggregate)` from a grouped result, as a map.
+fn grouped(result: &uops_store_ch::ResultSet) -> std::collections::BTreeMap<String, (u64, u64)> {
+    result
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row[0].as_str().unwrap_or_default().to_owned(),
+                (count(&row[1]), row.get(2).map_or(0, count)),
+            )
+        })
+        .collect()
+}
+
+/// M11 §3: failed authentications group by `(user.name, source.ip)` and the three shapes in
+/// §2.4 are distinguishable in the output.
+///
+/// # The shapes are arithmetic, and the product does not name them
+///
+/// §2.4 is explicit: *"the product does not name these. It groups by the key and reports
+/// the counts, because 'password spraying' is an interpretation and the three shapes above
+/// are arithmetic."* So what this asserts is that the two numbers which distinguish them —
+/// **failures per source** and **distinct users per source** — come back from one query,
+/// and that they separate the fixtures.
+///
+/// # And it needs no new aggregate
+///
+/// `count()` and `countDistinct()` over a `Field::Attr` are both already in the AST.
+/// Nothing in `uops-query` changed for this, which is the second half of the claim: M11's
+/// analytics are queries this product could already express, pointed at a table it could
+/// already read.
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "three fixtures and two groupings")]
+async fn failed_authentications_group_by_user_and_source() {
+    let store = store();
+    let tenant = TenantId::new();
+    let scope = scope_for(tenant);
+    let device = ResourceId::new();
+
+    let mut rows = Vec::new();
+
+    // Shape one: many failures, one user, one source. Somebody mistyping, or a stuck
+    // service account.
+    for n in 0..9 {
+        rows.push(event_row(
+            tenant,
+            device,
+            "authentication",
+            "failure",
+            &[("user.name", "alice"), ("source.ip", "10.0.0.5")],
+            120 + n,
+        ));
+    }
+
+    // Shape two: many failures, **many users**, one source. The one worth waking up for.
+    for (n, user) in ["bob", "carol", "dan", "erin", "frank"].iter().enumerate() {
+        let n = i64::try_from(n).expect("five users");
+        for attempt in 0..4 {
+            rows.push(event_row(
+                tenant,
+                device,
+                "authentication",
+                "failure",
+                &[("user.name", *user), ("source.ip", "198.51.100.7")],
+                140 + (n * 4) + attempt,
+            ));
+        }
+    }
+
+    // Shape three: many failures, one user, **many sources**. A credential in a botnet, or
+    // a phone looping.
+    for (n, source) in ["203.0.113.1", "203.0.113.2", "203.0.113.3"]
+        .iter()
+        .enumerate()
+    {
+        let n = i64::try_from(n).expect("three sources");
+        for attempt in 0..3 {
+            rows.push(event_row(
+                tenant,
+                device,
+                "authentication",
+                "failure",
+                &[("user.name", "grace"), ("source.ip", *source)],
+                200 + (n * 3) + attempt,
+            ));
+        }
+    }
+
+    // Successes in the same window, which the filter must exclude — without them the test
+    // would pass against a query that counted every authentication event.
+    for n in 0..40 {
+        rows.push(event_row(
+            tenant,
+            device,
+            "authentication",
+            "success",
+            &[("user.name", "heidi"), ("source.ip", "10.0.0.9")],
+            250 + n,
+        ));
+    }
+
+    uops_store_ch::EventStore::insert_events(&store, &rows)
+        .await
+        .unwrap();
+
+    let failures = Expr::And {
+        of: vec![
+            Expr::Compare {
+                field: Field::EventCategory,
+                cmp: CompareOp::Eq,
+                value: Value::Str("authentication".into()),
+            },
+            Expr::Compare {
+                field: Field::EventType,
+                cmp: CompareOp::Eq,
+                value: Value::Str("failure".into()),
+            },
+        ],
+    };
+
+    // Per source: how many failures, and how many distinct users they were against. Two
+    // numbers, no interpretation.
+    let mut by_source = Query::new(SignalType::Event, window());
+    by_source.filter = Some(failures.clone());
+    by_source.aggregations = vec![
+        Aggregation {
+            func: AggFunc::Count,
+            field: None,
+            alias: "failures".into(),
+        },
+        Aggregation {
+            func: AggFunc::CountDistinct,
+            field: Some(Field::Attr {
+                key: "user.name".into(),
+            }),
+            alias: "users".into(),
+        },
+    ];
+    by_source.group_by = vec![Field::Attr {
+        key: "source.ip".into(),
+    }];
+
+    let result = store
+        .query(&by_source, &scope, &ResolvedResources::whole_tenant(&scope))
+        .await
+        .unwrap();
+    let found = grouped(&result);
+
+    // The successful sign-ins are absent: the filter is doing the work.
+    assert!(!found.contains_key("10.0.0.9"), "{found:?}");
+
+    // One user, many failures.
+    assert_eq!(found["10.0.0.5"], (9, 1), "{found:?}");
+    // Many users from one source — the same failure count spread over one account would be
+    // unremarkable, and the second number is what separates them.
+    assert_eq!(found["198.51.100.7"], (20, 5), "{found:?}");
+    // The third shape is invisible from this grouping by construction: each source has only
+    // three failures. It is the *user* grouping below that shows it, which is why §2.4
+    // names a pair and not a single key.
+    assert_eq!(found["203.0.113.1"], (3, 1), "{found:?}");
+
+    // Per user: how many failures, and from how many distinct sources.
+    let mut by_user = Query::new(SignalType::Event, window());
+    by_user.filter = Some(failures);
+    by_user.aggregations = vec![
+        Aggregation {
+            func: AggFunc::Count,
+            field: None,
+            alias: "failures".into(),
+        },
+        Aggregation {
+            func: AggFunc::CountDistinct,
+            field: Some(Field::Attr {
+                key: "source.ip".into(),
+            }),
+            alias: "sources".into(),
+        },
+    ];
+    by_user.group_by = vec![Field::Attr {
+        key: "user.name".into(),
+    }];
+
+    let result = store
+        .query(&by_user, &scope, &ResolvedResources::whole_tenant(&scope))
+        .await
+        .unwrap();
+    let found = grouped(&result);
+
+    assert_eq!(found["alice"], (9, 1), "one user, one source: {found:?}");
+    assert_eq!(
+        found["grace"],
+        (9, 3),
+        "one user, three sources: {found:?}"
+    );
+    // Alice and Grace have the *same* failure count and different shapes. That is the whole
+    // argument for the pair: a threshold on failures alone cannot tell them apart.
+    assert_eq!(
+        found["alice"].0, found["grace"].0,
+        "the fixture is only interesting if these match"
+    );
+}
+
+/// M11 §3: an `NXDOMAIN` frequency table is answerable through the Query AST with no new
+/// aggregate.
+///
+/// §2.5 is the reason this is the DNS analytic and nothing cleverer. Reputation lookups,
+/// DGA scoring and entropy heuristics need either a feed this product will not ship or a
+/// model whose false-positive rate nobody here has measured. What a resolver log answers on
+/// its own is *what resolved, from where, how often* — and `NXDOMAIN` in volume from one
+/// host, which is one of the few DNS signals that means something without external
+/// knowledge.
+///
+/// It reports the count and says nothing about what it means: that shape is a piece of
+/// software looking for a command server that has been taken down, and it is also a
+/// misconfigured search domain.
+#[tokio::test]
+async fn an_nxdomain_frequency_table_needs_no_new_aggregate() {
+    let store = store();
+    let tenant = TenantId::new();
+    let scope = scope_for(tenant);
+    let resolver = ResourceId::new();
+
+    let mut rows = Vec::new();
+    for n in 0..12 {
+        rows.push(event_row(
+            tenant,
+            resolver,
+            "dns",
+            "query",
+            &[
+                ("dns.question.name", "absent.example.invalid"),
+                ("dns.response_code", "NXDOMAIN"),
+                ("source.ip", "10.0.0.5"),
+            ],
+            300 + n,
+        ));
+    }
+    for n in 0..4 {
+        rows.push(event_row(
+            tenant,
+            resolver,
+            "dns",
+            "query",
+            &[
+                ("dns.question.name", "gone.example.invalid"),
+                ("dns.response_code", "NXDOMAIN"),
+                ("source.ip", "10.0.0.6"),
+            ],
+            320 + n,
+        ));
+    }
+    // Resolutions that worked, which must not be counted.
+    for n in 0..50 {
+        rows.push(event_row(
+            tenant,
+            resolver,
+            "dns",
+            "query",
+            &[
+                ("dns.question.name", "present.example.invalid"),
+                ("dns.response_code", "NOERROR"),
+                ("source.ip", "10.0.0.5"),
+            ],
+            340 + n,
+        ));
+    }
+    uops_store_ch::EventStore::insert_events(&store, &rows)
+        .await
+        .unwrap();
+
+    let mut table = Query::new(SignalType::Event, window());
+    table.filter = Some(Expr::Compare {
+        field: Field::Attr {
+            key: "dns.response_code".into(),
+        },
+        cmp: CompareOp::Eq,
+        value: Value::Str("NXDOMAIN".into()),
+    });
+    table.aggregations = vec![Aggregation {
+        func: AggFunc::Count,
+        field: None,
+        alias: "n".into(),
+    }];
+    table.group_by = vec![Field::Attr {
+        key: "dns.question.name".into(),
+    }];
+
+    let result = store
+        .query(&table, &scope, &ResolvedResources::whole_tenant(&scope))
+        .await
+        .unwrap();
+    let found = grouped(&result);
+
+    assert_eq!(found.len(), 2, "only the failures: {found:?}");
+    assert_eq!(found["absent.example.invalid"].0, 12, "{found:?}");
+    assert_eq!(found["gone.example.invalid"].0, 4, "{found:?}");
+    assert!(
+        !found.contains_key("present.example.invalid"),
+        "a name that resolved is not in a table of names that did not: {found:?}"
+    );
+}
