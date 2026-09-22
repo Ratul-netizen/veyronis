@@ -2906,6 +2906,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-runbook"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "serde",
+ "thiserror 2.0.20",
+ "uops-core",
+ "uops-query",
+]
+
+[[package]]
 name = "uops-secrets"
 version = "0.0.1"
 dependencies = [

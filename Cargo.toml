@@ -176,6 +176,7 @@ uops-flow = { path = "crates/uops-flow" }
 uops-sweeper = { path = "crates/uops-sweeper" }
 uops-incident = { path = "crates/uops-incident" }
 uops-oidc = { path = "crates/uops-oidc" }
+uops-runbook = { path = "crates/uops-runbook" }
 uops-api = { path = "crates/uops-api" }
 uops-server = { path = "crates/uops-server" }
 uops-store-ch = { path = "crates/uops-store-ch" }

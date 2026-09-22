@@ -1,0 +1,23 @@
+[package]
+name = "uops-runbook"
+description = "Runbooks: what a step may be, what makes it destructive, and who may approve a run."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+uops-core.workspace = true
+# A runbook targets resources the same way an alert rule and a maintenance window do.
+# Reusing the selector rather than inventing a third is what makes "restart the device
+# this alert fired on" a copy of one field.
+uops-query.workspace = true
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

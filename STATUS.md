@@ -167,6 +167,9 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M12 §2.5 · the buyer's evidence** | ✅ [`docs/security-overview.md`](./docs/security-overview.md) and [`SECURITY.md`](./SECURITY.md) — dated, naming what it describes, and claiming **no certification**, because claiming one casually is worse than claiming neither |
 | **M12 §2.5 · generated, not typed** | ✅ an SBOM and a dependency licence report out of CI, attached to every published release. 300 third-party crates across 18 licence expressions, all permissive — `scripts/licence-report.py` reads `cargo metadata`, so it cannot drift from what cargo builds |
 | **M12 — all 12 acceptance criteria addressed** | ✅ ten met, two partial: the two-poller sample count, and cross-tenant isolation which reopens with each new surface |
+| **M10 · decisions closed** | ✅ [`docs/M10-automation.md`](./docs/M10-automation.md) — the first milestone that **writes** to a customer's network, so every decision in it is about what stops it |
+| **M10 · the rules** | ✅ `uops-runbook` — 59 tests on what the product refuses: a `reload` marked read-only, a destructive step with no declared rollback, a value that could end the command it is substituted into, a run approved by the person who started it |
+| M10 · storage, runner, API, screens | ⬜ next |
 
 ## Resume in three commands
 
