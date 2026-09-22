@@ -385,6 +385,16 @@ fn two_roots_at_the_same_instant_have_no_candidate() {
 }
 
 #[test]
+fn an_incident_of_one_has_a_candidate_even_with_no_topology() {
+    // The order of the two checks in `candidate`, asserted. One alert on one device has
+    // an unambiguous origin whether or not anything in the estate is linked — and an
+    // integration test found this the wrong way round, reporting "no likely origin" for
+    // the single device the incident was about.
+    let only = ResourceId::new();
+    assert_eq!(candidate(&[member(only, 0)], false, |_, _| false), Ok(only));
+}
+
+#[test]
 fn an_estate_with_no_topology_has_no_candidate() {
     // Nothing is upstream of anything, so nothing is a likely origin. The screen says
     // there is none and why — an empty field is information.

@@ -301,13 +301,19 @@ pub fn candidate<F>(
 where
     F: Fn(ResourceId, ResourceId) -> bool,
 {
-    if !estate_has_topology {
-        return Err(NoCandidate::NoTopology);
-    }
-
-    // An incident of one has exactly one answer, whatever the topology looks like.
+    // An incident of one has exactly one answer, and it is checked **before** the
+    // topology. There is no tie to refuse: one alert on one device has an unambiguous
+    // origin whether or not anything else in the estate is linked to anything.
+    //
+    // The order used to be the other way round, and an integration test caught it — a
+    // single firing alert on an estate with no edges reported "no likely origin" for the
+    // one device it was about, which reads as broken rather than as careful.
     if let [only] = members {
         return Ok(only.resource_id);
+    }
+
+    if !estate_has_topology {
+        return Err(NoCandidate::NoTopology);
     }
 
     let roots: Vec<&Member> = members

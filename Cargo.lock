@@ -2296,6 +2296,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "uops-core",
+ "uops-incident",
  "uops-notify",
  "uops-poll",
  "uops-query",

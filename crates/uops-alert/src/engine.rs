@@ -36,6 +36,7 @@ use chrono::{DateTime, Duration, Utc};
 use tokio::sync::Mutex;
 use uops_core::alert::{Phase, step};
 use uops_core::{ResourceId, Suppression, TenantId, TenantScope};
+use uops_incident::{Firing, GroupReason, NoCandidate, candidate, group};
 use uops_query::{Query, ResolvedResources, resolve};
 use uops_store_ch::{ChStore, TelemetryStore};
 use uops_store_pg::{AlertRule, Evaluated, PgCatalog, PgStore};
@@ -67,6 +68,14 @@ pub struct RuleOutcome {
     pub suppressed: usize,
     /// True when the evaluation filled its series ceiling — see [`plan::MAX_SERIES`].
     pub truncated: bool,
+    /// Things that went wrong *beside* the evaluation rather than in it.
+    ///
+    /// M9's grouping is the first of these: an alert that cannot be put into an incident
+    /// is still an alert, and still notifies. Returning `Err` from the evaluation would
+    /// throw away a decision the engine had already made and written — SPEC §M0.2 rule 1
+    /// one level up, where the thing that matters is not lost for the thing that
+    /// decorates it.
+    pub failures: Vec<String>,
 }
 
 impl RuleOutcome {
@@ -112,6 +121,16 @@ pub struct Engine {
     /// Per tenant: when it was read, and what it said. Shared across clones so the run
     /// loop's spawned evaluations reuse one another's work rather than each doing it.
     suppression: SuppressionCache,
+}
+
+/// One line describing an incident at the moment it was opened.
+///
+/// Not a title a human edits — M9 §5 keeps incident editing out of v0.1, because an
+/// editable summary is the first half of a ticketing system. It names the rule, because
+/// that is what an operator recognises, and the grouping reason, because §2.3 requires an
+/// incident of one to say why it is one.
+fn summary(rule: &AlertRule, reason: GroupReason) -> String {
+    format!("{} — {}", rule.name, reason.explain())
 }
 
 /// Which resources are inside an open maintenance window, and what it suppresses.
@@ -193,21 +212,52 @@ impl Engine {
             // few hundred pointless writes a minute whose only symptom is a `PostgreSQL`
             // instance that is busier than anybody can explain.
             let recovering = was.is_some_and(|(phase, _)| phase.is_active());
-            if transition.phase.is_active() || recovering {
-                self.pg
-                    .record_evaluation(
-                        scope,
-                        &Evaluated {
-                            rule_id: rule.id,
-                            resource_id: series.resource,
-                            dedup_key: key.clone(),
-                            phase: transition.phase,
-                            since: transition.since,
-                            at: now,
-                            value: Some(series.value),
-                        },
-                    )
-                    .await?;
+            let written = if transition.phase.is_active() || recovering {
+                Some(
+                    self.pg
+                        .record_evaluation(
+                            scope,
+                            &Evaluated {
+                                rule_id: rule.id,
+                                resource_id: series.resource,
+                                dedup_key: key.clone(),
+                                phase: transition.phase,
+                                since: transition.since,
+                                at: now,
+                                value: Some(series.value),
+                            },
+                        )
+                        .await?,
+                )
+            } else {
+                None
+            };
+
+            // The softer half of a maintenance window: the phase moves, the history is
+            // kept, nobody is woken up.
+            let mut notify = transition.notify && !quiet.is_some_and(|s| s.notifications);
+
+            // M9 §2.2. An alert that has just *entered* firing is grouped into an
+            // incident, and grouping may take its notification away — §2.4. Only on the
+            // entering edge: `notify` is also true when an alert resolves, and a
+            // resolution belongs to the incident its alert already joined.
+            if notify
+                && transition.phase == Phase::Firing
+                && let Some(row) = &written
+            {
+                {
+                    match self.group_into_incident(scope, rule, row, now).await {
+                        Ok(permitted) => notify = permitted,
+                        // Grouping is not allowed to lose an alert. A failure here leaves
+                        // the alert ungrouped and notifying, which is the same behaviour
+                        // the product had before M9 — SPEC §M0.2 rule 1 applied one level
+                        // up: never block the thing that matters for the thing that
+                        // decorates it.
+                        Err(e) => outcome
+                            .failures
+                            .push(format!("incident grouping for rule {}: {e}", rule.id)),
+                    }
+                }
             }
 
             outcome.decisions.push(Decision {
@@ -216,14 +266,100 @@ impl Engine {
                 dedup_key: key,
                 phase: transition.phase,
                 since: transition.since,
-                // The softer half of a maintenance window: the phase moves, the history
-                // is kept, nobody is woken up.
-                notify: transition.notify && !quiet.is_some_and(|s| s.notifications),
+                notify,
                 value: Some(series.value),
             });
         }
 
         Ok(outcome)
+    }
+
+    /// Put a newly firing alert into an incident, and say whether it may still notify.
+    ///
+    /// M9 §2.2 and §2.4. Everything that decides is in `uops_incident`; everything here
+    /// is the four reads and one write that decision needs, in the order it needs them.
+    ///
+    /// # Why the candidate is recomputed rather than carried
+    ///
+    /// §2.5 picks the resource with nothing above it, and the answer depends on the whole
+    /// membership — which is what just changed. An incident that grew a new root has a new
+    /// candidate, and holding the old one would mean the screen names a switch that turned
+    /// out to be downstream of the thing that actually broke.
+    async fn group_into_incident(
+        &self,
+        scope: &TenantScope,
+        rule: &AlertRule,
+        alert: &uops_store_pg::AlertStateRow,
+        now: DateTime<Utc>,
+    ) -> uops_core::Result<bool> {
+        let firing = Firing {
+            resource_id: alert.resource_id,
+            rule_id: rule.id,
+            at: now,
+        };
+
+        let open = self.pg.open_incidents(scope).await?;
+        let topology = self.pg.neighbourhood(scope, alert.resource_id).await?;
+        let suppression = self.pg.suppression_enabled(scope).await?;
+
+        let decision = group(&firing, &open, &topology, suppression);
+        let severity = rule.severity.as_str();
+
+        let incident = if let Some(id) = decision.join {
+            let hops = match decision.reason {
+                GroupReason::Connected { hops } => Some(hops),
+                _ => None,
+            };
+            self.pg
+                .join_incident(scope, id, alert.id, decision.notify, hops, severity, now)
+                .await?;
+            id
+        } else {
+            {
+                // §2.3: an incident of one on an estate with no topology carries the
+                // reason it was not grouped, because it is indistinguishable from a bug
+                // otherwise.
+                let why = match decision.reason {
+                    GroupReason::NoTopology => Some(NoCandidate::NoTopology.as_str()),
+                    _ => None,
+                };
+                self.pg
+                    .open_incident(
+                        scope,
+                        alert.id,
+                        severity,
+                        &summary(rule, decision.reason),
+                        now,
+                        why,
+                    )
+                    .await?
+            }
+        };
+
+        // Recomputed over the membership as it now stands. The oracle is one query per
+        // pair, which is bounded by the incident's size and runs only when an alert joins
+        // — not on the evaluation path that every series takes every cycle.
+        let members = self.pg.incident_members(scope, incident).await?;
+        let mut upstream = std::collections::HashMap::new();
+        for a in &members {
+            for b in &members {
+                if a.resource_id != b.resource_id {
+                    let yes = self
+                        .pg
+                        .is_upstream_of(scope, a.resource_id, b.resource_id)
+                        .await?;
+                    upstream.insert((a.resource_id, b.resource_id), yes);
+                }
+            }
+        }
+        let picked = candidate(&members, topology.estate_has_topology, |upper, lower| {
+            upstream.get(&(upper, lower)).copied().unwrap_or(false)
+        });
+        self.pg
+            .set_candidate(scope, incident, picked.map_err(NoCandidate::as_str))
+            .await?;
+
+        Ok(decision.notify)
     }
 
     /// Run the evaluation query, and for an absence rule add the resources that produced
@@ -344,6 +480,7 @@ impl Engine {
                     cycle.series += outcome.decisions.len();
                     cycle.notifications += outcome.notifications();
                     cycle.suppressed += outcome.suppressed;
+                    cycle.failures.extend(outcome.failures);
                     if outcome.truncated {
                         cycle.failures.push(format!(
                             "rule {} read the maximum of {} series and stopped; its grouping \
@@ -357,6 +494,17 @@ impl Engine {
                 // alternative is that a single broken rule silences the installation.
                 Err(e) => cycle.failures.push(format!("rule {}: {e}", rule.name)),
             }
+        }
+
+        // M9 §2.1. An incident whose alerts have all resolved becomes *quiet* — never
+        // closed, because closing is a claim that it is understood and a machine is not
+        // in a position to make one.
+        //
+        // Once per tenant per cycle rather than per rule: it is one statement over the
+        // tenant's open incidents, and running it per rule would repeat it a thousand
+        // times for an answer that changes when an alert resolves.
+        if let Err(e) = self.pg.quiet_settled_incidents(&scope, now).await {
+            cycle.failures.push(format!("settling incidents: {e}"));
         }
 
         cycle

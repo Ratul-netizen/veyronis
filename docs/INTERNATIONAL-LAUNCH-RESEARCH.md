@@ -3,7 +3,7 @@
 **Prepared:** 22 September 2026  
 **Status:** research and product-direction note; not legal, tax, accounting, trademark, or certification advice.  
 **Audience:** Claude (product/engineering collaborator) and the founder.  
-**Repository state used:** `STATUS.md` records M0–M8 complete; M9 Incident is designed in `docs/M9-incident.md` and is the next implementation milestone.
+**Repository state used:** `STATUS.md` records M0–M8 complete. M9 Incident is in progress: commit `d732038` adds its schema, graph-walk rules, and store layer; the remaining M9 work is the alert-fire engine integration, cross-signal timeline, API/UI, and the full acceptance-test set.
 
 ## 1. The decision to make now
 
@@ -39,7 +39,7 @@ The repository records meaningful performance evidence: the M8 trace lookup and 
 
 ### Not yet credible as a general commercial promise
 
-- M9 Incident / Investigation Workspace implementation (the design exists; the product does not yet).
+- A complete M9 Incident / Investigation Workspace. The grouping foundations are implemented, but the alert-fire engine integration, cross-signal timeline, API/UI, and full end-to-end acceptance evidence remain.
 - Mature HA, DR testing, distributed collector management, billing, support tooling, SSO/SAML, and formal customer-facing security evidence.
 - Broad vendor integration coverage and a mature monitoring-profile ecosystem.
 - A trademark-cleared public name. Keep `uops` as the internal implementation identity until clearance is completed.
@@ -92,6 +92,8 @@ QoS is commercially relevant and fits Veyronis well. It must be implemented in t
 ### 4.1 QoS visibility — recommended product scope
 
 Build this first. It is observation, not a production network change:
+
+**Roadmap decision required:** QoS is not in the current M0–M13 sequence. The proposal fits the product, but it must be added deliberately to `PLAN.md` as a new milestone or a bounded extension, rather than silently displacing M10–M13. The natural split is CBQoS/vendor profiles alongside the M2 collection model, DSCP attributes alongside M7 flow, then an explicitly named QoS visibility milestone once a design partner makes the need concrete.
 
 - Interface utilization, errors, discards, and queue drops.
 - Service policy / class-map / queue statistics where exposed by SNMP and vendor APIs.
@@ -313,16 +315,14 @@ The repository’s existing secret handling, tenant typing, audit discipline, de
 
 ## 11. Recommended roadmap from today
 
-### Next engineering milestone: M9 Incident
+### Next engineering work: complete M9 Incident
 
-Implement `docs/M9-incident.md` without broadening it:
+The schema, time-plus-topology grouping, suppression-default control, candidate explanation, and store layer are already committed in `d732038`. Complete `docs/M9-incident.md` without broadening it:
 
-- PostgreSQL incident and incident-alert schema.
-- Time + topology grouping rule.
-- Transparent topology-notification suppression, off by default per tenant.
-- Likely-origin candidate with explicit explanation/evidence.
-- Cross-signal timeline queried from the existing stores, not duplicated into a second truth.
-- Acceptance tests for a cascade, unrelated failures, quiet versus closed, tenant isolation, and 100M-row timeline performance.
+- Wire the grouping engine to the alert-fire path.
+- Add the cross-signal timeline, queried from the existing stores rather than duplicated into a second truth.
+- Add the API/UI and the remaining acceptance tests: cascade, unrelated failures, quiet versus closed, suppression semantics, and tenant isolation.
+- Measure timeline performance honestly. The documented ClickHouse VM has 3.8 GB RAM and cannot currently support a trustworthy 100M-row timeline benchmark. Allocate sufficient memory, or measure at a smaller scale and label the result precisely; never report a 10M result as a 100M result.
 
 ### Immediately after M9
 
