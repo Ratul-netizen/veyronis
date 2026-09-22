@@ -52,6 +52,68 @@ would have nulled `tenant_id`.
 
 ## ClickHouse — a Linux VM
 
+### Two things that will bite you after a restart
+
+**The guest's IP changes.** It is DHCP on a bridged adapter, so a restart can move it —
+and it moved across an entire subnet once, from `192.168.1.219` to `172.31.38.250`. The
+failure is confusing rather than obvious: `ping` still answered, because a different
+device on the old network had taken the old address, while every TCP connection to 8123
+timed out. Read the address back rather than assuming it:
+
+```bash
+vmrun -T ws getGuestIPAddress "<the vmx>" -wait
+export CLICKHOUSE_URL="http://<that>:8123"
+```
+
+STATUS.md's housekeeping already carries the same lesson for Docker — *"re-read the
+container IPs, Docker reassigns them"*. It is the same mistake with a different
+hypervisor.
+
+**ClickHouse does not auto-start.** It is a standalone binary, not a package:
+
+```bash
+cd ~/clickhouse && nohup ./clickhouse server --config-file=./config.xml > /tmp/ch.out 2>&1 &
+```
+
+### Running commands in the guest
+
+`vmrun`'s guest operations work, but **invoke them from PowerShell, not from bash**. The
+same `runScriptInGuest` call that returns `Error: A file was not found` through the bash
+tool succeeds unchanged from PowerShell — the VMX path has a space in it and the bash
+wrapper mangles the quoting into an argument vmrun reads as a missing file. The error
+names the wrong thing entirely, which is what makes it expensive.
+
+```powershell
+$vmx = "C:\...\kali-linux-2026.2-vmware-amd64.vmx"
+$vmrun = "C:\Program Files\VMware\VMware Workstation\vmrun.exe"
+& $vmrun -T ws -gu kali -gp kali runScriptInGuest $vmx "/bin/bash" "free -m > /tmp/x.txt 2>&1"
+& $vmrun -T ws -gu kali -gp kali CopyFileFromGuestToHost $vmx /tmp/x.txt C:\Temp\x.txt
+```
+
+Output comes back through a file, because `runScriptInGuest` does not return stdout.
+
+### The guest has 3.8 GB of RAM, and the benchmark does not fit in it
+
+`config.xml` caps ClickHouse at half of that, which is right for the test suite and **not
+enough for a benchmark load**. Loading 100M spans — 8.26 GiB compressed, 20.5 GiB raw —
+plus a `MATERIALIZE INDEX` mutation across thirty parts took the guest out of memory: the
+process stayed alive and kept its pid, dropped its listener, and left the kernel unable to
+fork, so that not even `/bin/true` would run. From the host it looked like a hung test
+suite.
+
+The measurement in [`bench/results/m8-spans-100000000rows.md`](../bench/results/m8-spans-100000000rows.md)
+was worth having and worth the outage once. Before running another one:
+
+* **Give the VM more memory first**, or run the benchmark somewhere that is not also the
+  suite's database. An 8 GiB load on the instance every integration test depends on turns
+  a benchmark into an outage for everything else.
+* **The data is regenerable** from seed 42 and is never committed, so dropping it costs
+  eleven minutes and nothing else: `DROP DATABASE bench`.
+* **Merges settle.** Once the load and any mutation have finished, the table sits there
+  costing disk and nothing else. `system.merges` and `system.mutations` are the two tables
+  to check before concluding it is still the problem.
+
+
 ClickHouse has **no native Windows build**, so this one needs a Linux somewhere. Any
 Linux reachable over the network will do; here it is a VMware guest.
 
