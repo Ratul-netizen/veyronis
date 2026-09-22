@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT resource_id AS \"resource_id: ResourceId\", step_index, name, rendered,\n                   destructive, state::text AS \"state!\", output, exit_code, finished_at\n              FROM runbook_run_step\n             WHERE run_id = $1 AND tenant_id = $2\n             ORDER BY resource_id, step_index\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "resource_id: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "step_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "rendered",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "destructive",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "output",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "exit_code",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "1a68297b6da8bcfd497fda391710688bf609cc20e914a8936f4819761d9e487c"
+}

@@ -18,6 +18,14 @@ uops-core.workspace = true
 uops-notify.workspace = true
 uops-identity.workspace = true
 uops-query.workspace = true
+# M10's routes. The API validates a runbook, plans a run and asks whether one may go — and
+# does none of those itself: every rule is in this crate and this one calls it, so the
+# screen and `uops-runner` cannot come to different conclusions.
+uops-runbook.workspace = true
+# The fingerprint over a run's resolved target list — what an approval is *of*. Integrity,
+# not secrecy, which is the same reason the migration runner uses it directly rather than
+# through uops-secrets.
+sha2.workspace = true
 uops-oidc.workspace = true
 uops-secrets.workspace = true
 uops-store-ch.workspace = true
@@ -40,7 +48,7 @@ tower-http.workspace = true
 # those are fixtures rather than anything the API is responsible for creating.
 chrono.workspace = true
 sqlx.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tower = { workspace = true, features = ["util"] }
 uuid.workspace = true
 serde_json.workspace = true

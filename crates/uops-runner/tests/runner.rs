@@ -90,17 +90,60 @@ impl Transport for Scripted {
 
 // ---- fixture --------------------------------------------------------------------
 
-/// Only one test at a time may hold the queue.
+/// A key nobody else uses, for the advisory lock below. Arbitrary and fixed.
+const RUN_QUEUE_LOCK: i64 = 0x7075_6f70_735f_726e;
+
+/// Exclusive use of the run queue, across every test binary at once.
 ///
 /// **This is a property of the thing under test, not a workaround.** `claim_next_run` is
-/// deliberately cross-tenant — a runner serves a deployment, not a tenant — so two tests
-/// running at once against one database are two runners contending for one queue, and each
-/// would take the other's run. That is the product working correctly and the test being
-/// wrong about what it owns.
+/// deliberately cross-tenant — a runner serves a deployment, not a tenant — so two test
+/// binaries against one database are two runners contending for one queue, and each takes
+/// the other's runs. `uops-api`'s runbook tests create `ready` runs; this binary's runner
+/// claims them, executes them against a scripted device, and then asserts about a run it
+/// never queued.
 ///
-/// The one test that *wants* two runners contending takes the gate once and runs both
-/// inside it.
-static QUEUE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// A `tokio::sync::Mutex` cannot fix that: it is one process. A `PostgreSQL` session
+/// advisory lock can, because the contention is in the database and so is the lock.
+///
+/// Held by a connection of its own rather than one from the pool, so that dropping the
+/// guard closes the session and `PostgreSQL` releases the lock — including when a test
+/// panics, which is the path a `Drop` written in async Rust cannot reach.
+struct QueueLock {
+    // Kept alive for the life of the test and never used again. The connection *is* the
+    // lock.
+    _held: sqlx::PgConnection,
+}
+
+impl QueueLock {
+    async fn take() -> Self {
+        use sqlx::Connection as _;
+
+        let url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://uops:uops@localhost:5432/uops".into());
+        let mut held = sqlx::PgConnection::connect(&url).await.expect("lock connection");
+
+        // `pg_try_advisory_lock` in a loop rather than `pg_advisory_lock`, so a leaked
+        // lock fails with a sentence instead of hanging a test run for ever. Thirty
+        // seconds is longer than any test here and far shorter than a CI timeout.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            let (got,): (bool,) = sqlx::query_as("SELECT pg_try_advisory_lock($1)")
+                .bind(RUN_QUEUE_LOCK)
+                .fetch_one(&mut held)
+                .await
+                .expect("try lock");
+            if got {
+                return Self { _held: held };
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the run queue is still held after 120s. Another test binary is stuck, or a \
+                 connection holding the advisory lock leaked."
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+}
 
 /// A store for one test.
 ///
@@ -126,8 +169,8 @@ async fn store() -> PgStore {
 }
 
 struct Fixture {
-    /// Held for the life of the test — see [`QUEUE`].
-    _queue: tokio::sync::MutexGuard<'static, ()>,
+    /// Held for the life of the test — see [`QueueLock`].
+    _queue: QueueLock,
     store: PgStore,
     scope: TenantScope,
     starter: ActorId,
@@ -137,8 +180,24 @@ struct Fixture {
 }
 
 async fn fixture(slug: &str) -> Fixture {
-    let gate = QUEUE.lock().await;
+    let gate = QueueLock::take().await;
     let store = store().await;
+
+    // Start from an empty queue.
+    //
+    // `claim_next_run` takes the **oldest** `ready` run in the deployment, which is right
+    // — a run that has waited longest should go first — and means a development database
+    // that has accumulated abandoned `ready` rows from a previous test run hands this one
+    // somebody else's work. The symptom is a test that claims a run, sends nothing, and
+    // asserts about a runbook it never wrote.
+    //
+    // Safe under the lock: nothing else that cares about the queue is running. Cancelled
+    // rather than deleted, because a run row is referenced by its approvals and its
+    // transcript, and because "cancelled" is what these actually are.
+    sqlx::query("UPDATE runbook_run SET state = 'cancelled' WHERE state = 'ready'")
+        .execute(store.pool())
+        .await
+        .expect("drain the queue");
     let org = OrgId::new();
     let tenant = TenantId::new();
     let tag = tenant.into_uuid().simple().to_string();

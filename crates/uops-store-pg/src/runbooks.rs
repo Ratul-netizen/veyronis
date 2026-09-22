@@ -163,6 +163,35 @@ impl Claimed {
     }
 }
 
+/// One step of a run, as the transcript screen reads it.
+#[derive(Clone, Debug)]
+pub struct RunStepRow {
+    pub resource_id: ResourceId,
+    pub step_index: i32,
+    pub name: String,
+    pub rendered: String,
+    pub destructive: bool,
+    /// `pending`, `skipped`, `running`, `ok`, `failed`.
+    pub state: String,
+    /// Already redacted — it was redacted on the way *in*, by `record_step`, so there is
+    /// no path in this product that can serve a raw transcript.
+    pub output: Option<String>,
+    pub exit_code: Option<i32>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+/// Everything about a run that the approval decision needs.
+#[derive(Clone, Debug)]
+pub struct RunContext {
+    /// The version that was recorded, not the runbook's current one. An approval is of
+    /// *this* run, which executed *that* version.
+    pub runbook: Runbook,
+    pub targets_fingerprint: String,
+    pub started_by: ActorId,
+    pub break_glass: bool,
+    pub approvals: Vec<uops_runbook::Approval>,
+}
+
 impl PgStore {
     /// Create a runbook, or save a new version of one that exists.
     ///
@@ -381,6 +410,155 @@ impl PgStore {
         Ok(affected == 1)
     }
 
+    /// Whether this account is its organization's break-glass account.
+    ///
+    /// **The same account M12 §2.2 created, used for a second thing**, which M10 §2.5 asks
+    /// for in as many words: *"The same argument, and the same shape, as the break-glass
+    /// account in M12 §2.2."*
+    ///
+    /// One flag, two powers — signing in with a password when the organization requires
+    /// SSO, and starting a destructive run without an approval — and that is the point
+    /// rather than a conflation. Both are the 3 a.m. case: an organization with a rule and
+    /// one engineer awake will get around the rule, through a laptop and SSH, with no
+    /// audit trail at all. What the product offers instead is the route it can observe,
+    /// and it is the *same* route, held by the same single account per organization that
+    /// migration 0024's unique index enforces. Two separate emergency accounts would be
+    /// two things to hand out, two to review and two to forget.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said. A user that does not exist is **not** break-glass
+    /// rather than an error: the caller is asking "may this person skip approval", and the
+    /// answer for somebody who is not there is no.
+    pub async fn is_break_glass(&self, user: ActorId) -> Result<bool> {
+        // tenant-exempt: a user is an organization-level record, and break-glass is a
+        // property of the organization's emergency account rather than of a tenant.
+        let row = sqlx::query!(
+            r#"
+            SELECT break_glass FROM app_user
+             WHERE id = $1 AND disabled_at IS NULL
+            "#,
+            user as ActorId,
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| map("user", user.to_string(), e))?;
+
+        Ok(row.is_some_and(|r| r.break_glass))
+    }
+
+    /// A run's transcript, in the order it was executed.
+    ///
+    /// Ordered by resource and then step, so a run across forty devices reads as forty
+    /// sequences rather than as one interleaved list nobody can follow.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn run_steps(&self, scope: &TenantScope, run: uuid::Uuid) -> Result<Vec<RunStepRow>> {
+        // tenant-exempt: the tenant is a bound parameter, from the scope.
+        let rows = sqlx::query!(
+            r#"
+            SELECT resource_id AS "resource_id: ResourceId", step_index, name, rendered,
+                   destructive, state::text AS "state!", output, exit_code, finished_at
+              FROM runbook_run_step
+             WHERE run_id = $1 AND tenant_id = $2
+             ORDER BY resource_id, step_index
+            "#,
+            run,
+            scope.tenant_id() as TenantId,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("run step", run.to_string(), e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| RunStepRow {
+                resource_id: r.resource_id,
+                step_index: r.step_index,
+                name: r.name,
+                rendered: r.rendered,
+                destructive: r.destructive,
+                state: r.state,
+                output: r.output,
+                exit_code: r.exit_code,
+                finished_at: r.finished_at,
+            })
+            .collect())
+    }
+
+    /// What deciding about a run needs, in one read.
+    ///
+    /// The alternative is three calls from the route and an opportunity for two of them to
+    /// see different versions of the same run. The decision itself is **not** here — it is
+    /// `uops_runbook::decide`, and a second copy of it in this layer could disagree with
+    /// the one the runner uses, which is the disagreement that matters most in this
+    /// milestone.
+    ///
+    /// # Errors
+    ///
+    /// [`uops_core::Error::NotFound`] for a run that is not this tenant's, which is the
+    /// same answer as one that does not exist — confirming an id exists elsewhere is an
+    /// inventory leak between customers.
+    pub async fn run_context(&self, scope: &TenantScope, run: uuid::Uuid) -> Result<RunContext> {
+        // tenant-exempt: the tenant is a bound parameter, from the scope.
+        let row = sqlx::query!(
+            r#"
+            SELECT version_id, targets_fingerprint,
+                   started_by AS "started_by: ActorId", break_glass
+              FROM runbook_run
+             WHERE id = $1 AND tenant_id = $2
+            "#,
+            run,
+            scope.tenant_id() as TenantId,
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| map("run", run.to_string(), e))?
+        .ok_or(uops_core::Error::NotFound {
+            kind: "run",
+            id: run.to_string(),
+        })?;
+
+        let (_, runbook) = self
+            .runbook_version(scope, row.version_id)
+            .await?
+            .ok_or(uops_core::Error::NotFound {
+                kind: "runbook version",
+                id: row.version_id.to_string(),
+            })?;
+
+        // tenant-exempt: the tenant is a bound parameter, from the scope.
+        let approvals = sqlx::query!(
+            r#"
+            SELECT approved_by AS "approved_by: ActorId", at, targets_fingerprint
+              FROM runbook_approval
+             WHERE run_id = $1 AND tenant_id = $2
+            "#,
+            run,
+            scope.tenant_id() as TenantId,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("approval", run.to_string(), e))?
+        .into_iter()
+        .map(|a| uops_runbook::Approval {
+            by: a.approved_by,
+            at: a.at,
+            targets_fingerprint: a.targets_fingerprint,
+        })
+        .collect();
+
+        Ok(RunContext {
+            runbook,
+            targets_fingerprint: row.targets_fingerprint,
+            started_by: row.started_by,
+            break_glass: row.break_glass,
+            approvals,
+        })
+    }
+
     // ---- the queue the runner reads ---------------------------------------------
 
     /// Take the oldest queued run, or find there is none.
@@ -582,6 +760,101 @@ impl PgStore {
         .map_err(|e| map("resource", scope.tenant_id().to_string(), e))?;
 
         Ok(rows.into_iter().map(|r| (r.id, r.value)).collect())
+    }
+
+    /// How many resources a runbook's selector reaches, and what they are called.
+    ///
+    /// # Why the count comes back separately from the names
+    ///
+    /// M10 §2.7 refuses a run whose selector exceeds the runbook's maximum **and says by
+    /// how much**. Saying by how much needs the true number; drawing the plan needs the
+    /// names. A single query that fetched names for a selector matching forty thousand
+    /// resources would do forty thousand rows of work in order to be told the answer is
+    /// "no" — so the ids come first, and the names are fetched only once the count has
+    /// been accepted.
+    ///
+    /// That ordering is also what §2.2's dry run reports: *"a selector that was meant to
+    /// match one switch and matches four hundred is the single most common way automation
+    /// causes an outage"*, and the number is the thing to look at before anything else.
+    ///
+    /// `ResourceSelector::All` is materialised here rather than left as "the whole
+    /// tenant". A query may leave it implicit — no `resource_id` predicate is the whole
+    /// tenant — but a run cannot: somebody has to approve *this list*, and "everything,
+    /// whatever that is at the time" is not a list.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the catalog or `PostgreSQL` said.
+    pub async fn runbook_target_ids(
+        &self,
+        scope: &TenantScope,
+        selector: &uops_query::ast::ResourceSelector,
+    ) -> Result<Vec<ResourceId>> {
+        let resolved = uops_query::resolve(selector, scope, &crate::PgCatalog::new(self.clone()))
+            .await
+            .map_err(|e| uops_core::Error::Invalid(format!("resolving the targets: {e}")))?;
+
+        if let Some(ids) = resolved.ids() {
+            return Ok(ids.to_vec());
+        }
+
+        // `All`. Decommissioned resources are excluded: they are kept so a run record's
+        // name keeps resolving, and sending a command to one is not something a selector
+        // meaning "everything" should be read as asking for.
+        //
+        // tenant-exempt: the tenant is the only bound parameter, from the scope.
+        let rows = sqlx::query!(
+            r#"
+            SELECT id AS "id: ResourceId"
+              FROM resource
+             WHERE tenant_id = $1 AND status <> 'decommissioned'
+             ORDER BY id
+            "#,
+            scope.tenant_id() as TenantId,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("resource", scope.tenant_id().to_string(), e))?;
+
+        Ok(rows.into_iter().map(|r| r.id).collect())
+    }
+
+    /// The names of resources a run will act on, in the order a plan lists them.
+    ///
+    /// Sorted by name rather than by id: the list exists to be *read* by somebody deciding
+    /// whether to approve it, and a page of UUIDs in insertion order is a page nobody
+    /// checks — which is the failure §2.2 is about.
+    ///
+    /// A resource that has disappeared between resolution and this call is simply absent.
+    /// The caller compares the counts; a plan quietly one shorter than the selector
+    /// matched is not a plan anybody should approve.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn runbook_target_names(
+        &self,
+        scope: &TenantScope,
+        ids: &[ResourceId],
+    ) -> Result<Vec<(ResourceId, String)>> {
+        let raw: Vec<uuid::Uuid> = ids.iter().map(|id| (*id).into()).collect();
+
+        // tenant-exempt: the tenant is a bound parameter, from the scope.
+        let rows = sqlx::query!(
+            r#"
+            SELECT id AS "id: ResourceId", COALESCE(display_name, name) AS "name!"
+              FROM resource
+             WHERE tenant_id = $1 AND id = ANY($2)
+             ORDER BY COALESCE(display_name, name), id
+            "#,
+            scope.tenant_id() as TenantId,
+            &raw,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("resource", scope.tenant_id().to_string(), e))?;
+
+        Ok(rows.into_iter().map(|r| (r.id, r.name)).collect())
     }
 
     // ---- runs -------------------------------------------------------------------

@@ -31,6 +31,7 @@ import { createRoot } from "react-dom/client";
 
 import { ApiError, api } from "./api";
 import { CollectorsPage } from "./collectorspage";
+import { PlanPage, RunPage, RunbooksPage, RunsPage } from "./runbookspages";
 import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
@@ -177,6 +178,37 @@ const channelsRoute = createRoute({
   component: ChannelsPage,
 });
 
+// Runbooks — M10. Three screens: what exists, what a run would do, and what it did.
+const runbooksRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/runbooks",
+  component: RunbooksPage,
+});
+
+const runbookPlanRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/runbooks/$id",
+  component: function RunbookPlan() {
+    const { id } = runbookPlanRoute.useParams();
+    return <PlanPage id={id} />;
+  },
+});
+
+const runsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/runs",
+  component: RunsPage,
+});
+
+const runRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/runs/$id",
+  component: function OneRun() {
+    const { id } = runRoute.useParams();
+    return <RunPage id={id} />;
+  },
+});
+
 const topologyRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/topology",
@@ -238,6 +270,10 @@ const routeTree = rootRoute.addChildren([
     alertsRoute,
     rulesRoute,
     channelsRoute,
+    runbooksRoute,
+    runbookPlanRoute,
+    runsRoute,
+    runRoute,
     topologyRoute,
     discoveryRoute,
     discoveryRunsRoute,

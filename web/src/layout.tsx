@@ -59,6 +59,10 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       // question rather than an inventory one — and the answer is often that a process
       // died rather than that a device did.
       { to: "/collectors", label: "Collectors" },
+      // Under Operations, and next to the things it is used during. A runbook is not part
+      // of the inventory — it is what somebody does to the inventory at 3 a.m.
+      { to: "/runbooks", label: "Runbooks" },
+      { to: "/runs", label: "Runs" },
     ],
   },
 ];

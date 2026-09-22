@@ -325,8 +325,9 @@ somebody should make deliberately rather than inherit.
       the word it matched
 - [ ] A dry run resolves the targets, names every resource, renders every command, and
       executes only the read-only steps — verified against a real SSH server, not a mock
-      > **Partly.** Everything but the last clause holds and is tested
-      > (`uops-runner/tests/runner.rs`). The real-SSH half is not: no SSH server was
+      > **Partly.** Everything but the last clause holds and is tested — the resolving,
+      > naming and rendering by `uops-api/tests/runbooks.rs`, the executing by
+      > `uops-runner/tests/runner.rs`. The real-SSH half is not: no SSH server was
       > reachable from the machine this was built on, so what has been verified against a
       > real `ssh(1)` is the client invocation and the refused-connection contract
       > (`ssh::tests::a_refused_connection_is_reported_as_never_having_asked`), not a
@@ -339,17 +340,19 @@ somebody should make deliberately rather than inherit.
       > having touched no device — exactly the simulation §2.2 opens by saying a dry run is
       > not. The author's `destructive` flag is what decides, and §2.3's deny-list is what
       > makes that flag trustworthy. That is what §2.3 is for.
-- [ ] A run whose selector exceeds the runbook's maximum does not run, and says by how much
-      > `uops_runbook::plan` refuses with the numbers; nothing calls it yet. The API route
-      > that plans a run is where this becomes reachable.
+- [x] A run whose selector exceeds the runbook's maximum does not run, and says by how much
+      > And the count is checked *before* the names are fetched, so a selector matching
+      > forty thousand resources costs one index scan to be told no rather than forty
+      > thousand rows of work.
 - [x] A destructive run started and approved by the same person is **refused**
 - [x] An approval older than its window is refused, and the run stays pending rather than
       failing
-- [ ] A break-glass run without approval succeeds, is audited as its own kind of event, and
+- [x] A break-glass run without approval succeeds, is audited as its own kind of event, and
       the run record says it was unapproved
-      > The run record says it (`runbook_run.break_glass`) and `decide` returns
-      > `BreakGlass`, which the runner honours. The *audit event* is written where a person
-      > starts a run, which is the API route and is not built.
+      > `runbooks.run.break_glass` is a separate action from `runbooks.run.start`, not one
+      > action with a flag: an investigation looking for these should filter on the action
+      > rather than read every run's detail. The account is the organization's single
+      > emergency account — the same one M12 §2.2 created, which §2.5 asks for by name.
 - [x] A step that fails stops the run, and the product offers the declared rollback rather
       than performing it
 - [x] A rendered command and a captured output never reach a log line — by the same kind of
@@ -363,11 +366,57 @@ somebody should make deliberately rather than inherit.
       > the database serialises. The test runs **with no lease at all**, so it tests the
       > claim rather than the lease — M12 §2.3's enrolment token is where that distinction
       > was learned.
-- [ ] Cross-tenant isolation holds for every new surface, by the same adversarial test
+- [x] Cross-tenant isolation holds for every new surface, by the same adversarial test
       every milestone since M7 has used
-      > No new HTTP surface exists yet. The store surfaces added here are tenant-scoped or
-      > deliberately cross-tenant (`claim_next_run`, `fail_abandoned_runs` — a runner serves
-      > a deployment), and each carries the `tenant-exempt` marker the CI guard reads.
+      > Ten routes, each with both attacks. The second one matters more here than anywhere
+      > else in the product: a leak on these routes is not one customer *reading* another's
+      > inventory, it is one customer **starting a run against** it.
+      >
+      > The two store surfaces that are deliberately cross-tenant — `claim_next_run` and
+      > `fail_abandoned_runs`, because a runner serves a deployment rather than a tenant —
+      > carry the `tenant-exempt` marker the CI guard reads, and everything they hand back
+      > carries the tenant it came from.
+
+---
+
+## 3b. What the screens are, and the one that is the product
+
+`RunbooksPage` lists what exists. `RunPage` says what happened. **`PlanPage` is where
+somebody decides**, and every decision §2.2 argues for is on it: the resolved targets by
+name, the count in front of the reader, the literal command that would be sent to each
+device, and a mark against every step saying whether a dry run executes it.
+
+It prints the server's own sentence rather than composing one. There is no client-side
+summary, because there is no client-side version of *"would run 3 steps on 4 resources,
+none of which change anything"* that could not drift into *"would succeed"*.
+
+**Starting a real run is two clicks and the second is not the easy path.** A dry run is the
+primary button; a real run is behind a checkbox that says what it means and a confirmation
+that repeats the count. Deliberate friction on the only action in this product that
+changes somebody else's equipment.
+
+**There is no runbook editor.** A runbook is written as JSON in a textarea and posted, and
+the refusal comes back in full with every problem at once. A typed step-tree editor is a
+screen of its own and is not what §3 asks for — what §3 asks for is that a runbook is
+created, validated and versioned, and that the refusal names the step.
+
+### A test-infrastructure note that is really a design note
+
+The queue is deployment-wide: `claim_next_run` takes the oldest `ready` run in the whole
+database, because a runner serves a deployment rather than a tenant. That is correct, and
+it means **two test binaries against one database are two runners contending for one
+queue** — `uops-api`'s tests create `ready` runs and `uops-runner`'s claims them, then
+asserts about a runbook it never wrote.
+
+An in-process mutex cannot fix that; a `PostgreSQL` session advisory lock can, because the
+contention is in the database and so is the lock. Both suites take it, held by a connection
+of its own so that a panicking test still releases it.
+
+The same work turned up a second thing worth knowing: a development database accumulates
+abandoned `ready` rows, and oldest-first means a fresh test claims one of them. The runner
+fixture drains the queue under the lock. Both are the shape of the real system showing
+through the tests rather than test bugs, which is why they are recorded here.
+
 
 ## 4. What M10 does not do
 

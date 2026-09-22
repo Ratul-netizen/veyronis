@@ -24,6 +24,7 @@ pub mod searches;
 pub mod servicemap;
 pub mod sites;
 pub mod sso;
+pub mod runbooks;
 pub mod topology;
 
 use axum::routing::{any, delete, get, patch, post, put};
@@ -198,6 +199,28 @@ pub fn router(state: AppState) -> Router {
         // The link graph -- what M5's neighbour walk found out about how the estate is
         // wired. Read-only: edges come from a device naming its neighbour, not from
         // anybody drawing a line.
+        // Runbooks — M10. The only routes in this API whose effect is a command reaching
+        // somebody's equipment, and none of them sends one: `POST /runs` writes a row and
+        // `uops-runner` picks it up. There is no PUT on a runbook, because editing writes
+        // version n+1 — §2.1.
+        .route(
+            "/api/v1/runbooks",
+            get(runbooks::list).post(runbooks::save),
+        )
+        .route(
+            "/api/v1/runbooks/{id}",
+            get(runbooks::get).delete(runbooks::retire),
+        )
+        // What a run *would* do, without creating one: the resolved targets by name and
+        // the literal command that would be sent to each. A POST rather than a GET because
+        // it resolves a selector across the estate, which is not a thing to put in a URL a
+        // proxy will log.
+        .route("/api/v1/runbooks/{id}/plan", post(runbooks::plan))
+        .route("/api/v1/runbooks/{id}/runs", post(runbooks::start))
+        .route("/api/v1/runs", get(runbooks::runs))
+        .route("/api/v1/runs/{id}", get(runbooks::run))
+        .route("/api/v1/runs/{id}/approve", post(runbooks::approve))
+        .route("/api/v1/runs/{id}/cancel", post(runbooks::cancel))
         .route("/api/v1/topology", get(topology::get))
         // The service map -- M8 §2.6. The same posture as the topology above and for the
         // same reason: the edges are evidence rather than assertion, so there is nothing

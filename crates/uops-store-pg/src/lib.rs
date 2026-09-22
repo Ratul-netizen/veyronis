@@ -97,7 +97,9 @@ pub use notify::{Attempt, Channel, NewChannel, Outcome, Reservation, SentRecord}
 pub use page::{Cursor, DEFAULT_PAGE, MAX_PAGE, Page};
 pub use pollable::{PollableDevice, SYSOBJECTID_KEY};
 pub use resource::{NewResource, ResourceFilter};
-pub use runbooks::{ApprovalRow, Claimed, QueuedTarget, RunRow, RunState, RunbookRow};
+pub use runbooks::{
+    ApprovalRow, Claimed, QueuedTarget, RunContext, RunRow, RunState, RunStepRow, RunbookRow,
+};
 pub use sealed::PgSealedStore;
 pub use searches::{NewSearch, SavedSearch};
 pub use sites::{Location, SiteOverview, StatusCounts};

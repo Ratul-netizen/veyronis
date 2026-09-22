@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT version_id, targets_fingerprint,\n                   started_by AS \"started_by: ActorId\", break_glass\n              FROM runbook_run\n             WHERE id = $1 AND tenant_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "targets_fingerprint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "started_by: ActorId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "break_glass",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "49c661f02357c6065a774dcf694744476a0a3e93f775e7e0e6b963870ad59201"
+}

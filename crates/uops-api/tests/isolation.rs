@@ -421,6 +421,93 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Unscoped,
         body: None,
     },
+    // Runbooks and runs — M10. Every one of these is `Scoped`, and the second attack is
+    // the one that matters most anywhere in this product: the routes below are the only
+    // ones whose effect is a command reaching equipment. A leak here is not a customer
+    // reading another customer's inventory, it is a customer *starting a run against* it.
+    //
+    // `POST /runbooks/{id}/runs` with somebody else's runbook id must 404 for exactly the
+    // same reason `GET` does, and the composite keys in migration 0026 are what make the
+    // repository unable to find it rather than the handler remembering to check.
+    RouteCase {
+        path: "/api/v1/runbooks",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runbooks",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        // Deliberately a runbook that would *validate*: a body rejected for its shape
+        // would 400 before the tenant check and the case would pass without testing
+        // anything. This one is refused because the tenant is not the caller's.
+        body: Some(
+            r#"{"name":"iso-probe","description":"","targets":{"type":"all"},
+                "steps":[{"name":"look","action":{"kind":"wait","seconds":1},
+                          "destructive":false}],
+                "max_targets":10,"concurrency":2,"approvals":"none",
+                "maintenance_only":false}"#,
+        ),
+    },
+    RouteCase {
+        path: "/api/v1/runbooks/{id}",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runbooks/{id}",
+        probe: None,
+        method: "DELETE",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runbooks/{id}/plan",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runbooks/{id}/runs",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: Some(r#"{"reason":"isolation probe","dry_run":true}"#),
+    },
+    RouteCase {
+        path: "/api/v1/runs",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runs/{id}",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runs/{id}/approve",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/runs/{id}/cancel",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     // The link graph. Scoped, and the second attack is the one that matters: a topology
     // is a map of a customer's network, which is the single most sensitive read in the
     // product after the credentials themselves.

@@ -1954,7 +1954,7 @@ h2 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--mono);
   font-size: var(--t-label);
   overflow-wrap: anywhere;
   user-select: all;
@@ -2484,6 +2484,123 @@ button.following {
 .scene3d-legend p {
   margin: 0;
   font-size: var(--t-label);
+}
+
+/* Runbooks and runs — M10.
+   The dry-run review is the screen these styles exist for: the count, the resources by
+   name, and the literal command. Everything is set so the command is the thing the eye
+   lands on, because it is the thing somebody is being asked to approve. */
+
+/* The server's own sentence — "would run 3 steps on 4 resources". Larger than body text
+   because it is the summary somebody reads before deciding, and never styled as a success
+   or a warning: it is a description, not a verdict. */
+.plan-summary {
+  font-size: var(--t-body);
+  margin: 0 0 var(--space);
+}
+
+.plan-steps {
+  margin: 0;
+  padding-left: calc(var(--space) * 2.5);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 1.5);
+}
+
+.plan-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--t-label);
+}
+
+/* What would actually be sent. Monospace and boxed, because a reviewer has to be able to
+   see a trailing space or a substituted value that is not what they expected. */
+.plan-rendered {
+  margin: 4px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  font-family: var(--mono);
+  font-size: var(--t-label);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* What the device said back. Already redacted and capped by the server — the height limit
+   here is only so one step's output cannot push the next one off the screen. */
+.run-output {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border-left: 2px solid var(--border-strong);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: var(--t-label);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 20rem;
+  overflow: auto;
+}
+
+.runbook-source {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: var(--t-label);
+  padding: var(--space);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text);
+  resize: vertical;
+}
+
+/* A small standing label — "changes something", "not run in a dry run". Not a colour on
+   its own: each one carries its own words, because state by hue alone is unreadable to a
+   reader who cannot distinguish them and invisible in a screenshot. */
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: var(--t-label);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tag-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space);
+  font-size: var(--t-label);
+}
+
+.field input[type="text"],
+.field input:not([type]) {
+  width: 100%;
+}
+
+/* A checkbox and its sentence, on one line, with the sentence able to wrap. The label is
+   long on purpose — it is the control that turns a dry run into a real one. */
+.field-check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space);
+}
+
+/* 24 CSS pixels of target, per WCAG 2.2. */
+.field-check input[type="checkbox"] {
+  min-width: 24px;
+  min-height: 24px;
+  margin: 0;
 }
 
 .topo-loading {

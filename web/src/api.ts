@@ -23,6 +23,8 @@
  */
 
 /** RFC 7807, which is what every error from this API is. */
+import type { Plan, Run, RunDetail, Runbook } from "./runbooks";
+
 export interface Problem {
   type: string;
   title: string;
@@ -307,5 +309,72 @@ export const api = {
     request<Resource>(`/api/v1/resources/${encodeURIComponent(id)}`, {
       method: "DELETE",
       tenant,
+    }),
+
+  // --- runbooks, M10 -----------------------------------------------------------
+  //
+  // Note what is absent: nothing here executes anything. `startRun` posts a row and
+  // `uops-runner` picks it up, so every one of these returns in milliseconds and the
+  // run's own state is what says what happened to it.
+
+  runbooks: (tenant: string) => request<Runbook[]>("/api/v1/runbooks", { tenant }),
+
+  saveRunbook: (tenant: string, runbook: unknown) =>
+    request<Runbook>("/api/v1/runbooks", { method: "POST", tenant, body: runbook }),
+
+  retireRunbook: (tenant: string, id: string) =>
+    request<void>(`/api/v1/runbooks/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      tenant,
+    }),
+
+  /**
+   * What a run would do, without creating one.
+   *
+   * A POST despite writing nothing: it resolves a selector across the estate, and that is
+   * not a thing to put in a URL a reverse proxy will log.
+   */
+  planRun: (tenant: string, id: string) =>
+    request<Plan>(`/api/v1/runbooks/${encodeURIComponent(id)}/plan`, {
+      method: "POST",
+      tenant,
+      body: {},
+    }),
+
+  /**
+   * Record a run.
+   *
+   * `dryRun` is required at this boundary although the server defaults it to `true`: a
+   * caller here has a screen in front of it and has made the choice, and an omitted
+   * argument that silently means "safe" is how the *other* branch gets taken by accident
+   * somewhere else later.
+   */
+  startRun: (tenant: string, id: string, reason: string, dryRun: boolean) =>
+    request<Run>(`/api/v1/runbooks/${encodeURIComponent(id)}/runs`, {
+      method: "POST",
+      tenant,
+      body: { reason, dry_run: dryRun },
+    }),
+
+  runs: (tenant: string, runbook?: string) => {
+    const suffix = runbook ? `?runbook=${encodeURIComponent(runbook)}` : "";
+    return request<Run[]>(`/api/v1/runs${suffix}`, { tenant });
+  },
+
+  run: (tenant: string, id: string) =>
+    request<RunDetail>(`/api/v1/runs/${encodeURIComponent(id)}`, { tenant }),
+
+  approveRun: (tenant: string, id: string) =>
+    request<Run>(`/api/v1/runs/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      tenant,
+      body: {},
+    }),
+
+  cancelRun: (tenant: string, id: string) =>
+    request<Run>(`/api/v1/runs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      tenant,
+      body: {},
     }),
 };
