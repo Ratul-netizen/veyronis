@@ -219,10 +219,12 @@ incident", in the schema rather than in code.
 - [x] The timeline shows metrics, logs, events, states, flows and spans for the incident's
       resources on one axis, and says which signals expired rather than showing a gap —
       `uops_query::timeline`'s `Coverage`, through the API, onto the screen
-- [ ] The timeline for a one-hour incident over 100M rows is answered from the sort key,
-      measured rather than assumed — W1's method, and W1's 9 ms is the number to beat.
-      **The only criterion still fully open**, and the one that needs a populated table
-      rather than a test
+- [~] The timeline for a one-hour incident over 100M rows is answered from the sort key —
+      **measured**: 40 960 rows read against 3 735 552 without the resource predicate, a
+      77× reduction across both loaded tracks.
+      [`bench/results/m9-timeline-100000000rows.md`](../bench/results/m9-timeline-100000000rows.md).
+      W1's 9 ms is **not** beaten: 24 ms per track, because this reads two resources with
+      an ordering where W1's Q05 read one without. Same shape, more of it
 - [x] Incidents from tenant A are unreachable from tenant B, by the same adversarial test
       every milestone since M7 has used — and the timeline's membership read *is* its
       tenant check, so the two cannot drift apart
