@@ -54,6 +54,7 @@ pub mod plan;
 pub mod resolve;
 pub mod servicemap;
 pub mod sql;
+pub mod timeline;
 pub mod warning;
 
 pub use ast::{
@@ -67,6 +68,7 @@ pub use plan::{TableKind, TablePlan};
 pub use resolve::{ResolvedResources, ResourceCatalog, resolve};
 pub use servicemap::{MAX_EDGES, compile_service_map};
 pub use sql::{Param, Sql};
+pub use timeline::{Coverage, PER_SIGNAL, SIGNALS, Track, retention, timeline};
 pub use warning::{QueryWarning, WarningView};
 
 #[cfg(test)]

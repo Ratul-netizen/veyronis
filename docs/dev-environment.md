@@ -92,9 +92,10 @@ $vmrun = "C:\Program Files\VMware\VMware Workstation\vmrun.exe"
 
 Output comes back through a file, because `runScriptInGuest` does not return stdout.
 
-### The guest has 3.8 GB of RAM, and the benchmark does not fit in it
+### The guest's memory, and the benchmark that did not fit in it
 
-`config.xml` caps ClickHouse at half of that, which is right for the test suite and **not
+**It has 8 GB now.** It had 3.8 GB when the M8 benchmark was run, and `config.xml` caps
+ClickHouse at half of whatever is there — which was right for the test suite and **not
 enough for a benchmark load**. Loading 100M spans — 8.26 GiB compressed, 20.5 GiB raw —
 plus a `MATERIALIZE INDEX` mutation across thirty parts took the guest out of memory: the
 process stayed alive and kept its pid, dropped its listener, and left the kernel unable to
@@ -104,9 +105,13 @@ suite.
 The measurement in [`bench/results/m8-spans-100000000rows.md`](../bench/results/m8-spans-100000000rows.md)
 was worth having and worth the outage once. Before running another one:
 
-* **Give the VM more memory first**, or run the benchmark somewhere that is not also the
-  suite's database. An 8 GiB load on the instance every integration test depends on turns
-  a benchmark into an outage for everything else.
+* **The memory was doubled after this happened**, which is the first half of the fix. The
+  second half stands: an 8 GiB load on the instance every integration test depends on
+  turns a benchmark into an outage for everything else, and more headroom moves that
+  threshold rather than removing it.
+* **Watch `free -m` in the guest during a load**, rather than concluding afterwards. The
+  failure mode is not a crash: the process keeps its pid, drops its listener, and the
+  kernel stops being able to fork.
 * **The data is regenerable** from seed 42 and is never committed, so dropping it costs
   eleven minutes and nothing else: `DROP DATABASE bench`.
 * **Merges settle.** Once the load and any mutation have finished, the table sits there
