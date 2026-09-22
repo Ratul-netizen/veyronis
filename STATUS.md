@@ -11,9 +11,9 @@ Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 > closed with the Investigation Workspace and its own measurement:
 > [`bench/results/m9-timeline-100000000rows.md`](./bench/results/m9-timeline-100000000rows.md),
 > **77× fewer rows** than a time-first sort key would read.
-> **M12 Enterprise is in progress** — leases (§2.1), single sign-on (§2.2) and the
-> collector registry (§2.3) are done; the restore drill and the buyer-facing evidence are
-> not.
+> **M12 Enterprise is in progress** — leases (§2.1), single sign-on (§2.2), the collector
+> registry (§2.3) and the tested restore (§2.4) are done; the buyer-facing evidence (§2.5)
+> is not.
 > SPEC stops at M4
 > deliberately, so each milestone past it has its own document with its decisions closed
 > before anything was built: [`M5-discovery.md`](./docs/M5-discovery.md),
@@ -156,7 +156,10 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M12 §2.2 · requiring SSO** | ✅ an organization may switch off password login for everyone but one named break-glass account, whose every use is an audit event |
 | **M12 §2.3 · the collector registry** | ✅ [`docs/collectors.md`](./docs/collectors.md) — migration 0025 — enrol, heartbeat, and an inventory that separates *never reported* from *went quiet*. Four callers: the syslog, OTLP and flow collectors and the poller. The token is an operational control rather than a security boundary, and the doc says why |
 | **M12 §2.3 · assignment comes from the server** | ✅ a listener naming a tenant this collector was not assigned refuses to start, naming the tenant. Opt-in: a collector with no token behaves exactly as before |
-| M12 · restore drill, buyer evidence | ⬜ §2.4–§2.5 — not started |
+| **M12 §2.4 · backup and restore** | ✅ `scripts/backup.sh` + `scripts/restore.sh` — two planes, two commands, and a destination that has no default so a rehearsal cannot overwrite production |
+| **M12 §2.4 · a drill was performed** | ✅ [`docs/restore-drill.md`](./docs/restore-drill.md) — every telemetry table matched exactly, recovery took **8 s** on this data, and the drill **found a defect a procedure would not have**: restoring with the materialized views attached doubled every aggregate and tripled `metrics_1h`, silently, with every raw table exactly right |
+| **M12 §2.4 · the KEK property is a test** | ✅ a restored control plane without its key material lists and names its credentials and opens none of them — `uops-store-pg/tests/restore.rs`, with the paired positive case so the negative one means something |
+| M12 · buyer evidence | ⬜ §2.5 — not started |
 
 ## Resume in three commands
 
@@ -694,11 +697,11 @@ crates/uops-query/
    surfaces it. Blocked on the above, because a queue you can only agree with is worse
    than no queue.
 
-5. **M12 Enterprise is the milestone in progress**, and the next piece of it is §2.4's
-   restore drill — the one item in that document that cannot be met by writing code,
-   because a restore that has not been performed is not a backup. Then §2.5: an SBOM and
-   a licence report out of CI, and a security overview that claims no certification. See
-   [`docs/M12-enterprise.md`](./docs/M12-enterprise.md); §2.1, §2.2 and §2.3 are done.
+5. **M12 Enterprise is the milestone in progress**, and the last piece of it is §2.5:
+   an SBOM and a dependency licence report out of CI per release, and a security overview
+   that is dated, names the release it describes, and claims no certification. None of it
+   is code; all of it is a gate a procurement team puts in front of a purchase. See
+   [`docs/M12-enterprise.md`](./docs/M12-enterprise.md); §2.1 through §2.4 are done.
 
 ### Carried forward, still true
 

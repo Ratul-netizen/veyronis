@@ -906,6 +906,122 @@ jobs:
           fi
           echo "ok: editing an applied migration stops the run"
 
+      # ---- the restore drill, as a guard -------------------------------------------
+      #
+      # M12 §2.4 asks for a drill rather than a procedure, and `docs/restore-drill.md`
+      # records why: the first one silently doubled every aggregate table. Restoring the
+      # raw rows made each materialized view fire into an aggregate that already held the
+      # rows from the backup, and *every raw table was exactly right* — which is what
+      # somebody spot-checking a restore looks at.
+      #
+      # A drill performed once is a drill that was true once. This is it as a guard, so
+      # the aggregate-doubling cannot come back, and so that a materialized view added in
+      # a future migration is covered the day it is added rather than at the next
+      # rehearsal.
+      # `pg_dump` refuses to read a server newer than itself, and the runner image ships
+      # a client one major behind the `postgres:17-alpine` service this job uses. Pinning
+      # the service down to match would be the wrong fix: it would stop CI exercising the
+      # version a deployment runs.
+      - name: Install a matching PostgreSQL client
+        run: |
+          set -euo pipefail
+          if pg_dump --version | grep -q " 17"; then
+            echo "already 17"
+            exit 0
+          fi
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -sS -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc             https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc]             https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main"             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          pg_dump --version
+
+      - name: A backup restores to exactly what was backed up
+        run: |
+          set -euo pipefail
+
+          # Something to lose. The suite above has already populated both planes; this
+          # adds a row to each aggregate's source so none of the interesting tables is
+          # empty, because an empty table matches itself whatever the restore does.
+          curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD&database=$CLICKHOUSE_DB" \
+            --data-binary "SELECT count() FROM logs" > /dev/null
+
+          bash scripts/backup.sh "$RUNNER_TEMP/drill"
+
+          psql "$DATABASE_URL" -tAc "SELECT 1" > /dev/null
+          createdb -h localhost -U uops uops_restored
+          curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+            --data-binary "CREATE DATABASE uops_restored"
+
+          RESTORE_DATABASE_URL="postgres://uops:uops@localhost:5432/uops_restored" \
+          RESTORE_CLICKHOUSE_DB="uops_restored" \
+            bash scripts/restore.sh "$RUNNER_TEMP/drill"
+
+          # The comparison is the step that is not optional. The aggregate tables are the
+          # ones that were wrong, and they are the ones nothing else in this file checks.
+          failed=0
+          for t in logs logs_counts_5m metrics metrics_5m metrics_1h events states \
+                   flows flows_5m spans service_5m; do
+            a=$(curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+                  --data-binary "SELECT count() FROM ${CLICKHOUSE_DB}.$t")
+            b=$(curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+                  --data-binary "SELECT count() FROM uops_restored.$t")
+            if [ "$a" != "$b" ]; then
+              echo "::error::$t restored $b rows from a backup of $a"
+              failed=1
+            fi
+          done
+
+          for t in app_user tenant resource credential user_tenant_role alert_rule collector; do
+            a=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM $t")
+            b=$(psql "postgres://uops:uops@localhost:5432/uops_restored" -tAc "SELECT count(*) FROM $t")
+            if [ "$a" != "$b" ]; then
+              echo "::error::$t restored $b rows from a backup of $a"
+              failed=1
+            fi
+          done
+
+          [ "$failed" = 0 ] || exit 1
+          echo "ok: every table restored to exactly what was backed up"
+
+      # And the guard on the guard. Re-attaching the materialized views before the load
+      # instead of after is the exact mistake the first drill made, and it must fail.
+      - name: The restore drill fails when the aggregates are allowed to double
+        run: |
+          set -euo pipefail
+          F=scripts/restore.sh
+          cp "$F" "$RUNNER_TEMP/restore.bak"
+          # Detach nothing: the views stay attached through the load, and every aggregate
+          # is written twice — once from the backup and once by the view.
+          sed -i 's/^      echo "DETACH TABLE ${view}" | ch_sql$/      true/' "$F"
+          if git diff --quiet -- "$F"; then
+            echo "::error::the mutation did not apply; this guard is no longer guarding anything"
+            exit 1
+          fi
+
+          dropdb -h localhost -U uops --if-exists uops_doubled
+          createdb -h localhost -U uops uops_doubled
+          curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+            --data-binary "DROP DATABASE IF EXISTS uops_doubled"
+          curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+            --data-binary "CREATE DATABASE uops_doubled"
+
+          RESTORE_DATABASE_URL="postgres://uops:uops@localhost:5432/uops_doubled" \
+          RESTORE_CLICKHOUSE_DB="uops_doubled" \
+            bash "$F" "$RUNNER_TEMP/drill" > /dev/null
+
+          cp "$RUNNER_TEMP/restore.bak" "$F"
+
+          a=$(curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+                --data-binary "SELECT count() FROM ${CLICKHOUSE_DB}.logs_counts_5m")
+          b=$(curl -sS -f "$CLICKHOUSE_URL/?user=$CLICKHOUSE_USER&password=$CLICKHOUSE_PASSWORD" \
+                --data-binary "SELECT count() FROM uops_doubled.logs_counts_5m")
+          if [ "$a" = "$b" ]; then
+            echo "::error::leaving the materialized views attached did not double logs_counts_5m ($a vs $b); the detach is no longer what prevents it"
+            exit 1
+          fi
+          echo "ok: leaving the views attached doubles the aggregates ($a became $b), and the detach is what stops it"
+
   supply-chain:
     name: advisories · licenses · SBOM
     runs-on: ubuntu-latest

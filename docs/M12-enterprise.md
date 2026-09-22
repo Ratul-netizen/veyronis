@@ -191,6 +191,11 @@ design work for a customer-hosted collector talking to a hosted control plane.
 
 ### 2.4 Backup and restore are a tested procedure, not a documented intention.
 
+*Built and performed. `scripts/backup.sh`, `scripts/restore.sh`, and
+[`docs/restore-drill.md`](./restore-drill.md) — which records what the first attempt got
+wrong, because that is the only part of a drill that could not have been written in
+advance.*
+
 **The two planes back up differently and must be said separately.** PostgreSQL is small,
 mutable and irreplaceable — it holds identity, credentials and every decision. ClickHouse
 is large, append-only and *partially* regenerable: telemetry that has aged out is gone,
@@ -251,8 +256,12 @@ in every milestone since M7.
       true: a collector dials out to PostgreSQL and ClickHouse and nothing ever dials in.
       The part of §2.3 that is *not* yet true is the stronger one it implies — that a
       collector needs only an HTTPS egress — and the amendment above says why
-- [ ] A restore drill is performed and recorded: what was lost, how long it took, and what
-      a restored control plane cannot open without its KEK
+- [x] A restore drill is performed and recorded: what was lost, how long it took, and what
+      a restored control plane cannot open without its KEK — nothing was lost, it took
+      **8 s** on this data, and the KEK property is a test rather than a claim. The drill
+      found a defect that a procedure would not have: restoring with the materialized
+      views attached **doubled every aggregate** and tripled `metrics_1h`, silently, with
+      every raw table exactly right
 - [ ] An SBOM and a licence report are produced by CI for a release
 - [ ] A security overview exists, is dated, names the release it describes, and claims no
       certification
