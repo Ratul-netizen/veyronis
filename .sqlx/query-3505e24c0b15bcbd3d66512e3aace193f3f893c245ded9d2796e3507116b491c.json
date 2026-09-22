@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE incident\n               SET last_alert_at = greatest(last_alert_at, $3),\n                   state         = 'open',\n                   quiet_at      = NULL,\n                   severity      = CASE\n                       WHEN $4 = 'critical' THEN 'critical'\n                       WHEN $4 = 'warning' AND severity = 'info' THEN 'warning'\n                       ELSE severity\n                   END\n             WHERE id = $1 AND tenant_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3505e24c0b15bcbd3d66512e3aace193f3f893c245ded9d2796e3507116b491c"
+}

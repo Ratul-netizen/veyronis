@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT resource_id AS \"id!: ResourceId\"\n              FROM resource_dependencies($1, $2, $3)\n             WHERE depth > 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: ResourceId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "926a72a5b1ed15063e1bd73276b80b48efcd4dcccecf1eed574417dbd0553ee1"
+}

@@ -11,6 +11,8 @@ authors.workspace = true
 
 [dependencies]
 uops-core = { workspace = true, features = ["sqlx"] }
+# M9's grouping types. The rules are there; the queries that feed them are here.
+uops-incident.workspace = true
 uops-identity.workspace = true
 uops-secrets.workspace = true
 uops-profile.workspace = true

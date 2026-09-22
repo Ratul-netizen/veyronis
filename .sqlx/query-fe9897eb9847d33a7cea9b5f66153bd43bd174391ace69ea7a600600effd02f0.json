@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE incident i\n               SET state = 'quiet', quiet_at = $2\n             WHERE i.tenant_id = $1\n               AND i.state = 'open'\n               -- Every alert in it has resolved. `NOT EXISTS` rather than a count, so an\n               -- incident whose alerts were deleted with their rule also settles instead\n               -- of staying open forever with nothing in it.\n               AND NOT EXISTS (\n                   SELECT 1\n                     FROM incident_alert ia\n                     JOIN alert_state a\n                       ON a.id = ia.alert_state_id AND a.tenant_id = ia.tenant_id\n                    WHERE ia.incident_id = i.id\n                      AND ia.tenant_id = i.tenant_id\n                      AND a.state IN ('pending', 'firing')\n               )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe9897eb9847d33a7cea9b5f66153bd43bd174391ace69ea7a600600effd02f0"
+}

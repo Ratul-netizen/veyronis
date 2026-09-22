@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE incident\n               SET state = 'closed', closed_at = $3, closed_by = $4\n             WHERE id = $1 AND tenant_id = $2 AND state <> 'closed'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0203ea28bbf3188ac8ee48614bbd2eed90f98dc3b5a537bd0c56831677a31a17"
+}

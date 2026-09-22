@@ -54,6 +54,7 @@ pub mod error;
 pub mod facts;
 pub mod groups;
 pub mod identity;
+pub mod incidents;
 pub mod maintenance;
 pub mod neighbour_ingest;
 pub mod notify;

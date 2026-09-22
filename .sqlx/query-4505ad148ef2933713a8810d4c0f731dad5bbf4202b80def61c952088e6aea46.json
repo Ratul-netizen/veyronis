@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT resource_id AS \"id!: ResourceId\", depth AS \"depth!\"\n              FROM resource_neighbourhood($1, $2, $3)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "depth!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "4505ad148ef2933713a8810d4c0f731dad5bbf4202b80def61c952088e6aea46"
+}

@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO incident\n                (tenant_id, state, severity, candidate_resource_id,\n                 candidate_absent_because, started_at, last_alert_at, summary)\n            VALUES ($1, 'open', $2, $3, $4, $5, $5, $6)\n            RETURNING id AS \"id: IncidentId\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: IncidentId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "70e5bbb497b901d06146e339e2ec426f8f2fff1d5c2ccb3f212a5231590f2306"
+}

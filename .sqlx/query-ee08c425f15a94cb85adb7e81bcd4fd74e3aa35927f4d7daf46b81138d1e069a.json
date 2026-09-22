@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT a.resource_id AS \"resource_id: ResourceId\", min(a.since) AS \"since!\"\n              FROM incident_alert ia\n              JOIN alert_state a\n                ON a.id = ia.alert_state_id AND a.tenant_id = ia.tenant_id\n             WHERE ia.tenant_id = $1 AND ia.incident_id = $2\n             GROUP BY a.resource_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "resource_id: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "since!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "ee08c425f15a94cb85adb7e81bcd4fd74e3aa35927f4d7daf46b81138d1e069a"
+}

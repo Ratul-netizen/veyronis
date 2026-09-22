@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE incident\n               SET candidate_resource_id = $3, candidate_absent_because = $4\n             WHERE id = $1 AND tenant_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a93a6509e4e60098dbc54d65d31e2d5d9531313610f8898067788205dd989c0d"
+}

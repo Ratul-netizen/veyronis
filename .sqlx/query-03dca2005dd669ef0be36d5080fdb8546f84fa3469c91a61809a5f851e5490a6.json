@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO incident_alert\n                (incident_id, tenant_id, alert_state_id, joined_at, notified,\n                 hops_from_candidate)\n            VALUES ($1, $2, $3, $4, true, 0)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "03dca2005dd669ef0be36d5080fdb8546f84fa3469c91a61809a5f851e5490a6"
+}

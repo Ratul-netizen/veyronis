@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                i.id            AS \"id: IncidentId\",\n                i.last_alert_at,\n                -- The two sets the decision needs, aggregated in the database rather\n                -- than by fetching one row per alert: an incident with forty alerts is\n                -- one row here and forty round trips otherwise, on the path that runs\n                -- every time anything fires.\n                coalesce(array_agg(DISTINCT a.resource_id)\n                         FILTER (WHERE a.resource_id IS NOT NULL), '{}')\n                                AS \"resources!: Vec<ResourceId>\",\n                coalesce(array_agg(DISTINCT a.rule_id)\n                         FILTER (WHERE a.rule_id IS NOT NULL), '{}')\n                                AS \"rules!: Vec<uuid::Uuid>\"\n              FROM incident i\n              LEFT JOIN incident_alert ia\n                ON ia.incident_id = i.id AND ia.tenant_id = i.tenant_id\n              LEFT JOIN alert_state a\n                ON a.id = ia.alert_state_id AND a.tenant_id = i.tenant_id\n             WHERE i.tenant_id = $1 AND i.state = 'open'\n             GROUP BY i.id, i.last_alert_at\n             ORDER BY i.last_alert_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: IncidentId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_alert_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "resources!: Vec<ResourceId>",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 3,
+        "name": "rules!: Vec<uuid::Uuid>",
+        "type_info": "UuidArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "7e984bb12fd7642897cf4a8b6a297ef3b04d0ee636c5bb5798e1bf88bad6c8a6"
+}

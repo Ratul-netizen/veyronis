@@ -2659,6 +2659,7 @@ dependencies = [
  "uops-core",
  "uops-discover",
  "uops-identity",
+ "uops-incident",
  "uops-oui",
  "uops-pipeline",
  "uops-profile",
