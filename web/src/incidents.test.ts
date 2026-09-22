@@ -9,10 +9,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  SUPPRESSION_ADVICE,
+  SUPPRESSION_RISK,
   describeCoverage,
   describeNoCandidate,
   describeSignal,
   describeState,
+  describeSuppression,
   merge,
   observedAt,
   summarise,
@@ -178,5 +181,29 @@ describe("signal names", () => {
 
   it("falls back to the server's word for one it does not know", () => {
     expect(describeSignal("profile")).toBe("profile");
+  });
+});
+
+describe("topology suppression", () => {
+  it("says what each position means in terms of who gets woken up", () => {
+    // Not "enabled"/"disabled". The reader is deciding whether a page will arrive, and a
+    // label naming the feature rather than the consequence makes them guess.
+    expect(describeSuppression(true)).toMatch(/only the cause is notified/i);
+    expect(describeSuppression(true)).toMatch(/still on the incident/i);
+    expect(describeSuppression(false)).toMatch(/every alert notifies/i);
+  });
+
+  it("states the specific failure rather than a general caution", () => {
+    // "Are you sure?" tells the reader nothing they did not already know.
+    expect(SUPPRESSION_RISK).toMatch(/missed outage/i);
+    expect(SUPPRESSION_RISK).toMatch(/topology is wrong/i);
+    expect(SUPPRESSION_RISK).not.toMatch(/are you sure/i);
+  });
+
+  it("keeps the advice separate from the standing risk", () => {
+    // The risk is shown in both positions; the advice is about a decision that has not
+    // been made yet, so it has no place beside a switch that is already on.
+    expect(SUPPRESSION_ADVICE).toMatch(/turn it on after/i);
+    expect(SUPPRESSION_RISK).not.toMatch(/turn it on/i);
   });
 });

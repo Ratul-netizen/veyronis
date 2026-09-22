@@ -2603,6 +2603,27 @@ button.following {
   margin: 0;
 }
 
+/* Topology suppression — M9 §2.4. Under the incident list rather than in a settings
+   screen, and set apart from it: it changes what the list above means, and somebody
+   reading the list should be able to see which world they are in. */
+.suppression {
+  margin-top: calc(var(--space) * 4);
+  padding-top: calc(var(--space) * 2);
+  border-top: 1px solid var(--border);
+  max-width: 62ch;
+}
+
+.suppression h2 {
+  font-size: var(--t-body);
+  margin: 0 0 var(--space);
+}
+
+.suppression p {
+  margin: var(--space) 0 0;
+  font-size: var(--t-label);
+}
+
+
 .topo-loading {
   aspect-ratio: 1;
   max-height: 72vh;

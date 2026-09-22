@@ -88,6 +88,63 @@ export function closeIncident(tenant: string, id: string) {
 }
 
 /**
+ * Whether this tenant lets topology suppression stop a notification — M9 §2.4.
+ *
+ * The one setting in the incident engine that can cause a **missed outage**: the product
+ * deciding, from a topology it inferred, that somebody does not need to be woken up.
+ */
+export interface Suppression {
+  suppress_downstream_alerts: boolean;
+}
+
+export function fetchSuppression(tenant: string) {
+  return request<Suppression>("/api/v1/incidents/suppression", { tenant });
+}
+
+export function setSuppression(tenant: string, on: boolean) {
+  return request<Suppression>("/api/v1/incidents/suppression", {
+    method: "PUT",
+    tenant,
+    body: { suppress_downstream_alerts: on },
+  });
+}
+
+/**
+ * What switching it says, in the words somebody needs before clicking.
+ *
+ * Both directions have a consequence and the screen says which. "On" is the one that can
+ * lose a page; "off" is the one that brings back every downstream alert an operator may
+ * have turned this on to stop.
+ */
+export function describeSuppression(on: boolean): string {
+  return on
+    ? "When one device's failure explains another's, only the cause is notified. Every suppressed alert is still on the incident, and the notification says how many it stood for."
+    : "Every alert notifies, including the ones a failure upstream already explains. A switch going down pages once for the switch and once for everything behind it.";
+}
+
+/**
+ * The standing caveat, shown in both positions.
+ *
+ * Not a general caution: the specific failure. A product that says "are you sure?" and
+ * nothing else has told the reader nothing they did not already know.
+ *
+ * Shown when the switch is **on** as well as off, and that is the point — the risk is not
+ * in the moment of clicking, it is in every page that does not arrive afterwards. A
+ * warning that disappears once somebody accepts it is a warning nobody sees again.
+ */
+export const SUPPRESSION_RISK =
+  "This is the only setting here that can cause a missed outage: if the topology is wrong about which device explains which, the notification that was suppressed was the one somebody needed.";
+
+/**
+ * The extra line shown only while it is off.
+ *
+ * Advice about a decision that has not been made yet, so it has no place beside a switch
+ * that is already on.
+ */
+export const SUPPRESSION_ADVICE =
+  "Turn it on after you have watched it group correctly on this estate.";
+
+/**
  * What the state word means, in a sentence.
  *
  * `quiet` is the one that needs explaining: it is not resolved and it is not closed. The

@@ -19,6 +19,12 @@
 //! Reading is `Viewer`. Acknowledging and closing are `Operator`, because both are
 //! statements a person makes about the estate: *I am holding this* and *this is
 //! understood*. Neither changes what is true, which is why neither needs Admin.
+//!
+//! **Topology suppression is the exception, and takes `Admin`.** Everything else here
+//! records what somebody decided about an outage that has already happened; that setting
+//! decides whether the product will decline to wake somebody up about a future one, on the
+//! strength of a topology it inferred. It is the single thing in M9 that can cause a
+//! missed outage — §2.4 — so it sits with the role that manages credentials and users.
 
 use axum::Json;
 use axum::extract::{Path, Query as UrlQuery, State};
@@ -328,6 +334,81 @@ pub async fn close(
         .audit()
         .wrote("incidents.close", incident.to_string(), None, None);
     one(&state, &caller, incident).await
+}
+
+/// Whether this tenant lets topology suppression stop a notification — M9 §2.4.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SuppressionView {
+    pub suppress_downstream_alerts: bool,
+}
+
+/// `GET /api/v1/incidents/suppression`
+///
+/// `Viewer`, because "will this product decide not to page me" is a question anybody
+/// carrying a pager is entitled to ask about their own tenant.
+pub async fn suppression(
+    State(state): State<AppState>,
+    caller: Caller,
+) -> ApiResult<Json<SuppressionView>> {
+    caller.require(Role::Viewer)?;
+
+    let on = state.store.suppression_enabled(caller.scope()).await?;
+    caller.audit().read("incidents.suppression", None);
+
+    Ok(Json(SuppressionView {
+        suppress_downstream_alerts: on,
+    }))
+}
+
+/// `PUT /api/v1/incidents/suppression`
+///
+/// M9 §2.4, and the criterion this route exists for: *"switching it on is a decision with
+/// an audit entry rather than a default somebody inherits"*. Until this existed, it was a
+/// database update and there was nothing to audit.
+///
+/// # Why `Admin` and not `Operator`
+///
+/// Every other write in this module — acknowledging, closing — records what a human
+/// decided about an outage that has already happened. This one changes whether the product
+/// will decline to wake somebody up about a future one, on the strength of a topology it
+/// inferred. It is the single feature in M9 that can cause a **missed outage**, and the
+/// role that manages credentials and users is the right one to hold it.
+///
+/// # Why turning it *off* is audited too
+///
+/// The obvious reading is that switching it on is the risky direction, so that is the one
+/// to record. But the record exists to answer "why did nobody get paged in March", and the
+/// answer to that is as often "it was on then and it is off now" as the reverse. An audit
+/// trail that only has one edge of a toggle cannot reconstruct what was true at a time.
+pub async fn set_suppression(
+    State(state): State<AppState>,
+    caller: Caller,
+    _csrf: CsrfChecked,
+    Json(body): Json<SuppressionView>,
+) -> ApiResult<Json<SuppressionView>> {
+    caller.require(Role::Admin)?;
+
+    let was = state
+        .store
+        .set_suppression(caller.scope(), body.suppress_downstream_alerts)
+        .await?;
+
+    // Both sides, and `changed` explicitly. An operator who clicks the switch twice
+    // produces one row that is a decision and one that says nothing happened, and a reader
+    // should not have to diff two JSON blobs to tell which is which.
+    caller.audit().wrote(
+        "incidents.suppression.set",
+        format!("tenant:{}", caller.scope().tenant_id()),
+        Some(serde_json::json!({ "suppress_downstream_alerts": was })),
+        Some(serde_json::json!({
+            "suppress_downstream_alerts": body.suppress_downstream_alerts,
+            "changed": was != body.suppress_downstream_alerts,
+        })),
+    );
+
+    Ok(Json(SuppressionView {
+        suppress_downstream_alerts: body.suppress_downstream_alerts,
+    }))
 }
 
 /// Read one incident back, so a mutation returns the same shape the list does and a

@@ -235,9 +235,25 @@ incident", in the schema rather than in code.
       on the subject line and in the body, and every suppressed alert is still visible on
       the incident. The count is a *running* one — see §2.4a for why the cause's own page
       cannot carry the final figure without delaying the outage it is reporting
-- [~] Suppression is off by default and is a per-tenant column — tested. The **audit
-      entry** for switching it on is not written, because no route changes it yet: today
-      it is a database update
+- [x] Suppression is off by default and is a per-tenant column, and switching it is a
+      decision with an **audit entry** rather than a default somebody inherits
+      > `PUT /api/v1/incidents/suppression`, `Admin` — the one write in this module that
+      > is not `Operator`. Everything else here records what a person decided about an
+      > outage that has already happened; this decides whether the product will decline to
+      > wake somebody up about a future one, on the strength of a topology it inferred.
+      >
+      > **Turning it off is audited too**, and the audit row carries both sides plus an
+      > explicit `changed`. The obvious reading is that switching it *on* is the risky
+      > direction and so the one to record, but the record exists to answer "why did nobody
+      > get paged in March" — and the answer to that is as often "it was on then and it is
+      > off now". An audit trail with only one edge of a toggle cannot reconstruct what was
+      > true at a time, and two identical rows cannot tell a decision from a double-click.
+      >
+      > The switch is on the incident screen, under the list it changes the meaning of,
+      > rather than in a settings page. Both positions carry a sentence about who gets woken
+      > up, and the risk is stated in both — the danger is not in the moment of clicking, it
+      > is in every page that does not arrive afterwards, and a warning that disappears once
+      > somebody accepts it is a warning nobody sees again.
 - [x] A downstream failure followed by an upstream one notifies for the upstream — the
       direction rule, §2.4
 - [x] Resolving every alert moves an incident to `quiet` and not to `closed`; only a

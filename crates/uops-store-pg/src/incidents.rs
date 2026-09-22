@@ -447,6 +447,52 @@ impl PgStore {
         .map_err(|e| map("tenant", "suppression".to_owned(), e))
     }
 
+    /// Turn topology suppression on or off for this tenant — M9 §2.4.
+    ///
+    /// Returns what it was before, so the caller can write an audit entry with both sides
+    /// and can tell a change from a no-op. An operator who clicks the switch twice should
+    /// produce one audit row that matters and one that says nothing happened, not two
+    /// identical rows that both look like a decision.
+    ///
+    /// # Why this is a column and not a setting somebody inherits
+    ///
+    /// Suppression is the one feature in this milestone that can cause a **missed
+    /// outage**: the product decides, from a topology it inferred, that somebody does not
+    /// need to be woken up. It defaults to off and earns its way on after an operator has
+    /// watched it group correctly on their own estate — which is only a real decision if
+    /// there is a record of who made it and when.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn set_suppression(&self, scope: &TenantScope, on: bool) -> Result<bool> {
+        // `RETURNING` the old value needs it read in the same statement, or two callers
+        // racing would each report the other's write as "what it was before" — and an
+        // audit trail that disagrees with itself about the previous state is worse than
+        // one that omits it.
+        //
+        // tenant-exempt: the tenant is the row being updated, from the scope.
+        let row = sqlx::query!(
+            r#"
+            UPDATE tenant AS t
+               SET suppress_downstream_alerts = $2
+              FROM (SELECT id, suppress_downstream_alerts FROM tenant WHERE id = $1 FOR UPDATE) AS was
+             WHERE t.id = was.id
+            RETURNING was.suppress_downstream_alerts AS "was!"
+            "#,
+            scope.tenant_id() as uops_core::TenantId,
+            on,
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| map("tenant", "suppression".to_owned(), e))?;
+
+        row.map(|r| r.was).ok_or(uops_core::Error::NotFound {
+            kind: "tenant",
+            id: scope.tenant_id().to_string(),
+        })
+    }
+
     /// A tenant's incidents, newest first.
     ///
     /// # Errors

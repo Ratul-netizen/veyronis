@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE tenant AS t\n               SET suppress_downstream_alerts = $2\n              FROM (SELECT id, suppress_downstream_alerts FROM tenant WHERE id = $1 FOR UPDATE) AS was\n             WHERE t.id = was.id\n            RETURNING was.suppress_downstream_alerts AS \"was!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "was!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9f69783aefab2716656f35f335e7247c83fb99dd95284342f44b4a11c1af0db6"
+}

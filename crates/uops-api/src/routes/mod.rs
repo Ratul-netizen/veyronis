@@ -170,6 +170,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/incidents/{id}/timeline",
             get(incidents::timeline_of),
         )
+        // Whether topology suppression may stop a notification — M9 §2.4. Reading is
+        // Viewer, because "will this product decide not to page me" is a question anybody
+        // carrying a pager may ask. Writing is Admin: it is the one setting in M9 that can
+        // cause a missed outage.
+        //
+        // Above `/{id}` so that `suppression` is not read as an incident id.
+        .route(
+            "/api/v1/incidents/suppression",
+            get(incidents::suppression).put(incidents::set_suppression),
+        )
         .route("/api/v1/incidents/{id}/ack", post(incidents::acknowledge))
         .route("/api/v1/incidents/{id}/close", post(incidents::close))
         // A saved search is a stored Query AST — the same object the route below takes,

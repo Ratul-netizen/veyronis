@@ -27,11 +27,23 @@
 //! N replicas to race on. Migrations are DDL and are `scripts/db.sh migrate` and
 //! `uops-ch-migrate`, for the reasons `uops-server`'s `main` sets out.
 //!
-//! # Why more than one poller is not yet safe
+//! # More than one poller is safe, and this paragraph used to say the opposite
 //!
-//! There is no lease. Two pollers against one database would both schedule every device
-//! and poll it twice, which doubles the load on the fleet and writes each sample twice.
-//! One process for now; the lease is M2's remaining scale work and is in STATUS.
+//! It said *"there is no lease"*, which was true when M2 wrote it and stopped being true
+//! when M12 §2.1 added one. A comment that tells an operator not to run a second replica
+//! of something that is safe to replicate is not a harmless stale line: it is the product
+//! refusing a capability it has, in the one place somebody looks before deploying.
+//!
+//! What is actually true: [`run::serve`] claims the `poll` lease and only the holder
+//! sends anything. A second poller loads the fleet, stands by, and takes over within one
+//! lease period if the first stops — so a takeover is a one-slot gap rather than a reload.
+//!
+//! Measured by sample count rather than argued: `tests/live.rs`'s
+//! `two_pollers_against_one_database_write_the_samples_of_one` runs two against one
+//! database and counts rows in `ClickHouse`, then runs the same loop with the lease gate
+//! removed and shows the count go up. A duplicated sample is worse than a duplicated
+//! packet — every rate computed from `metrics` is then wrong rather than merely doubled —
+//! which is why the measurement is in samples and not in polls.
 
 use std::process::ExitCode;
 use std::sync::Arc;

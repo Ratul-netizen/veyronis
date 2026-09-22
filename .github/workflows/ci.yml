@@ -346,6 +346,24 @@ jobs:
             exit 1
           fi
 
+      # M12 §3's lease criterion, measured rather than argued: two pollers against one
+      # database write the samples of one. It prints the two counts, and the numbers are
+      # echoed here so a regression is visible in the log rather than only in an assertion
+      # — a run that suddenly reports 10 and 10 has a story worth reading.
+      #
+      # Needs no SNMP fixture: the device is `uops_snmp::sim` and only the databases are
+      # real. That is why it is its own step and not gated on the container — an
+      # acceptance criterion that runs only where a particular container is up is one
+      # that stops being run.
+      - name: Two pollers write the samples of one
+        run: |
+          output=$(cargo test -p uops-poller --test lease -- --nocapture 2>&1)
+          echo "$output"
+          echo "$output" | grep "M12 §3, measured" || {
+            echo "::error::the lease measurement printed no numbers; it did not run"
+            exit 1
+          }
+
       # The whole suite, in the one job that has what it needs. Unit and integration
       # together: which is which is not a distinction worth maintaining in a list
       # somebody has to remember to update.

@@ -237,9 +237,31 @@ in every milestone since M7.
 
 ## 3. Acceptance criteria
 
-- [~] Two pollers against one database poll each device **once** — the lease elects one
-      of sixteen racing processes, tested. Not yet measured *by sample count* through two
-      real pollers, which is the version of this claim that cannot be argued with
+- [x] Two pollers against one database poll each device **once** — measured by sample
+      count, which is the version of this claim that cannot be argued with
+      > `crates/uops-poller/tests/lease.rs`. Two pollers, one database, 300 slots of
+      > schedule: **5 samples with the lease and 10 without it.** Exactly the doubling the
+      > lease exists to prevent, and a duplicated sample is worse than a duplicated packet
+      > — every rate computed from `metrics` is then wrong rather than merely doubled.
+      >
+      > **The control is what makes it evidence.** A test that ran two leased pollers and
+      > found five samples would pass equally well if the second poller were broken,
+      > mis-seeded or pointed at nothing. So the same loop runs again with the gate removed
+      > and nothing else changed. The comparison is the measurement; either half alone is
+      > an assertion.
+      >
+      > The device is `uops_snmp::sim` and the databases are real. `live.rs` skips without
+      > the containerised agent, and an acceptance criterion that only runs on a machine
+      > with a particular container started is one that stops being run — while the lease
+      > is a row in `PostgreSQL` whose effect is rows in `ClickHouse`, both of which are
+      > real here. A simulated agent also answers in microseconds, so it cannot be the
+      > reason one poller wrote fewer samples than two.
+      >
+      > Writing it found a stale comment worth more than the test: `uops-poller`'s `main`
+      > still said *"there is no lease… one process for now"*, which was true when M2 wrote
+      > it and has been false since this milestone. A comment telling an operator not to
+      > run a second replica of something safe to replicate is the product refusing a
+      > capability it has, in the one place somebody looks before deploying.
 - [x] Killing the process that holds a lease causes another to take over within one lease
       period, and the gap is one cycle rather than an outage — the poller keeps its
       schedule warm while standing by, so a takeover is a slot and not a reload

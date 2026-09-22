@@ -530,6 +530,25 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Scoped,
         body: None,
     },
+    // Topology suppression — M9 §2.4. Scoped, and the interesting attack is the first:
+    // this is a *tenant's* setting, so naming a tenant you have no role on must be
+    // indistinguishable from naming one that does not exist. There is no object id here to
+    // point at somebody else's, which is why the probe body is the whole of the second
+    // attack's surface.
+    RouteCase {
+        path: "/api/v1/incidents/suppression",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/incidents/suppression",
+        probe: None,
+        method: "PUT",
+        expectation: Expectation::Scoped,
+        body: Some(r#"{"suppress_downstream_alerts":true}"#),
+    },
     RouteCase {
         path: "/api/v1/incidents/{id}/timeline",
         probe: None,

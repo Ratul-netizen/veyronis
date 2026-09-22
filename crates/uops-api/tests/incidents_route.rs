@@ -414,3 +414,153 @@ async fn a_timeline_for_an_incident_in_another_tenant_is_not_found() {
         "and it is not in the list either: {body}"
     );
 }
+
+// ---- topology suppression ------------------------------------------------------
+
+impl Fixture {
+    fn put(&self, uri: &str, body: &serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method("PUT")
+            .uri(uri)
+            .header(
+                header::COOKIE,
+                format!(
+                    "{SESSION_COOKIE}={}; {CSRF_COOKIE}={}",
+                    self.session, self.csrf
+                ),
+            )
+            .header(TENANT_HEADER, self.tenant.to_string())
+            .header(CSRF_HEADER, self.csrf.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn audit_log(&self) -> Vec<(String, Option<serde_json::Value>, Option<serde_json::Value>)> {
+        self.store
+            .audit_entries(self.tenant, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.action, e.before, e.after))
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn suppression_is_off_until_somebody_turns_it_on_and_that_is_audited() {
+    // M9 §2.4's last open acceptance criterion. Until this route existed, switching
+    // suppression on was a database update and there was nothing to audit — so "a decision
+    // with an audit entry rather than a default somebody inherits" was a sentence in a
+    // document with nothing behind it.
+    let f = fixture("suppress", Role::Admin).await;
+
+    let (status, off) = f.call(f.get("/api/v1/incidents/suppression")).await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    assert_eq!(
+        off["suppress_downstream_alerts"], false,
+        "the default has to be off: suppression is the one thing in M9 that can cause a \
+         missed outage"
+    );
+
+    let (status, on) = f
+        .call(f.put(
+            "/api/v1/incidents/suppression",
+            &serde_json::json!({ "suppress_downstream_alerts": true }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{on}");
+    assert_eq!(on["suppress_downstream_alerts"], true);
+
+    // It stuck, and the alert engine reads the same column.
+    let (_, again) = f.call(f.get("/api/v1/incidents/suppression")).await;
+    assert_eq!(again["suppress_downstream_alerts"], true);
+    assert!(
+        f.store
+            .suppression_enabled(&uops_core::TenantScope::system(f.tenant))
+            .await
+            .unwrap()
+    );
+
+    // The audit row, with both sides. "Why did nobody get paged in March" is answered by
+    // knowing what it was as well as what it became.
+    let log = f.audit_log().await;
+    let entry = log
+        .iter()
+        .find(|(action, _, _)| action == "incidents.suppression.set")
+        .expect("switching it on is audited");
+    assert_eq!(entry.1.as_ref().unwrap()["suppress_downstream_alerts"], false);
+    assert_eq!(entry.2.as_ref().unwrap()["suppress_downstream_alerts"], true);
+    assert_eq!(entry.2.as_ref().unwrap()["changed"], true);
+}
+
+#[tokio::test]
+async fn turning_suppression_off_is_audited_too_and_a_no_op_says_so() {
+    // The obvious reading is that switching it *on* is the risky direction, so that is the
+    // one to record. But the record exists to answer "why did nobody get paged in March",
+    // and the answer is as often "it was on then and it is off now".
+    let f = fixture("unsuppress", Role::Admin).await;
+
+    f.call(f.put(
+        "/api/v1/incidents/suppression",
+        &serde_json::json!({ "suppress_downstream_alerts": true }),
+    ))
+    .await;
+    f.call(f.put(
+        "/api/v1/incidents/suppression",
+        &serde_json::json!({ "suppress_downstream_alerts": false }),
+    ))
+    .await;
+
+    let log = f.audit_log().await;
+    let sets: Vec<_> = log
+        .iter()
+        .filter(|(action, _, _)| action == "incidents.suppression.set")
+        .collect();
+    assert_eq!(sets.len(), 2, "both directions are recorded");
+
+    // Newest first, so the second write is the first row.
+    assert_eq!(sets[0].1.as_ref().unwrap()["suppress_downstream_alerts"], true);
+    assert_eq!(sets[0].2.as_ref().unwrap()["suppress_downstream_alerts"], false);
+
+    // Clicking the switch twice produces a row that says nothing happened, rather than a
+    // second row that looks like a decision.
+    f.call(f.put(
+        "/api/v1/incidents/suppression",
+        &serde_json::json!({ "suppress_downstream_alerts": false }),
+    ))
+    .await;
+    let log = f.audit_log().await;
+    let latest = log
+        .iter()
+        .find(|(action, _, _)| action == "incidents.suppression.set")
+        .expect("recorded");
+    assert_eq!(latest.2.as_ref().unwrap()["changed"], false);
+}
+
+#[tokio::test]
+async fn an_operator_can_read_the_setting_and_cannot_change_it() {
+    // Everything else in this module is Operator. This one is Admin, because it decides
+    // whether the product will decline to wake somebody up — and "will this product decide
+    // not to page me" is still a question anybody carrying a pager may ask.
+    let f = fixture("supprole", Role::Operator).await;
+
+    let (status, view) = f.call(f.get("/api/v1/incidents/suppression")).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+
+    let (status, refused) = f
+        .call(f.put(
+            "/api/v1/incidents/suppression",
+            &serde_json::json!({ "suppress_downstream_alerts": true }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+
+    // And nothing changed.
+    assert!(
+        !f.store
+            .suppression_enabled(&uops_core::TenantScope::system(f.tenant))
+            .await
+            .unwrap()
+    );
+}
