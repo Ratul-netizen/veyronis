@@ -2663,6 +2663,7 @@ version = "0.0.1"
 dependencies = [
  "chrono",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
  "socket2",
  "sqlx",
@@ -2686,6 +2687,7 @@ dependencies = [
  "opentelemetry-proto",
  "prost",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
  "sqlx",
  "thiserror 2.0.20",
@@ -2706,6 +2708,7 @@ version = "0.0.1"
 dependencies = [
  "chrono",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
  "sqlx",
  "tokio",
@@ -2863,6 +2866,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "chrono",
+ "serde_json",
  "socket2",
  "sqlx",
  "tokio",

@@ -1186,6 +1186,101 @@ SELECT pg_temp.must_fail($$
     INSERT INTO lease (name, holder, expires_at) VALUES ('pol', 'x', now())
 $$, '23514');
 
+-- ================================================================
+-- A collector carries the customers it was assigned, and no others
+-- ================================================================
+--
+-- Migration 0025. Before this table, any collector with database credentials could carry
+-- any tenant by editing its own YAML. The assignment is what makes that a server-side
+-- decision, so every boundary around it is a boundary around "whose logs land where".
+
+INSERT INTO collector (id, org_id, kind, name) VALUES
+    ('00000000-0000-0000-0000-0000000000e5',
+     '00000000-0000-0000-0000-0000000000f0', 'syslog', 'berlin-01');
+
+-- A collector assigned another organization's tenant. The one that matters: a mistyped
+-- tenant id in an MSP's console would otherwise point a box at somebody else's customer.
+SELECT pg_temp.must_fail($$
+    INSERT INTO collector_tenant (collector_id, org_id, tenant_id)
+    VALUES ('00000000-0000-0000-0000-0000000000e5',
+            '00000000-0000-0000-0000-0000000000f0',
+            '00000000-0000-0000-0000-0000000000d1')
+$$, '23503');
+
+-- Claiming the other organization's id on the row does not help: the collector half of
+-- the key stops matching instead. Both halves have to agree, which is why `org_id` is
+-- carried on the assignment at all.
+SELECT pg_temp.must_fail($$
+    INSERT INTO collector_tenant (collector_id, org_id, tenant_id)
+    VALUES ('00000000-0000-0000-0000-0000000000e5',
+            '00000000-0000-0000-0000-0000000000d0',
+            '00000000-0000-0000-0000-0000000000d1')
+$$, '23503');
+
+-- Within one organization it is allowed, and to several tenants: one collector at a site
+-- serving two customers is the ordinary MSP arrangement.
+INSERT INTO collector_tenant (collector_id, org_id, tenant_id) VALUES
+    ('00000000-0000-0000-0000-0000000000e5',
+     '00000000-0000-0000-0000-0000000000f0', '00000000-0000-0000-0000-00000000000a'),
+    ('00000000-0000-0000-0000-0000000000e5',
+     '00000000-0000-0000-0000-0000000000f0', '00000000-0000-0000-0000-00000000000b');
+SELECT pg_temp.check(
+    (SELECT count(*) = 2 FROM collector_tenant
+      WHERE collector_id = '00000000-0000-0000-0000-0000000000e5'),
+    'one collector may serve several tenants of the same organization');
+
+-- Two collectors of one kind with one name in one organization. Enrolment is idempotent
+-- on this triple — it is what removes the identity file — so a duplicate here would mean
+-- two rows for one process and no way to tell which is which.
+SELECT pg_temp.must_fail($$
+    INSERT INTO collector (org_id, kind, name)
+    VALUES ('00000000-0000-0000-0000-0000000000f0', 'syslog', 'berlin-01')
+$$, '23505');
+
+-- The same name for a different kind is fine, and is what a host running both a syslog
+-- and an OTLP collector looks like.
+INSERT INTO collector (org_id, kind, name)
+VALUES ('00000000-0000-0000-0000-0000000000f0', 'otlp', 'berlin-01');
+SELECT pg_temp.check(
+    (SELECT count(*) = 2 FROM collector WHERE name = 'berlin-01'),
+    'one host may run collectors of different kinds under one name');
+
+-- An enrolment token with a negative use count. `uses_left = 0` is a spent token and is
+-- legitimate; below zero is a decrement that ran one time too many, and it would read as
+-- "unlimited" to anybody testing `> 0` carelessly.
+SELECT pg_temp.must_fail($$
+    INSERT INTO collector_enrolment_token (org_id, label, token_hash, uses_left)
+    VALUES ('00000000-0000-0000-0000-0000000000f0', 'bad',
+            decode('00', 'hex'), -1)
+$$, '23514');
+
+-- Two tokens cannot share a hash, across the whole deployment. Scoped globally rather
+-- than per organization on purpose: enrolment presents a token and nothing else, so a
+-- hash that matched two rows would make "which organization is this" ambiguous at
+-- exactly the moment it decides whose data the collector will carry.
+INSERT INTO collector_enrolment_token (org_id, label, token_hash)
+VALUES ('00000000-0000-0000-0000-0000000000f0', 'site-berlin', decode('aabb', 'hex'));
+SELECT pg_temp.must_fail($$
+    INSERT INTO collector_enrolment_token (org_id, label, token_hash)
+    VALUES ('00000000-0000-0000-0000-0000000000d0', 'theirs', decode('aabb', 'hex'))
+$$, '23505');
+
+-- Retiring a collector keeps its assignments; deleting one takes them. Both are
+-- deliberate: retirement is what an operator does to a box that has gone, and the row
+-- stays so that "what used to be at that site" has an answer.
+UPDATE collector SET retired_at = now()
+ WHERE id = '00000000-0000-0000-0000-0000000000e5';
+SELECT pg_temp.check(
+    (SELECT count(*) = 2 FROM collector_tenant
+      WHERE collector_id = '00000000-0000-0000-0000-0000000000e5'),
+    'retiring a collector does not silently drop what it was carrying');
+
+DELETE FROM collector WHERE id = '00000000-0000-0000-0000-0000000000e5';
+SELECT pg_temp.check(
+    (SELECT count(*) = 0 FROM collector_tenant
+      WHERE collector_id = '00000000-0000-0000-0000-0000000000e5'),
+    'deleting a collector takes its assignments with it');
+
 -- Every foreign key has an index on its referencing side.
 --
 -- PostgreSQL indexes the referenced side automatically and the referencing side never,

@@ -186,6 +186,11 @@ async fn fifty_thousand_messages_a_second_with_nothing_dropped() {
         spill: None,
         queue: 500_000,
         workers: std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get),
+        // Not enrolled: these tests are about the path from a socket to a row,
+        // and the registry is a separate concern with its own tests in
+        // `uops-store-pg/tests/collectors.rs`.
+        collector_token: None,
+        collector_name: "test".to_owned(),
     };
     let bound = run::resolve_tenants(&store, &config)
         .await
@@ -456,6 +461,9 @@ async fn how_much_headroom_there_is_above_the_target() {
         spill: None,
         queue: 500_000,
         workers: std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get),
+        // Not enrolled: see the note on the other fixture in this file.
+        collector_token: None,
+        collector_name: "test".to_owned(),
     };
     let bound = run::resolve_tenants(&store, &config)
         .await

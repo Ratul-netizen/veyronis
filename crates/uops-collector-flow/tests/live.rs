@@ -166,6 +166,11 @@ fn one_listener(slug: String, udp: SocketAddr) -> Config {
         clickhouse: ch_config(),
         queue: 1024,
         workers: 2,
+        // Not enrolled: these tests are about the path from a datagram to a row,
+        // and the registry is a separate concern with its own tests in
+        // `uops-store-pg/tests/collectors.rs`.
+        collector_token: None,
+        collector_name: "test".to_owned(),
         receive_buffer: 1 << 20,
     }
 }
@@ -189,6 +194,8 @@ async fn a_netflow_v5_datagram_becomes_a_row() {
         clickhouse: ch_config(),
         queue: 1024,
         workers: 2,
+        collector_token: None,
+        collector_name: "test".to_owned(),
         receive_buffer: 1 << 20,
     };
 
@@ -255,6 +262,8 @@ async fn an_exporter_nobody_registered_gets_a_resource_rather_than_a_dropped_pac
         clickhouse: ch_config(),
         queue: 1024,
         workers: 2,
+        collector_token: None,
+        collector_name: "test".to_owned(),
         receive_buffer: 1 << 20,
     };
 
@@ -321,6 +330,8 @@ async fn a_datagram_nothing_can_decode_is_counted_and_does_not_stop_the_listener
         clickhouse: ch_config(),
         queue: 1024,
         workers: 1,
+        collector_token: None,
+        collector_name: "test".to_owned(),
         receive_buffer: 1 << 20,
     };
 
@@ -376,6 +387,8 @@ async fn a_listener_naming_a_tenant_that_does_not_exist_refuses_to_start() {
         clickhouse: ch_config(),
         queue: 16,
         workers: 1,
+        collector_token: None,
+        collector_name: "test".to_owned(),
         receive_buffer: 1 << 20,
     };
 

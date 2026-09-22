@@ -19,6 +19,8 @@ uops-store-pg.workspace = true
 
 chrono.workspace = true
 serde.workspace = true
+# The collector reports what it is bound to as JSON — see `describe_listeners` in main.
+serde_json.workspace = true
 # A listener list is inherently a list, and the syslog collector's argument applies
 # unchanged: UOPS_FLOW_LISTENER_0_UDP is not configuration, it is a workaround.
 serde_yaml_ng.workspace = true

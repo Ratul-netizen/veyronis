@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, label, kind AS \"kind: Kind\", expires_at, uses_left, created_at,\n                   (revoked_at IS NOT NULL) AS \"revoked!\"\n              FROM collector_enrolment_token\n             WHERE org_id = $1\n             ORDER BY created_at DESC, id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind: Kind",
+        "type_info": {
+          "Custom": {
+            "name": "collector_kind",
+            "kind": {
+              "Enum": [
+                "syslog",
+                "otlp",
+                "flow",
+                "poller"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "uses_left",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "revoked!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "13ed02cca41f6b60af7bfaa772e057ff982d547249ee333705d2de9c7c9a9f0e"
+}

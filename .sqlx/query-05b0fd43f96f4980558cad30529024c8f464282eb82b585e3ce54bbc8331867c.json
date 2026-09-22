@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT c.id, c.kind AS \"kind: Kind\", c.name, c.hostname, c.version, c.reported,\n                   c.enrolled_at, c.last_seen_at, c.started_at,\n                   c.received, c.written, c.lost,\n                   (c.retired_at IS NOT NULL) AS \"retired!\",\n                   -- Computed here rather than stored. See the module docs: the process\n                   -- that would write a stored flag is the kind of process this watches.\n                   (c.last_seen_at IS NOT NULL\n                    AND c.last_seen_at < now() - $2::interval) AS \"quiet!\",\n                   (c.last_seen_at IS NULL) AS \"never_reported!\",\n                   COALESCE(\n                       array_agg(ct.tenant_id) FILTER (WHERE ct.tenant_id IS NOT NULL),\n                       '{}'\n                   ) AS \"tenants!: Vec<TenantId>\"\n              FROM collector c\n              LEFT JOIN collector_tenant ct ON ct.collector_id = c.id\n             WHERE c.org_id = $1\n             GROUP BY c.id\n             ORDER BY c.kind, c.name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind: Kind",
+        "type_info": {
+          "Custom": {
+            "name": "collector_kind",
+            "kind": {
+              "Enum": [
+                "syslog",
+                "otlp",
+                "flow",
+                "poller"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "hostname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "reported",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "enrolled_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "received",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "written",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "lost",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "retired!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "quiet!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 14,
+        "name": "never_reported!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "tenants!: Vec<TenantId>",
+        "type_info": "UuidArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Interval"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "05b0fd43f96f4980558cad30529024c8f464282eb82b585e3ce54bbc8331867c"
+}

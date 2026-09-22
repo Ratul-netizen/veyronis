@@ -93,6 +93,11 @@ fn config(slug: &str, udp: SocketAddr) -> Config {
         // somebody has to break on purpose.
         spill: None,
         // Small, so the test does not allocate a 200 000-row channel twice per case.
+        // Not enrolled: these tests are about the path from a socket to a row,
+        // and the registry is a separate concern with its own tests in
+        // `uops-store-pg/tests/collectors.rs`.
+        collector_token: None,
+        collector_name: "test".to_owned(),
         queue: 4_096,
         workers: 2,
     }

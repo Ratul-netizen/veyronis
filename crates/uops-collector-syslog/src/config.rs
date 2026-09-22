@@ -48,6 +48,18 @@ pub const CONFIG_PATH: &str = "UOPS_SYSLOG_CONFIG";
 /// restart but not an upgrade that goes wrong.
 pub const SPILL_PATH: &str = "UOPS_SYSLOG_SPILL";
 
+/// The enrolment token, from `UOPS_COLLECTOR_TOKEN` — M12 §2.3.
+///
+/// **Unset means this collector does not enrol**, and behaves exactly as it did
+/// before migration 0025: it reads the listener file and serves what that names.
+/// Making it required would have turned the registry into a flag day for every
+/// existing deployment, which is not a thing to do to somebody's logging pipeline.
+///
+/// Set, it means an operator has said *this box is part of the estate*: the
+/// collector appears in the inventory, is noticed when it stops, and may only
+/// serve the tenants it has been assigned.
+pub use uops_store_pg::TOKEN_VAR;
+
 /// One tenant's ingress.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Listener {
@@ -79,6 +91,10 @@ pub struct File {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub listeners: Vec<Listener>,
+    /// The enrolment token, or `None` to stay out of the registry. See [`TOKEN_VAR`].
+    pub collector_token: Option<String>,
+    /// What this collector calls itself in the inventory. Defaults to the hostname.
+    pub collector_name: String,
     pub postgres: uops_store_pg::Config,
     pub clickhouse: uops_store_ch::ChConfig,
     /// How many rows may wait between the receivers and the batcher.
@@ -136,6 +152,11 @@ impl Config {
 
         Ok(Self {
             listeners: file.listeners,
+            // Read rather than required: see `TOKEN_VAR`.
+            collector_token: std::env::var(TOKEN_VAR)
+                .ok()
+                .filter(|t| !t.trim().is_empty()),
+            collector_name: uops_store_pg::Agent::default_name(),
             postgres,
             clickhouse: uops_store_ch::ChConfig::from_env(),
             spill: None,
@@ -161,6 +182,14 @@ impl Config {
                 format!("{} on {}", l.tenant, on.join(" + "))
             })
             .collect();
+        let registry = if self.collector_token.is_some() {
+            format!("enrolled as {}", self.collector_name)
+        } else {
+            // Worth saying out loud for the same reason the spill line is: an operator
+            // who believes this box is in the inventory and is not should find out at
+            // startup rather than when they go looking for it and it is not there.
+            format!("not enrolled (set {TOKEN_VAR} to join the collector inventory)")
+        };
         let spill = self.spill.as_ref().map_or_else(
             // Worth saying out loud. An operator who thinks they configured a spill and
             // did not should find out from the startup line, not from the rows_dropped
@@ -169,7 +198,7 @@ impl Config {
             |p| format!("spill {}", p.display()),
         );
         format!(
-            "{} listener(s): {}; queue {}, {} workers each, {spill}",
+            "{} listener(s): {}; queue {}, {} workers each, {spill}, {registry}",
             self.listeners.len(),
             binds.join(", "),
             self.queue,

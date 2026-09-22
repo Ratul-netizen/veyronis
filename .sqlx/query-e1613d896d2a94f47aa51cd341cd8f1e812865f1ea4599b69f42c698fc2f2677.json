@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collector\n               SET last_seen_at = now(),\n                   hostname   = COALESCE($2, hostname),\n                   version    = COALESCE($3, version),\n                   reported   = COALESCE($4, reported),\n                   started_at = COALESCE($5, started_at),\n                   received   = $6,\n                   written    = $7,\n                   lost       = $8\n             WHERE id = $1\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e1613d896d2a94f47aa51cd341cd8f1e812865f1ea4599b69f42c698fc2f2677"
+}

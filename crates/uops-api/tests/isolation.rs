@@ -167,6 +167,46 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Unscoped,
         body: None,
     },
+    // The collector inventory — M12 §2.3. `Unscoped` for the same reason as the SSO
+    // configuration routes above: they are organization-level and take `OrgAdmin`, so a
+    // caller who reaches them can already see every tenant they could name. Their real
+    // isolation property — one organization's collectors are not another's — is tested
+    // where it can be expressed, in `crates/uops-store-pg/tests/collectors.rs`.
+    RouteCase {
+        path: "/api/v1/collectors",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/collectors/{id}",
+        probe: Some("/api/v1/collectors/00000000-0000-0000-0000-0000000000ff"),
+        method: "DELETE",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/collectors/{id}/tenants",
+        probe: Some("/api/v1/collectors/00000000-0000-0000-0000-0000000000ff/tenants"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"tenant_id":"00000000-0000-0000-0000-0000000000ff"}"#),
+    },
+    RouteCase {
+        path: "/api/v1/collectors/tokens",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/collectors/tokens/{id}",
+        probe: Some("/api/v1/collectors/tokens/00000000-0000-0000-0000-0000000000ff"),
+        method: "DELETE",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/resources",
         probe: None,

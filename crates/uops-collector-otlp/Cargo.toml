@@ -28,6 +28,8 @@ opentelemetry-proto = { workspace = true, default-features = false, features = [
     "gen-tonic-messages", "logs", "metrics", "trace",
 ] }
 serde.workspace = true
+# The collector reports what it is bound to as JSON — see `describe_listeners` in main.
+serde_json.workspace = true
 thiserror.workspace = true
 serde_yaml_ng.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time", "rt-multi-thread", "macros", "sync"] }

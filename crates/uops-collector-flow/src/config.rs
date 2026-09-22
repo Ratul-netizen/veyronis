@@ -60,6 +60,13 @@ pub struct File {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub listeners: Vec<Listener>,
+    /// The enrolment token, or `None` to stay out of the registry — M12 §2.3.
+    ///
+    /// Unset means this collector behaves exactly as it did before migration 0025. See
+    /// `uops_store_pg::Agent` for why enrolment is opt-in and what that costs.
+    pub collector_token: Option<String>,
+    /// What this collector calls itself in the inventory. Defaults to the hostname.
+    pub collector_name: String,
     pub postgres: uops_store_pg::Config,
     pub clickhouse: uops_store_ch::ChConfig,
     /// How many decoded flows may wait between a receiver and the workers.
@@ -119,6 +126,10 @@ impl Config {
 
         Ok(Self {
             listeners: file.listeners,
+            collector_token: std::env::var(uops_store_pg::TOKEN_VAR)
+                .ok()
+                .filter(|t| !t.trim().is_empty()),
+            collector_name: uops_store_pg::Agent::default_name(),
             postgres,
             clickhouse: uops_store_ch::ChConfig::from_env(),
             queue: DEFAULT_QUEUE,

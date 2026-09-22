@@ -1846,6 +1846,120 @@ h2 {
   color: var(--text-dim);
 }
 
+/* --- collector and token state (M12 §2.3) --------------------------------
+ *
+ * The same idiom as `.severity` above and for the same reason: the word carries the
+ * meaning and the colour only emphasises it, so nothing here depends on hue. A healthy
+ * collector is deliberately the dim one — the eye should go to the two that need
+ * somebody, not to the nineteen that do not. */
+.state {
+  display: inline-block;
+  font-size: var(--t-label);
+  font-weight: 500;
+}
+
+/* Reported once and then stopped: an outage, and the one to look at first. */
+.state.quiet,
+.state.revoked {
+  color: var(--danger);
+}
+
+/* Enrolled and never reported: a configuration problem rather than an outage. Amber
+   rather than red because nothing was lost — it never started. */
+.state.silent,
+.state.expired,
+.state.spent {
+  color: var(--warn);
+}
+
+.state.reporting,
+.state.retired,
+.state.usable {
+  color: var(--text-dim);
+}
+
+/* The tenants a collector serves, each with a way to take it away. A list rather than
+   a sentence: the remove control belongs to one tenant, and a comma-separated string
+   has nowhere to put it. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--t-label);
+}
+
+.chip-remove {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip-remove:hover {
+  color: var(--danger);
+}
+
+/* A form that sits on one line among prose, rather than the stacked grid `.login form`
+   and `.explore-form` use. Wraps on a narrow screen instead of scrolling, because the
+   controls are independent. */
+.inline-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.inline-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: var(--t-label);
+}
+
+/* A button that reads as a link. Used where the action is "show me one more control"
+   rather than a command — a bordered button there would weigh the same as Retire. */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--t-label);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* An enrolment token, shown exactly once. Monospace and selectable: it is about to be
+   copied into somebody's configuration management, and a proportional font makes
+   checking a pasted value against this one impossible. */
+.token {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--t-label);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 /* A firing row is the one being looked for; a pending row is on the screen because it is
    one evaluation away, and must not compete with it. */
 tbody tr.firing td {

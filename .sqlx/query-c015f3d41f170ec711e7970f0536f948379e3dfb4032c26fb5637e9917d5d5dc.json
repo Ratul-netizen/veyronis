@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM collector_tenant\n             WHERE collector_id = $1 AND org_id = $2 AND tenant_id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c015f3d41f170ec711e7970f0536f948379e3dfb4032c26fb5637e9917d5d5dc"
+}

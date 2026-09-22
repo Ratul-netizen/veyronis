@@ -30,6 +30,7 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 
 import { ApiError, api } from "./api";
+import { CollectorsPage } from "./collectorspage";
 import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
@@ -200,6 +201,12 @@ const discoveryCandidatesRoute = createRoute({
   component: DiscoveryCandidatesPage,
 });
 
+const collectorsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/collectors",
+  component: CollectorsPage,
+});
+
 const dashboardsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/dashboards",
@@ -235,6 +242,7 @@ const routeTree = rootRoute.addChildren([
     discoveryRoute,
     discoveryRunsRoute,
     discoveryCandidatesRoute,
+    collectorsRoute,
     dashboardsRoute,
     dashboardRoute,
   ]),

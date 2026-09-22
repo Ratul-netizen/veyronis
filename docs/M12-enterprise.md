@@ -138,6 +138,9 @@ is not the first thing.
 
 ### 2.3 A collector is registered, not configured.
 
+*Built. [`docs/collectors.md`](./collectors.md) is the operator's side — issuing a
+token, enrolling a box, and what the three states in the inventory mean.*
+
 Today every collector reads a YAML file naming its tenants. That is right for one
 collector and wrong for forty across nine sites.
 
@@ -145,6 +148,36 @@ collector and wrong for forty across nine sites.
 it is, what it can reach and what it has sent, and the server can see which ones have gone
 quiet — a collector that stops is exactly as important as a device that stops, and today
 nothing notices.
+
+> **Amended while building it: the token is not a security boundary, and saying so is
+> better than implying otherwise.** A collector in this deployment model holds PostgreSQL
+> and ClickHouse credentials — it has to, because that is where it writes — and those are
+> strictly more powerful than any enrolment token. A malicious collector does not need to
+> enrol.
+>
+> What enrolment does buy is real: a box brought up with a copied config serves **no
+> tenant** until somebody assigns one; the set of tenants it may carry is decided
+> server-side rather than by editing its own YAML; and an inventory exists, so a collector
+> that stops is visible. Those are the three things §2.3 was actually for.
+>
+> It becomes a security boundary the day telemetry is routed through the server rather
+> than written straight to ClickHouse. That is a throughput decision — W1 measured
+> ~100 000 msg/s direct — rather than a plumbing one, and it is the next question rather
+> than this one.
+
+> **And enrolment is opt-in, which is a transitional state.** A collector with no
+> `UOPS_COLLECTOR_TOKEN` behaves exactly as it did before: it reads its file and serves
+> what that names. Making it mandatory would have turned this into a flag day for every
+> existing deployment. The consequence, stated plainly: **the server-side assignment is
+> authoritative only for collectors that enrolled.** What closes that is requiring the
+> token, which is a deployment decision and belongs after an estate has enrolled
+> everything it has.
+
+> **A change of assignment is noticed, not applied.** A running collector logs that its
+> assignment changed and keeps serving what it started with; applying it means starting
+> and stopping listeners underneath a live ingest path, which is a larger change than the
+> registry and has its own failure modes. The startup check is what enforces the
+> assignment today.
 
 **Configuration stays local; assignment comes from the server.** Which addresses to bind
 and which interfaces to use are properties of where the collector sits, and a server that
@@ -210,18 +243,25 @@ in every milestone since M7.
 - [x] An *organization* that requires SSO refuses password login for everyone except a
       break-glass account, and that account's use is an audit event — see the amendment
       in §2.2 for why "organization" rather than "tenant"
-- [ ] A collector enrols with a token, appears in an inventory, and is marked quiet when it
-      stops reporting
-- [ ] No inbound connection to a collector is required for any of it
+- [x] A collector enrols with a token, appears in an inventory, and is marked quiet when it
+      stops reporting — three states rather than two, because *enrolled and never
+      reported* is a misconfiguration and *reported then stopped* is an outage, and they
+      need different people
+- [x] No inbound connection to a collector is required for any of it — and it was already
+      true: a collector dials out to PostgreSQL and ClickHouse and nothing ever dials in.
+      The part of §2.3 that is *not* yet true is the stronger one it implies — that a
+      collector needs only an HTTPS egress — and the amendment above says why
 - [ ] A restore drill is performed and recorded: what was lost, how long it took, and what
       a restored control plane cannot open without its KEK
 - [ ] An SBOM and a licence report are produced by CI for a release
 - [ ] A security overview exists, is dated, names the release it describes, and claims no
       certification
 - [~] Cross-tenant isolation holds for every new surface, by the same adversarial test
-      every milestone since M7 has used — the eight SSO routes are in `isolation.rs`, and
-      the property they actually have is *organization* isolation, tested separately in
-      `crates/uops-api/tests/sso.rs`. Reopens with each surface this milestone adds
+      every milestone since M7 has used — the eight SSO routes and the five collector
+      routes are in `isolation.rs`, and the property they actually have is *organization*
+      isolation, tested separately in `crates/uops-api/tests/sso.rs` and
+      `crates/uops-store-pg/tests/collectors.rs`. Reopens with each surface this milestone
+      adds
 
 ---
 

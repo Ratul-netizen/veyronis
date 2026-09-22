@@ -78,6 +78,40 @@ pub struct Metrics {
     pub spans_batch: std::sync::Mutex<batch::Stats>,
 }
 
+impl Metrics {
+    /// Everything taken off the wire, across all three signals.
+    ///
+    /// One number, because the registry asks every kind of collector the same three
+    /// questions and a column per signal would be a column per collector kind.
+    #[must_use]
+    pub fn received(&self) -> u64 {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.log_records.load(Relaxed) + self.data_points.load(Relaxed) + self.spans.load(Relaxed)
+    }
+
+    /// Rows that reached `ClickHouse`, including replayed ones.
+    #[must_use]
+    pub fn rows_written(&self) -> u64 {
+        self.logs_batch.lock().map_or(0, |s| s.rows_written)
+            + self.metrics_batch.lock().map_or(0, |s| s.rows_written)
+            + self.spans_batch.lock().map_or(0, |s| s.rows_written)
+    }
+
+    /// Everything that was lost.
+    ///
+    /// The batchers only, unlike the syslog daemon: this receiver is HTTP, so a full
+    /// queue makes the handler wait and the exporter retry rather than dropping anything.
+    /// `unsupported` is deliberately *not* counted here — a metric type this build does
+    /// not convert was never ours to lose, and adding it would make "did we lose
+    /// anything" answer yes on a healthy deployment.
+    #[must_use]
+    pub fn lost(&self) -> u64 {
+        self.logs_batch.lock().map_or(0, |s| s.rows_dropped)
+            + self.metrics_batch.lock().map_or(0, |s| s.rows_dropped)
+            + self.spans_batch.lock().map_or(0, |s| s.rows_dropped)
+    }
+}
+
 /// One tenant's endpoint: everything a handler needs.
 pub struct Listener {
     pub tenant_id: TenantId,

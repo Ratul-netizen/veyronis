@@ -113,6 +113,11 @@ fn config(slug: &str, bind: SocketAddr) -> Config {
         spill: None,
         queue: 4_096,
         max_body: 4 * 1024 * 1024,
+        // Not enrolled: these tests are about the path from a request to a row,
+        // and the registry is a separate concern with its own tests in
+        // `uops-store-pg/tests/collectors.rs`.
+        collector_token: None,
+        collector_name: "test".to_owned(),
     }
 }
 

@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO collector\n                (org_id, kind, name, hostname, version, reported, started_at,\n                 last_seen_at, received, written, lost)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9, $10)\n            ON CONFLICT (org_id, kind, name) DO UPDATE\n               SET hostname     = EXCLUDED.hostname,\n                   version      = EXCLUDED.version,\n                   reported     = EXCLUDED.reported,\n                   started_at   = EXCLUDED.started_at,\n                   last_seen_at = now(),\n                   received     = EXCLUDED.received,\n                   written      = EXCLUDED.written,\n                   lost         = EXCLUDED.lost,\n                   -- A collector that comes back is not retired any more. Somebody\n                   -- retired a box and it started talking again; the inventory should\n                   -- say so rather than hiding it.\n                   retired_at   = NULL\n            RETURNING id, org_id AS \"org_id: OrgId\", (xmax = 0) AS \"created!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "org_id: OrgId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "created!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "collector_kind",
+            "kind": {
+              "Enum": [
+                "syslog",
+                "otlp",
+                "flow",
+                "poller"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "dbdbe48ed6445db02cb7ffb7138a59dba0e87b32e1620113e7c81d8ec0a44c87"
+}

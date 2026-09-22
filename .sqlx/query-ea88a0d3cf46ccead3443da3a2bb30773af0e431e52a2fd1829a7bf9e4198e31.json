@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE collector_enrolment_token\n                   SET uses_left = uses_left - 1\n                 WHERE id = $1 AND (uses_left IS NULL OR uses_left > 0)\n                RETURNING uses_left\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uses_left",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "ea88a0d3cf46ccead3443da3a2bb30773af0e431e52a2fd1829a7bf9e4198e31"
+}

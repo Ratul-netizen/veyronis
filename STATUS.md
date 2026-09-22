@@ -11,8 +11,9 @@ Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 > closed with the Investigation Workspace and its own measurement:
 > [`bench/results/m9-timeline-100000000rows.md`](./bench/results/m9-timeline-100000000rows.md),
 > **77× fewer rows** than a time-first sort key would read.
-> **M12 Enterprise is in progress** — leases (§2.1) and single sign-on (§2.2) are done;
-> collector enrolment, the restore drill and the buyer-facing evidence are not.
+> **M12 Enterprise is in progress** — leases (§2.1), single sign-on (§2.2) and the
+> collector registry (§2.3) are done; the restore drill and the buyer-facing evidence are
+> not.
 > SPEC stops at M4
 > deliberately, so each milestone past it has its own document with its decisions closed
 > before anything was built: [`M5-discovery.md`](./docs/M5-discovery.md),
@@ -153,7 +154,9 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M12 §2.1 · leases** | ✅ migration 0023 — one `UPDATE`, a row lock for an election, and the same mechanism in the poller, the alert engine and the sweeper. Sixteen processes race for one lease in the tests |
 | **M12 §2.2 · single sign-on** | ✅ [`docs/sso.md`](./docs/sso.md) — `uops-oidc` — the authorization-code flow with PKCE, RS256/ES256 verification, and claim-to-role mapping that is configuration rather than inference. 75 unit tests plus 15 against a scripted provider that **actually signs** |
 | **M12 §2.2 · requiring SSO** | ✅ an organization may switch off password login for everyone but one named break-glass account, whose every use is an audit event |
-| M12 · collectors, restore drill, buyer evidence | ⬜ §2.3–§2.5 — not started |
+| **M12 §2.3 · the collector registry** | ✅ [`docs/collectors.md`](./docs/collectors.md) — migration 0025 — enrol, heartbeat, and an inventory that separates *never reported* from *went quiet*. Four callers: the syslog, OTLP and flow collectors and the poller. The token is an operational control rather than a security boundary, and the doc says why |
+| **M12 §2.3 · assignment comes from the server** | ✅ a listener naming a tenant this collector was not assigned refuses to start, naming the tenant. Opt-in: a collector with no token behaves exactly as before |
+| M12 · restore drill, buyer evidence | ⬜ §2.4–§2.5 — not started |
 
 ## Resume in three commands
 
@@ -169,7 +172,7 @@ bash scripts/db.sh migrate && bash scripts/ch.sh apply
 export DATABASE_URL=postgres://uops:uops@localhost:5432/uops
 export CLICKHOUSE_USER=uops CLICKHOUSE_PASSWORD=uops
 cargo test --workspace --all-targets && cargo test --workspace --doc   # 1 400+ tests, green
-cd web && npm ci && npm test                                            # 144 more
+cd web && npm ci && npm test                                            # 160 more
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
@@ -691,12 +694,11 @@ crates/uops-query/
    surfaces it. Blocked on the above, because a queue you can only agree with is worse
    than no queue.
 
-5. **M12 Enterprise is the milestone in progress**, and the next pieces of it are §2.3
-   collector enrolment — a collector is *registered* rather than configured, so that
-   forty of them across nine sites is an inventory rather than forty YAML files — and
-   §2.4's restore drill, which is the one item in that document that cannot be met by
-   writing code. See [`docs/M12-enterprise.md`](./docs/M12-enterprise.md); §2.1 and §2.2
-   are done.
+5. **M12 Enterprise is the milestone in progress**, and the next piece of it is §2.4's
+   restore drill — the one item in that document that cannot be met by writing code,
+   because a restore that has not been performed is not a backup. Then §2.5: an SBOM and
+   a licence report out of CI, and a security overview that claims no certification. See
+   [`docs/M12-enterprise.md`](./docs/M12-enterprise.md); §2.1, §2.2 and §2.3 are done.
 
 ### Carried forward, still true
 

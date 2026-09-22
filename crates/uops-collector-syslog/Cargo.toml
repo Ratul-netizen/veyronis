@@ -19,6 +19,8 @@ uops-store-pg.workspace = true
 
 chrono.workspace = true
 serde.workspace = true
+# The collector reports what it is bound to as JSON — see `describe_listeners` in main.
+serde_json.workspace = true
 # A listener list is inherently a list, and environment variables encode lists badly --
 # UOPS_SYSLOG_LISTENER_0_UDP is not configuration, it is a workaround. YAML is what the
 # monitoring profiles already use, for the same reason: a human writes this file.

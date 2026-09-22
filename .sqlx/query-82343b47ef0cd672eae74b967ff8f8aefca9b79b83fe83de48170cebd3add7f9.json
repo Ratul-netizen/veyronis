@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE collector SET retired_at = now()\n             WHERE id = $1 AND org_id = $2 AND retired_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "82343b47ef0cd672eae74b967ff8f8aefca9b79b83fe83de48170cebd3add7f9"
+}

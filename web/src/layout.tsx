@@ -54,6 +54,11 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       { to: "/alerts", label: "Alerts", exact: true },
       { to: "/alerts/rules", label: "Rules" },
       { to: "/alerts/channels", label: "Channels" },
+      // Not under Network, although a collector sits on one. This is the list an
+      // operator checks when telemetry has stopped arriving, which is an operations
+      // question rather than an inventory one — and the answer is often that a process
+      // died rather than that a device did.
+      { to: "/collectors", label: "Collectors" },
     ],
   },
 ];

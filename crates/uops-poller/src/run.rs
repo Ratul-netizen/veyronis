@@ -34,6 +34,8 @@ use tokio::sync::Mutex;
 use uops_core::{ResourceId, ResourceStatus, TenantScope};
 use uops_poll::plan::Device;
 use uops_poll::poller::{JobKey, Schedule, Task, run_tick, tasks, tick_instant};
+use std::sync::atomic::AtomicU64;
+
 use uops_poll::{Executor, TickReport};
 use uops_profile::Profile;
 use uops_snmp::Target;
@@ -528,6 +530,53 @@ pub async fn serve(
     config: &Config,
     shutdown: impl Future<Output = ()> + Send,
 ) -> uops_core::Result<()> {
+    serve_with_totals(runner, config, Arc::new(Totals::default()), shutdown).await
+}
+
+/// Running totals across every tick this process has run.
+///
+/// `TickReport` is per-tick and is what the log line needs. The collector registry needs
+/// the other shape — M12 §2.3 — because "this poller has taken four million samples since
+/// it started" is a number an operator compares against yesterday, and a per-tick count
+/// is not.
+#[derive(Debug, Default)]
+pub struct Totals {
+    /// Jobs the wheel handed out.
+    pub due: AtomicU64,
+    /// Metric rows written.
+    pub samples: AtomicU64,
+    /// Jobs that failed, plus jobs that ran out of budget.
+    ///
+    /// Added together because both are a device that was due and produced nothing, which
+    /// is the question the registry asks. The log line keeps them apart, where the
+    /// difference between "it did not answer" and "we ran out of time" is actionable.
+    pub failed: AtomicU64,
+}
+
+impl Totals {
+    fn record(&self, report: &TickReport) {
+        self.due
+            .fetch_add(report.due as u64, std::sync::atomic::Ordering::Relaxed);
+        self.samples
+            .fetch_add(report.samples as u64, std::sync::atomic::Ordering::Relaxed);
+        self.failed.fetch_add(
+            (report.failed + report.budget_exhausted) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
+/// [`serve`], accumulating into counters the caller can read while it runs.
+///
+/// # Errors
+///
+/// As [`serve`].
+pub async fn serve_with_totals(
+    runner: Arc<Runner>,
+    config: &Config,
+    totals: Arc<Totals>,
+    shutdown: impl Future<Output = ()> + Send,
+) -> uops_core::Result<()> {
     let executor = Executor::new(config.limits.into());
     let mut schedule = Schedule::new();
 
@@ -601,7 +650,9 @@ pub async fn serve(
                 // sends nothing. Standing by with a loaded fleet is what makes a takeover
                 // a one-slot gap rather than a reload.
                 if holding {
-                    note(&tick_once(&runner, &executor, &mut schedule, &mut due).await);
+                    let report = tick_once(&runner, &executor, &mut schedule, &mut due).await;
+                    totals.record(&report);
+                    note(&report);
                 }
             }
         }

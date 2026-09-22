@@ -20,6 +20,8 @@ uops-store-ch.workspace = true
 uops-store-pg.workspace = true
 
 chrono.workspace = true
+# The poller reports what it is doing as JSON — see `describe` in main.
+serde_json.workspace = true
 # "net" for the TCP availability check, "signal" for graceful shutdown, "time" for the
 # tick, "rt-multi-thread" because PgSealedStore bridges a synchronous trait with
 # block_in_place and a current-thread runtime would panic on the first credential read.

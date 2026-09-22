@@ -10,6 +10,7 @@
 pub mod alerts;
 pub mod auth;
 pub mod channels;
+pub mod collectors;
 pub mod credentials;
 pub mod dashboards;
 pub mod discovery;
@@ -70,6 +71,26 @@ pub fn router(state: AppState) -> Router {
         // The organization-level half of the audit log: who signed in through a
         // provider, who was refused, and every use of the break-glass account.
         .route("/api/v1/sso/audit", get(sso::audit))
+        // The collector inventory -- M12 §2.3. Every route needs the admin role on every
+        // tenant in the organization, because an assignment decides whose telemetry a box
+        // may carry, and in an MSP that is a decision about somebody else.
+        //
+        // There is no enrolment route: a collector enrols through PostgreSQL, which it
+        // already holds credentials for. See routes/collectors.rs.
+        .route("/api/v1/collectors", get(collectors::list))
+        .route("/api/v1/collectors/{id}", delete(collectors::retire))
+        .route(
+            "/api/v1/collectors/{id}/tenants",
+            post(collectors::assign).delete(collectors::unassign),
+        )
+        .route(
+            "/api/v1/collectors/tokens",
+            get(collectors::list_tokens).post(collectors::issue_token),
+        )
+        .route(
+            "/api/v1/collectors/tokens/{id}",
+            delete(collectors::revoke_token),
+        )
         .route(
             "/api/v1/resources",
             get(resources::list).post(resources::create),

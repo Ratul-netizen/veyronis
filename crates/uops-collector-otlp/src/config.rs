@@ -63,6 +63,13 @@ pub struct File {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub listeners: Vec<Listener>,
+    /// The enrolment token, or `None` to stay out of the registry — M12 §2.3.
+    ///
+    /// Unset means this collector behaves exactly as it did before migration 0025. See
+    /// `uops_store_pg::Agent` for why enrolment is opt-in and what that costs.
+    pub collector_token: Option<String>,
+    /// What this collector calls itself in the inventory. Defaults to the hostname.
+    pub collector_name: String,
     pub postgres: uops_store_pg::Config,
     pub clickhouse: uops_store_ch::ChConfig,
     pub spill: Option<std::path::PathBuf>,
@@ -112,6 +119,10 @@ impl Config {
 
         Ok(Self {
             listeners: file.listeners,
+            collector_token: std::env::var(uops_store_pg::TOKEN_VAR)
+                .ok()
+                .filter(|t| !t.trim().is_empty()),
+            collector_name: uops_store_pg::Agent::default_name(),
             postgres: uops_store_pg::Config {
                 url: database_url.ok_or_else(|| "DATABASE_URL is not set".to_owned())?,
                 ..uops_store_pg::Config::default()
@@ -135,8 +146,16 @@ impl Config {
             || format!("no spill (set {SPILL_PATH} to survive a long ClickHouse outage)"),
             |p| format!("spill {}", p.display()),
         );
+        let registry = if self.collector_token.is_some() {
+            format!("enrolled as {}", self.collector_name)
+        } else {
+            format!(
+                "not enrolled (set {} to join the collector inventory)",
+                uops_store_pg::TOKEN_VAR
+            )
+        };
         format!(
-            "{} listener(s): {}; queue {}, body limit {} MiB, {spill}",
+            "{} listener(s): {}; queue {}, body limit {} MiB, {spill}, {registry}",
             self.listeners.len(),
             binds.join(", "),
             self.queue,

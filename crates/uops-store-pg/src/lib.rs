@@ -45,6 +45,7 @@ pub mod audit;
 pub mod auth;
 pub mod bootstrap;
 pub mod catalog;
+pub mod collectors;
 pub mod dashboards;
 pub mod discovery;
 pub mod discovery_jobs;
@@ -79,6 +80,10 @@ pub use auth::{
 };
 pub use bootstrap::{FirstRun, FirstRunRequest};
 pub use catalog::PgCatalog;
+pub use collectors::{
+    Agent, CollectorRow, Enrolled, HEARTBEAT, Kind, NAME_VAR, QUIET_AFTER, Refused, Report,
+    TOKEN_VAR, TokenRow, check_assignment,
+};
 pub use dashboards::{Dashboard, NewDashboard, Panel, Viz};
 pub use discovery::{DiscoveredChild, DiscoveryReport};
 pub use enrich::PgEnricher;

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO collector_tenant (collector_id, org_id, tenant_id, assigned_by)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (collector_id, tenant_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db75137f15e3d6de899c8bb5ba00cb2dd0983cd2e1b39cfd9637372ef508a359"
+}

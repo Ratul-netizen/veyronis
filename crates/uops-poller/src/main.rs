@@ -87,6 +87,10 @@ async fn start() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("the built-in profiles could not be seeded: {e}"))?;
     println!("uops-poller: {seeded} built-in profiles up to date");
 
+    // Cloned before the runner takes ownership: the registry heartbeat writes through
+    // the same pool rather than opening its own. `PgStore` is an `Arc` around one.
+    let store_for_registry = store.clone();
+
     let runner = Arc::new(run::Runner::new(
         store,
         metrics,
@@ -94,7 +98,87 @@ async fn start() -> Result<(), Box<dyn std::error::Error>> {
         config.limits.device_budget,
     ));
 
-    run::serve(runner, &config, shutdown::signal()).await?;
+    // M12 §2.3. A poller serves no listener, so there is no assignment to check — it is
+    // in the registry for visibility alone, which is the thing it most needs: a poller
+    // that has stopped produces no error and no drop counter, only metrics that stop
+    // arriving for a fleet nobody is looking at.
+    let totals = Arc::new(run::Totals::default());
+    let started_at = chrono::Utc::now();
+
+    let agent = match config.collector_token.as_deref() {
+        Some(token) => {
+            let (agent, _assigned) = uops_store_pg::Agent::enrol(
+                store_for_registry,
+                uops_store_pg::Kind::Poller,
+                &config.collector_name,
+                token,
+                &report(&totals, started_at, &config),
+            )
+            .await
+            .map_err(|e| format!("this poller could not enrol: {e}"))?;
+            println!("uops-poller: enrolled as {}", agent.describe());
+            Some(agent)
+        }
+        None => None,
+    };
+
+    let heartbeat = agent.map(|agent| {
+        let totals = Arc::clone(&totals);
+        let reload_every = config.reload_every;
+        let device_limit = config.device_limit;
+        tokio::spawn(async move {
+            agent
+                .run(
+                    move || describe(&totals, started_at, reload_every, device_limit),
+                    std::future::pending::<()>(),
+                )
+                .await;
+        })
+    });
+
+    run::serve_with_totals(runner, &config, Arc::clone(&totals), shutdown::signal()).await?;
+
+    if let Some(heartbeat) = heartbeat {
+        heartbeat.abort();
+    }
     println!("uops-poller: stopped cleanly");
     Ok(())
+}
+
+/// One heartbeat's worth of truth about this process, from its configuration.
+fn report(
+    totals: &run::Totals,
+    started_at: chrono::DateTime<chrono::Utc>,
+    config: &Config,
+) -> uops_store_pg::Report {
+    describe(totals, started_at, config.reload_every, config.device_limit)
+}
+
+/// The same, from the two settings that describe what this poller is doing.
+///
+/// Split out because the heartbeat task outlives the borrow of `Config`, and copying two
+/// numbers into it beats cloning the whole configuration — which holds a database URL
+/// with a password in it.
+fn describe(
+    totals: &run::Totals,
+    started_at: chrono::DateTime<chrono::Utc>,
+    reload_every: std::time::Duration,
+    device_limit: i64,
+) -> uops_store_pg::Report {
+    use std::sync::atomic::Ordering::Relaxed;
+
+    uops_store_pg::Report {
+        hostname: Some(uops_store_pg::Agent::default_name()),
+        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        reported: Some(serde_json::json!({
+            "reload_every_secs": reload_every.as_secs(),
+            "device_limit": device_limit,
+        })),
+        started_at: Some(started_at),
+        // Jobs the wheel handed out, which is the poller's equivalent of a datagram
+        // taken off a socket.
+        received: i64::try_from(totals.due.load(Relaxed)).unwrap_or(i64::MAX),
+        written: i64::try_from(totals.samples.load(Relaxed)).unwrap_or(i64::MAX),
+        lost: i64::try_from(totals.failed.load(Relaxed)).unwrap_or(i64::MAX),
+    }
 }

@@ -77,11 +77,35 @@ pub struct Stats {
     pub sampling_unknown: AtomicU64,
     /// Flows dropped because the queue to the workers was full.
     pub dropped_queue: AtomicU64,
+    /// The batcher's own counters, as of its last report.
+    ///
+    /// Added for the collector registry — M12 §2.3 — which asks every kind of collector
+    /// the same three questions, one of which is how much actually reached `ClickHouse`.
+    /// Until then this number existed only in a log line.
+    pub batch: std::sync::Mutex<batch::Stats>,
 }
 
 impl Stats {
     fn bump(counter: &AtomicU64, by: usize) {
         counter.fetch_add(by as u64, Ordering::Relaxed);
+    }
+
+    /// Rows that reached `ClickHouse`, including replayed ones.
+    #[must_use]
+    pub fn rows_written(&self) -> u64 {
+        self.batch.lock().map_or(0, |s| s.rows_written)
+    }
+
+    /// Everything that was lost, at either end.
+    ///
+    /// A full queue and a full disk are different failures — and an operator asking "did
+    /// we lose anything" wants them added up. `undecodable` and `awaiting_template` are
+    /// deliberately not here: a packet no decoder would take was never a flow, and a
+    /// record waiting for its template is the first half-minute after any exporter
+    /// restarts. Counting either would make a healthy collector report loss.
+    #[must_use]
+    pub fn lost(&self) -> u64 {
+        self.dropped_queue.load(Ordering::Relaxed) + self.batch.lock().map_or(0, |s| s.rows_dropped)
     }
 }
 
@@ -343,6 +367,33 @@ pub async fn run(
     telemetry: ChStore,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<Arc<Stats>, String> {
+    run_with_stats(
+        config,
+        store,
+        telemetry,
+        Arc::new(Stats::default()),
+        shutdown,
+    )
+    .await
+}
+
+/// [`run`], reporting into counters the caller can read while it runs.
+///
+/// The registry's heartbeat needs them mid-flight — a collector that only published its
+/// numbers on the way down would appear to have ingested nothing for its whole life. The
+/// syslog and OTLP daemons grew the same seam for the scale test, which is why this looks
+/// familiar.
+///
+/// # Errors
+///
+/// As [`run`].
+pub async fn run_with_stats(
+    config: Config,
+    store: PgStore,
+    telemetry: ChStore,
+    stats: Arc<Stats>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<Arc<Stats>, String> {
     let bounds = resolve_tenants(&store, &config).await?;
 
     // Bound before anything is spawned, so an address already in use is a startup error
@@ -356,8 +407,6 @@ pub async fn run(
         Resolver::new(store.clone()),
         Enrichment::new(PgEnricher::new(store.clone())),
     ));
-    let stats = Arc::new(Stats::default());
-
     let (rows_tx, rows_rx) = mpsc::channel::<FlowRow>(config.queue);
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
 
@@ -404,11 +453,15 @@ pub async fn run(
     }
     drop(rows_tx);
 
+    let reporting = Arc::clone(&stats);
     let batcher = tokio::spawn(batch::run(
         telemetry,
         rows_rx,
         batch::Config::default(),
-        |s| {
+        move |s| {
+            if let Ok(mut held) = reporting.batch.lock() {
+                *held = s;
+            }
             // rows_dropped is the one that means loss; retries and spills are the
             // system recovering. Reported together so the difference is visible rather
             // than inferred from a single number going up.

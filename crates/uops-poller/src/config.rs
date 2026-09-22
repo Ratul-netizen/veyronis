@@ -27,6 +27,14 @@ use uops_store_pg::Config as PgConfig;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub postgres: PgConfig,
+    /// The enrolment token, or `None` to stay out of the registry — M12 §2.3.
+    ///
+    /// A poller is not a collector in the ingest sense, and it is in the registry anyway:
+    /// its silence is the least visible of any process here. No error, no drop counter,
+    /// just metrics that stop arriving for a fleet nobody is looking at.
+    pub collector_token: Option<String>,
+    /// What this poller calls itself in the inventory. Defaults to the hostname.
+    pub collector_name: String,
     pub clickhouse: ChConfig,
     /// Where the key-encryption key comes from. See [`KekSource`].
     pub kek: KekSource,
@@ -140,6 +148,10 @@ impl Config {
 
         Ok(Self {
             postgres: PgConfig::from_env(),
+            collector_token: std::env::var(uops_store_pg::TOKEN_VAR)
+                .ok()
+                .filter(|t| !t.trim().is_empty()),
+            collector_name: uops_store_pg::Agent::default_name(),
             clickhouse: ChConfig::from_env(),
             kek,
             kek_id: KeyId(var("UOPS_KEK_ID", "default")),
