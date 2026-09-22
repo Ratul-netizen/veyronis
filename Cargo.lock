@@ -2917,6 +2917,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-runner"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "sqlx",
+ "tokio",
+ "uops-core",
+ "uops-query",
+ "uops-runbook",
+ "uops-secrets",
+ "uops-store-pg",
+ "uuid",
+]
+
+[[package]]
 name = "uops-secrets"
 version = "0.0.1"
 dependencies = [

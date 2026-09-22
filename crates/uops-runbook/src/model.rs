@@ -208,9 +208,23 @@ impl Step {
     ///
     /// M10 §2.2: a dry run really runs the read-only steps, against the real devices,
     /// right now — so the preconditions are genuinely checked rather than assumed.
+    ///
+    /// # This was `&& is_inherently_read_only()` and that was wrong
+    ///
+    /// The stricter version reads as the cautious choice and is the opposite. An
+    /// `ssh.command` is never *inherently* read-only, so under it a dry run of the runbook
+    /// §2.1 uses as its own example — `show bgp summary`, then `clear bgp neighbor` — ran
+    /// nothing at all. It reported "would run 2 steps on 4 resources" having touched
+    /// nothing, which is precisely the simulation §2.2 opens by saying a dry run is not.
+    ///
+    /// A safety feature that quietly does nothing is worse than none, because somebody
+    /// trusts it. So the author's declaration is what decides, and what makes that
+    /// trustworthy is [`crate::validate`]: a step marked non-destructive whose command
+    /// matches the deny-list does not save. §2.3 exists so that `destructive: false` can
+    /// be relied on here — that is the whole of what it is for.
     #[must_use]
     pub const fn runs_in_dry_run(&self) -> bool {
-        !self.destructive && self.action.is_inherently_read_only()
+        !self.destructive
     }
 }
 
@@ -359,6 +373,10 @@ mod tests {
         };
         assert!(!marked.runs_in_dry_run());
 
+        // A `show` command. It really runs, which is the whole of what makes a dry run
+        // more than a simulation — the precondition is checked against the device rather
+        // than assumed. What makes that safe is `validate`: this step would not have saved
+        // if its command matched the deny-list.
         let ssh = Step {
             action: Action::SshCommand {
                 command: "show bgp summary".to_owned(),
@@ -367,9 +385,16 @@ mod tests {
             ..read_only
         };
         assert!(
-            !ssh.runs_in_dry_run(),
-            "an SSH command is not known to be safe, so a dry run does not run it"
+            ssh.runs_in_dry_run(),
+            "a dry run that runs no ssh.command step runs nothing at all — see the note              on runs_in_dry_run"
         );
+
+        // And the one that must not: the author said it changes something.
+        let clear = Step {
+            destructive: true,
+            ..ssh
+        };
+        assert!(!clear.runs_in_dry_run());
     }
 
     #[test]

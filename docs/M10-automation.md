@@ -263,36 +263,111 @@ a run cannot be started twice by two replicas. It reads the queue from PostgreSQ
 is the same pattern the sweeper uses, and needs the vault for the same reason the poller
 does.
 
+### 2.10 The SSH transport is OpenSSH, because there is no library this product may link.
+
+This decision was made while building the runner, and it was not the intended one.
+
+**What was looked for and not found.** An SSH client for this workspace has to be pure
+Rust and carry a licence on the allow-list, because every other transport decision in this
+product has been made that way: `snmp2` over `async-snmp` to avoid `aws-lc-rs`, `ureq`
+without default features, `sqlx` and `axum` and the ClickHouse client all without TLS. The
+one maintained async SSH client in the ecosystem, `russh`, offers exactly two crypto
+backends — `aws-lc-rs` and `ring` — and both carry the OpenSSL licence term in their
+expression. Neither is on the allow-list.
+
+Adding one would make this the first OpenSSL-licensed code in an AGPL product, which is a
+distribution question for a lawyer and not a dependency choice for an afternoon. The
+alternative, writing an SSH client, is not a serious proposal: the transport that logs into
+a customer's core switch is the last place in this product to hand-roll cryptography.
+
+**So the transport is `ssh(1)`, invoked as a child process with an argument vector.**
+
+The cost is real and worth stating: the product now depends on OpenSSH being installed,
+and on its exit-code contract — 255 for the client's own failures, the remote command's
+status otherwise. That contract has been stable for twenty years and is better understood
+than anything this repository could write.
+
+Three things fall out of it that are better than the library would have been:
+
+* **There is no shell on this side.** `std::process::Command` takes an argv, not a command
+  line, so nothing between this process and `ssh` interprets the rendered text. The far end
+  still interprets it — that is what a device CLI *is* — which is precisely why §2.1's
+  amendment refuses to shell-quote and demands that a value simply *be* safe. Removing the
+  local shell removes the layer that could have been argued about; the remote one was never
+  ours to quote for.
+* **The credential never becomes a string in this process's memory on the way to the
+  device.** It is written to a private file, the path is passed as `-i`, and the file is
+  removed when the step ends.
+* **Host keys are checked.** `BatchMode=yes`, and `StrictHostKeyChecking=accept-new`
+  against a `known_hosts` file the product owns. Trust on first use, which is weak, and
+  `no` — which is what every hurried integration picks — is not weak, it is nothing. Once a
+  device's key is recorded, a changed key stops the run, which is the case worth catching.
+
+**Key authentication only, and this is a security position rather than a shortcut.**
+`ssh(1)` cannot take a password without a helper, and the helper would be a program whose
+job is to print a secret. A runbook that changes an estate should be authenticating with a
+key, so `CredentialMaterial::SshPassword` is refused at execution with a message that says
+so, and a passphrase-protected key is refused the same way. If a deployment genuinely needs
+either, the route is `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force`, and it is a decision
+somebody should make deliberately rather than inherit.
+
+**`http.request` needs none of this.** It is the HTTP client already in the tree.
+
 ---
 
 ## 3. Acceptance criteria
 
-- [ ] A runbook is created, validated, versioned, and a second edit produces a second
+- [x] A runbook is created, validated, versioned, and a second edit produces a second
       version while the first stays readable
-- [ ] A step whose action does not match a known kind, or whose rollback is `unknown`,
+- [x] A step whose action does not match a known kind, or whose rollback is `unknown`,
       fails validation at save time with a message naming the step
-- [ ] A step marked read-only whose command matches the deny-list fails validation, naming
+- [x] A step marked read-only whose command matches the deny-list fails validation, naming
       the word it matched
 - [ ] A dry run resolves the targets, names every resource, renders every command, and
       executes only the read-only steps — verified against a real SSH server, not a mock
+      > **Partly.** Everything but the last clause holds and is tested
+      > (`uops-runner/tests/runner.rs`). The real-SSH half is not: no SSH server was
+      > reachable from the machine this was built on, so what has been verified against a
+      > real `ssh(1)` is the client invocation and the refused-connection contract
+      > (`ssh::tests::a_refused_connection_is_reported_as_never_having_asked`), not a
+      > completed session. **This is the one criterion in M10 that has not been met and it
+      > stays open.**
+      >
+      > Building it found a defect worth recording: `runs_in_dry_run` was
+      > `!destructive && is_inherently_read_only()`, which meant a dry run of this
+      > milestone's own example runbook executed *nothing* and reported "would run 2 steps"
+      > having touched no device — exactly the simulation §2.2 opens by saying a dry run is
+      > not. The author's `destructive` flag is what decides, and §2.3's deny-list is what
+      > makes that flag trustworthy. That is what §2.3 is for.
 - [ ] A run whose selector exceeds the runbook's maximum does not run, and says by how much
-- [ ] A destructive run started and approved by the same person is **refused**
-- [ ] An approval older than its window is refused, and the run stays pending rather than
+      > `uops_runbook::plan` refuses with the numbers; nothing calls it yet. The API route
+      > that plans a run is where this becomes reachable.
+- [x] A destructive run started and approved by the same person is **refused**
+- [x] An approval older than its window is refused, and the run stays pending rather than
       failing
 - [ ] A break-glass run without approval succeeds, is audited as its own kind of event, and
       the run record says it was unapproved
-- [ ] A step that fails stops the run, and the product offers the declared rollback rather
+      > The run record says it (`runbook_run.break_glass`) and `decide` returns
+      > `BreakGlass`, which the runner honours. The *audit event* is written where a person
+      > starts a run, which is the API route and is not built.
+- [x] A step that fails stops the run, and the product offers the declared rollback rather
       than performing it
-- [ ] A rendered command and a captured output never reach a log line — by the same kind of
+- [x] A rendered command and a captured output never reach a log line — by the same kind of
       CI grep that keeps crypto in `uops-secrets`
-- [ ] A credential used by a run never appears in the run record, the rendered command, or
+- [x] A credential used by a run never appears in the run record, the rendered command, or
       the output
-- [ ] Two runners against one database execute each queued run **once** — by the same
+- [x] Two runners against one database execute each queued run **once** — by the same
       lease M12 §2.1 built
+      > And not by it, which is the part worth reading. The lease bounds how many runners
+      > contend; what makes the claim atomic is one `UPDATE … FOR UPDATE SKIP LOCKED` that
+      > the database serialises. The test runs **with no lease at all**, so it tests the
+      > claim rather than the lease — M12 §2.3's enrolment token is where that distinction
+      > was learned.
 - [ ] Cross-tenant isolation holds for every new surface, by the same adversarial test
       every milestone since M7 has used
-
----
+      > No new HTTP surface exists yet. The store surfaces added here are tenant-scoped or
+      > deliberately cross-tenant (`claim_next_run`, `fail_abandoned_runs` — a runner serves
+      > a deployment), and each carries the `tenant-exempt` marker the CI guard reads.
 
 ## 4. What M10 does not do
 

@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE runbook_run AS run\n               SET state = 'running', started_at = now()\n             WHERE run.id = (\n                     SELECT id FROM runbook_run\n                      WHERE state = 'ready'\n                      ORDER BY created_at\n                      LIMIT 1\n                      FOR UPDATE SKIP LOCKED\n                   )\n            RETURNING run.id, run.tenant_id AS \"tenant_id: TenantId\", run.version_id,\n                      run.dry_run, run.targets, run.targets_fingerprint,\n                      run.started_by AS \"started_by: ActorId\", run.break_glass\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id: TenantId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "dry_run",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "targets",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "targets_fingerprint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "started_by: ActorId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "break_glass",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f555edc8235c8320111c992570f9b3ada7bf4c4ca1fda6e17058851a463c2a6e"
+}

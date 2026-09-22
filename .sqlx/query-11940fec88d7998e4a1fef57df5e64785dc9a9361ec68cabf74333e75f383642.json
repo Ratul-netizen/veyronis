@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT i.resource_id AS \"id: ResourceId\", i.value\n              FROM resource_identifier i\n             WHERE i.tenant_id = $1 AND i.kind = 'mgmt_ip' AND i.resource_id = ANY($2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id: ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "value",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "11940fec88d7998e4a1fef57df5e64785dc9a9361ec68cabf74333e75f383642"
+}

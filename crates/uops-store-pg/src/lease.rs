@@ -69,6 +69,16 @@ pub enum Job {
     Alert,
     /// The discovery sweeper — `uops-sweeper`.
     Sweep,
+    /// The runbook runner — `uops-runner`, M10 §2.9.
+    ///
+    /// The one job here whose double-execution is not a duplicated *reading* but a
+    /// duplicated *change*: two runners picking up the same queued run would send
+    /// `clear bgp neighbor` to a device twice. The lease bounds how many processes
+    /// contend; what makes the claim atomic is the conditional `UPDATE` in
+    /// [`crate::PgStore::claim_next_run`], for the reason the enrolment token taught in
+    /// M12 §2.3 — a lock that a connection pool happens to serialise is not a guard you
+    /// can point at.
+    Run,
 }
 
 impl Job {
@@ -78,6 +88,7 @@ impl Job {
             Self::Poll => "poll",
             Self::Alert => "alert",
             Self::Sweep => "sweep",
+            Self::Run => "run",
         }
     }
 }

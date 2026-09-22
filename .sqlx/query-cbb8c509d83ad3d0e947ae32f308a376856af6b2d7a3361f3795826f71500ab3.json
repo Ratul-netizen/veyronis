@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE runbook_run\n               SET state = 'failed', finished_at = now(),\n                   failure = 'the runner executing this run stopped. What it had already sent is in the transcript; what it had not is not. It was not restarted, because a step that changes something must not be re-sent by a process guessing.'\n             WHERE state = 'running'\n               AND started_at < now() - make_interval(secs => $1)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cbb8c509d83ad3d0e947ae32f308a376856af6b2d7a3361f3795826f71500ab3"
+}

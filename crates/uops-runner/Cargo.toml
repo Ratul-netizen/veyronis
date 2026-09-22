@@ -1,0 +1,53 @@
+[package]
+name = "uops-runner"
+description = "The binary that executes runbook steps. Takes the run lease; opens no listener."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+uops-core.workspace = true
+uops-runbook.workspace = true
+uops-secrets.workspace = true
+uops-store-pg.workspace = true
+
+async-trait.workspace = true
+chrono.workspace = true
+# The HTTP transport for `http.request`. hyper rather than a new client: the server and
+# the ClickHouse store already pull exactly these, so this adds no licence and nothing to
+# the SBOM. No TLS, for the same reason as every other client here — a device API reached
+# over TLS goes through the same reverse proxy everything else does.
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+# `join_all` over the targets in one concurrency chunk. Already in the tree.
+futures-util.workspace = true
+uuid.workspace = true
+# "process" for the SSH transport — see M10 §2.10, which is why there is no SSH crate
+# here. "fs" to write a key to a private file and remove it again. "signal" for shutdown,
+# "time" for the poll interval and the per-step budget, "rt-multi-thread" because
+# PgSealedStore bridges a synchronous trait with block_in_place.
+tokio = { workspace = true, features = [
+    "process", "fs", "io-util", "signal", "time", "rt-multi-thread", "macros", "sync",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+sqlx.workspace = true
+uops-query.workspace = true
+uops-secrets.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "uops-runner"
+path = "src/main.rs"

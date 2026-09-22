@@ -109,6 +109,60 @@ pub struct ApprovalRow {
     pub targets_fingerprint: String,
 }
 
+/// One resource a claimed run acts on, as it was resolved at plan time.
+///
+/// Read back from the run's own row rather than re-resolved. The whole point of approving
+/// a run is that somebody looked at *this list* — M10 §2.5 — and a selector re-evaluated
+/// at execution time would mean approving one thing and running another.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct QueuedTarget {
+    pub id: ResourceId,
+    /// What an operator calls it, carried so a transcript reads in names.
+    pub name: String,
+}
+
+/// A run this process has taken, and everything needed to execute it.
+///
+/// Held by value rather than as ids to look up again: between the claim and the first step
+/// there must be no second read that could see a different answer.
+#[derive(Clone, Debug)]
+pub struct Claimed {
+    pub id: uuid::Uuid,
+    pub tenant_id: TenantId,
+    pub runbook_id: uuid::Uuid,
+    pub runbook: Runbook,
+    pub dry_run: bool,
+    pub targets: Vec<QueuedTarget>,
+    pub targets_fingerprint: String,
+    pub started_by: ActorId,
+    pub break_glass: bool,
+    /// Every approval on the run, unfiltered.
+    ///
+    /// Whether they are enough, fresh, distinct, and not the starter's own is
+    /// `uops_runbook::decide` — not this layer's business, and re-deciding here would be
+    /// a second copy of the rule that could disagree with the first.
+    pub approvals: Vec<uops_runbook::Approval>,
+}
+
+impl Claimed {
+    /// The scope everything about this run must be done under.
+    #[must_use]
+    pub const fn scope(&self) -> TenantScope {
+        TenantScope::system(self.tenant_id)
+    }
+
+    /// The approval question, as `uops_runbook` asks it.
+    #[must_use]
+    pub fn request(&self) -> uops_runbook::Request {
+        uops_runbook::Request {
+            started_by: self.started_by,
+            required: self.runbook.approvals,
+            targets_fingerprint: self.targets_fingerprint.clone(),
+            break_glass: self.break_glass,
+        }
+    }
+}
+
 impl PgStore {
     /// Create a runbook, or save a new version of one that exists.
     ///
@@ -325,6 +379,209 @@ impl PgStore {
         .map_err(|e| map("runbook", id.to_string(), e))?
         .rows_affected();
         Ok(affected == 1)
+    }
+
+    // ---- the queue the runner reads ---------------------------------------------
+
+    /// Take the oldest queued run, or find there is none.
+    ///
+    /// **This is what makes "each queued run executes once" true**, and the lease in M12
+    /// §2.1 is not. The lease bounds how many runners contend; a lease that lapsed a
+    /// millisecond ago while its holder was mid-claim would leave two processes both
+    /// believing they may work, and the thing that decides between them has to be a
+    /// single statement the database serialises.
+    ///
+    /// So the state transition *is* the claim: `ready` to `running` inside one `UPDATE`,
+    /// against a row picked with `FOR UPDATE SKIP LOCKED`. A second runner either sees no
+    /// `ready` row or skips the locked one. This is the lesson the enrolment token taught
+    /// in M12 §2.3 — a guard that a connection pool happens to serialise is not a guard
+    /// anybody can point at.
+    ///
+    /// It is **cross-tenant on purpose**: a runner serves the deployment, not a tenant,
+    /// the same way the sweeper and the alert engine do. Everything it hands back carries
+    /// the tenant it came from, and nothing below acts without it.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said, and [`uops_core::Error::Serialization`] for a stored
+    /// runbook this build cannot read — a downgrade past an action kind. That run is left
+    /// in `running` and reported by the caller rather than silently skipped, because a run
+    /// nobody can parse is a run somebody has to look at.
+    pub async fn claim_next_run(&self) -> Result<Option<Claimed>> {
+        // tenant-exempt: a runner serves the deployment. The tenant is read from the row
+        // and returned with it.
+        let row = sqlx::query!(
+            r#"
+            UPDATE runbook_run AS run
+               SET state = 'running', started_at = now()
+             WHERE run.id = (
+                     SELECT id FROM runbook_run
+                      WHERE state = 'ready'
+                      ORDER BY created_at
+                      LIMIT 1
+                      FOR UPDATE SKIP LOCKED
+                   )
+            RETURNING run.id, run.tenant_id AS "tenant_id: TenantId", run.version_id,
+                      run.dry_run, run.targets, run.targets_fingerprint,
+                      run.started_by AS "started_by: ActorId", run.break_glass
+            "#,
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| map("run", "queue".to_owned(), e))?;
+
+        let Some(row) = row else { return Ok(None) };
+        let scope = TenantScope::system(row.tenant_id);
+
+        // Read after the claim rather than joined into it. The `UPDATE` has to stay one
+        // statement over one row to be the thing that decides; widening it into a join
+        // over four tables to save a round trip would trade the property for a query plan.
+        let Some((runbook_id, runbook)) = self.runbook_version(&scope, row.version_id).await?
+        else {
+            return Err(uops_core::Error::NotFound {
+                kind: "runbook version",
+                id: row.version_id.to_string(),
+            });
+        };
+
+        let targets: Vec<QueuedTarget> = serde_json::from_value(row.targets)?;
+
+        let approvals = sqlx::query!(
+            r#"
+            SELECT approved_by AS "approved_by: ActorId", at, targets_fingerprint
+              FROM runbook_approval
+             WHERE run_id = $1 AND tenant_id = $2
+            "#,
+            row.id,
+            scope.tenant_id() as TenantId,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("approval", row.id.to_string(), e))?
+        .into_iter()
+        .map(|a| uops_runbook::Approval {
+            by: a.approved_by,
+            at: a.at,
+            targets_fingerprint: a.targets_fingerprint,
+        })
+        .collect();
+
+        Ok(Some(Claimed {
+            id: row.id,
+            tenant_id: row.tenant_id,
+            runbook_id,
+            runbook,
+            dry_run: row.dry_run,
+            targets,
+            targets_fingerprint: row.targets_fingerprint,
+            started_by: row.started_by,
+            break_glass: row.break_glass,
+            approvals,
+        }))
+    }
+
+    /// Put a claimed run back where it was, with no failure recorded against it.
+    ///
+    /// For the one case that is not a failure: an approval that expired while the run sat
+    /// in the queue. M10 §3 says such a run *stays pending rather than failing*, because
+    /// what went wrong is that ten minutes passed, and the operator's next step is to ask
+    /// somebody again rather than to read a transcript.
+    ///
+    /// `started_at` is cleared with it: a run that is waiting again has not started.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn return_run_to_queue(&self, scope: &TenantScope, run_id: uuid::Uuid) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE runbook_run
+               SET state = 'awaiting_approval', started_at = NULL
+             WHERE id = $1 AND tenant_id = $2 AND state = 'running'
+            "#,
+            run_id,
+            scope.tenant_id() as TenantId,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| map("run", run_id.to_string(), e))?;
+        Ok(())
+    }
+
+    /// Close out the runs a crashed runner left mid-flight.
+    ///
+    /// Called at start-up, the way the sweeper reaps its own abandoned discovery runs. A
+    /// run in `running` whose process is gone is the one state nothing else corrects: no
+    /// runner will claim it again, because claiming only looks at `ready`.
+    ///
+    /// **It is marked `failed`, not requeued.** A run that was `running` may already have
+    /// sent a destructive step, and the product does not know which. Re-running it would
+    /// be the product deciding, by itself, to send `clear bgp neighbor` a second time —
+    /// which is exactly what §2.6 refuses to do with a rollback, for the same reason.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn fail_abandoned_runs(&self, older_than: chrono::Duration) -> Result<u64> {
+        #[expect(clippy::cast_precision_loss, reason = "a staleness bound in seconds")]
+        let secs = older_than.num_seconds() as f64;
+
+        // tenant-exempt: a crashed process abandoned whichever tenants' runs it held.
+        let affected = sqlx::query!(
+            r#"
+            UPDATE runbook_run
+               SET state = 'failed', finished_at = now(),
+                   failure = 'the runner executing this run stopped. What it had already sent is in the transcript; what it had not is not. It was not restarted, because a step that changes something must not be re-sent by a process guessing.'
+             WHERE state = 'running'
+               AND started_at < now() - make_interval(secs => $1)
+            "#,
+            secs,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| map("run", "abandoned".to_owned(), e))?
+        .rows_affected();
+        Ok(affected)
+    }
+
+    /// Where to reach each of a run's targets, right now.
+    ///
+    /// **Resolved at execution time and not carried in the run record**, which looks like
+    /// an inconsistency with M10 §2.5 and is not. What §2.5 freezes is *which resources*
+    /// were approved — the identities somebody looked at. A management address is not an
+    /// identity, it is how this process opens a socket to one, and a device that was
+    /// re-addressed between approval and execution should be reached at its new address
+    /// rather than at a stale one held in a JSON blob.
+    ///
+    /// A target with no `mgmt_ip` identifier is simply absent from the result. The caller
+    /// records that step as failed against that resource and carries on with the others,
+    /// because one un-addressed device out of forty is not a reason to abandon a run.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn resource_addresses(
+        &self,
+        scope: &TenantScope,
+        ids: &[ResourceId],
+    ) -> Result<std::collections::HashMap<ResourceId, String>> {
+        let raw: Vec<uuid::Uuid> = ids.iter().map(|id| (*id).into()).collect();
+
+        // tenant-exempt: the tenant is a bound parameter, from the scope.
+        let rows = sqlx::query!(
+            r#"
+            SELECT i.resource_id AS "id: ResourceId", i.value
+              FROM resource_identifier i
+             WHERE i.tenant_id = $1 AND i.kind = 'mgmt_ip' AND i.resource_id = ANY($2)
+            "#,
+            scope.tenant_id() as TenantId,
+            &raw,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("resource", scope.tenant_id().to_string(), e))?;
+
+        Ok(rows.into_iter().map(|r| (r.id, r.value)).collect())
     }
 
     // ---- runs -------------------------------------------------------------------

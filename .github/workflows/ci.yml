@@ -149,6 +149,33 @@ jobs:
           fi
           echo "ok: public-key verification only"
 
+      # M10 §2.4's last paragraph, and the acceptance criterion that names this job: "a
+      # rendered command and a captured output never reach a log line — by the same kind of
+      # CI grep that keeps crypto in uops-secrets".
+      #
+      # A run's transcript is redacted and access-controlled. A log line is neither: it
+      # goes to stdout, into a container platform's log aggregator, and out to whoever can
+      # read that — which is very often not the people who may read a runbook run.
+      #
+      # `format!` is deliberately not in the list. Building the run's own `failure` string
+      # out of what a device said is allowed and necessary; what is forbidden is *printing*
+      # it. The comment-line filter is the crypto guard's, for the crypto guard's reason:
+      # a rule that also forbids writing down the reasoning teaches people to delete the
+      # reasoning.
+      - name: A rendered command and a captured output never reach a log line
+        run: |
+          LOGGERS='(println!|eprintln!|dbg!|trace!|debug!|info!|warn!|error!)'
+          SENSITIVE='(rendered|transcript|\.output|outcome\.output|says)'
+          hits=$(grep -rnE "$LOGGERS[^;]*$SENSITIVE" --include='*.rs' \
+                   crates/uops-runner/src crates/uops-store-pg/src/runbooks.rs \
+                 | grep -vE ':[0-9]+:[[:space:]]*//' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::a rendered command or captured output reached a log line; it belongs in the run transcript, which is redacted and access-controlled"
+            exit 1
+          fi
+          echo "ok: transcripts stay in the transcript"
+
   integration:
     name: schemas · repositories · api
     runs-on: ubuntu-latest
