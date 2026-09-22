@@ -27,6 +27,9 @@ uops-pipeline.workspace = true
 # The output type. A syslog message and an OTLP one become the same row, which is what
 # makes them correlatable — so the row type is the store's rather than this crate's.
 uops-store-ch.workspace = true
+# M11. A syslog message may carry a security event as well as a log line — never instead
+# of one. See `normalize::to_event`.
+uops-security.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "sync", "io-util", "time", "macros"] }
 
 [dev-dependencies]

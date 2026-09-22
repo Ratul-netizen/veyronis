@@ -1,0 +1,21 @@
+[package]
+name = "uops-security"
+description = "Security events: the message shapes this product reads, and what it refuses to guess."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Nothing else. This crate is a function from a log body to an optional event, and every
+# decision in it is one somebody should be able to argue with by reading it — which a
+# dependency on a pattern library would take away. See M11 §2.2 on why there is no regex
+# engine here: the shapes are grammars, and a grammar somebody can read beats a regex
+# nobody can.
+serde = { workspace = true }
+
+[lints]
+workspace = true

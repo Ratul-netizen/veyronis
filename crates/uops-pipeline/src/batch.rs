@@ -109,6 +109,26 @@ impl Sink<MetricRow> for uops_store_ch::ChStore {
     }
 }
 
+/// The same batching, the same spill, a fourth table — M11.
+///
+/// Events arrive at a *fraction* of the log rate by construction: a security event exists
+/// only where a log line matched a grammar and then carried evidence of a kind, which is a
+/// small proportion of any real feed. That makes the deadline rather than the row count
+/// the thing that usually fires, as it does for metrics.
+///
+/// It gets the same durability all the same. An event is a derived row — the log it came
+/// from is already safe in its own batch — but re-deriving one after a `ClickHouse` outage
+/// would mean re-reading logs nobody kept an offset into, so in practice a lost event is
+/// lost.
+#[async_trait]
+impl Sink<uops_store_ch::EventRow> for uops_store_ch::ChStore {
+    async fn write(&self, rows: &[uops_store_ch::EventRow]) -> Result<(), String> {
+        uops_store_ch::EventStore::insert_events(self, rows)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
 /// The same batching, the same spill, a third table.
 ///
 /// Spans arrive in the shape logs do rather than the shape metrics do — an instrumented

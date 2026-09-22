@@ -85,6 +85,62 @@ pub struct LogRow {
     pub span_id: String,
 }
 
+/// One row of `events`.
+///
+/// # The table has existed since `ClickHouse` migration 0006 and nothing wrote to it
+///
+/// It has been queryable, in the Query AST, on the timeline and in
+/// `uops_query::plan`'s attribute rewriting for that whole time — a signal the
+/// Investigation Workspace knows how to display and the product never produced. M11 is its
+/// first producer, and this struct is where that starts.
+///
+/// # What an event is, against a log
+///
+/// A log is what a device said. An event is what it *reported happening*, categorised —
+/// so `event_category` and `event_type` replace a log's `facility`, and `summary` is a
+/// sentence rather than the raw body. The body is still stored, as a log, by the same
+/// ingest: producing an event never consumes the line it came from.
+///
+/// `PartialEq` for the same reason `LogRow` has it: a round trip through the WAL should be
+/// assertable rather than described.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventRow {
+    pub tenant_id: TenantId,
+    pub resource_id: ResourceId,
+    pub site_id: SiteId,
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub observed_at: DateTime<Utc>,
+    #[serde(
+        serialize_with = "clickhouse_datetime",
+        deserialize_with = "clickhouse_datetime_de"
+    )]
+    pub ingested_at: DateTime<Utc>,
+    pub source_kind: String,
+    pub source_vendor: String,
+    /// The Enum8 label: `trace`…`emergency`.
+    ///
+    /// **The device's own severity, never one this product decided** — M11 §2.8. Severity
+    /// on a security event is the easiest place to manufacture confidence: once a number is
+    /// on the row every screen sorts by it and nobody reads the event.
+    pub severity: String,
+    /// ECS's category vocabulary: `authentication`, `network`, `dns`, `vpn`,
+    /// `configuration`, `process`.
+    pub event_category: String,
+    /// ECS's type vocabulary: `allowed`, `denied`, `start`, `end`, `failure`, `success`,
+    /// `change`, `query`.
+    pub event_type: String,
+    pub summary: String,
+    /// `Map(LowCardinality(String), String)`, ECS-keyed: `source.ip`, `destination.ip`,
+    /// `user.name`, `dns.question.name`, `event.outcome`.
+    ///
+    /// The materialised `host_name` and `service_name` columns are computed by the server
+    /// from this — they are not sent, and sending them would be an error.
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
 /// One row of `metrics`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MetricRow {

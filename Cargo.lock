@@ -2956,6 +2956,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-security"
+version = "0.0.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "uops-server"
 version = "0.0.1"
 dependencies = [
@@ -3056,6 +3063,7 @@ dependencies = [
  "tokio",
  "uops-core",
  "uops-pipeline",
+ "uops-security",
  "uops-store-ch",
 ]
 

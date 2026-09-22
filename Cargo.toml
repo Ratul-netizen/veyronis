@@ -178,6 +178,7 @@ uops-incident = { path = "crates/uops-incident" }
 uops-oidc = { path = "crates/uops-oidc" }
 uops-runbook = { path = "crates/uops-runbook" }
 uops-runner = { path = "crates/uops-runner" }
+uops-security = { path = "crates/uops-security" }
 uops-api = { path = "crates/uops-api" }
 uops-server = { path = "crates/uops-server" }
 uops-store-ch = { path = "crates/uops-store-ch" }

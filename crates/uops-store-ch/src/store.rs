@@ -28,7 +28,7 @@ use uops_query::{Compiled, Query, ResolvedResources, compile, compile_service_ma
 
 use crate::client::ChClient;
 use crate::error::{Error, Result};
-use crate::rows::{FlowRow, LogRow, MetricRow, ResultSet, SpanRow, StateRow};
+use crate::rows::{EventRow, FlowRow, LogRow, MetricRow, ResultSet, SpanRow, StateRow};
 
 /// Reading telemetry.
 #[async_trait]
@@ -70,6 +70,17 @@ pub trait LogStore: TelemetryStore {
 #[async_trait]
 pub trait MetricStore: TelemetryStore {
     async fn insert_metrics(&self, rows: &[MetricRow]) -> Result<()>;
+}
+
+/// Writing events — M11.
+///
+/// The `events` table has existed since `ClickHouse` migration 0006 and has had no producer:
+/// queryable, on the timeline, rewritten by `uops_query::plan`, and always empty. This is
+/// the trait that ends that, and it arrives with M11 for the same reason `FlowStore`
+/// arrived declared in M0 and filled in M7 — the shape was right before anything needed it.
+#[async_trait]
+pub trait EventStore: TelemetryStore {
+    async fn insert_events(&self, rows: &[EventRow]) -> Result<()>;
 }
 
 /// Writing state transitions.
@@ -228,6 +239,13 @@ impl LogStore for ChStore {
 impl MetricStore for ChStore {
     async fn insert_metrics(&self, rows: &[MetricRow]) -> Result<()> {
         self.insert("metrics", rows).await
+    }
+}
+
+#[async_trait]
+impl EventStore for ChStore {
+    async fn insert_events(&self, rows: &[EventRow]) -> Result<()> {
+        self.insert("events", rows).await
     }
 }
 

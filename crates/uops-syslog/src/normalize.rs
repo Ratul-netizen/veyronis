@@ -144,6 +144,76 @@ pub fn identifiers(received: &Received) -> Vec<uops_core::Identifier> {
     out
 }
 
+/// The security event a message carries, if it carries one — M11.
+///
+/// # Why this is beside `to_row` and not instead of it
+///
+/// **An event never replaces the log line it came from.** The row `to_row` produces is
+/// written whatever this returns: stored, indexed, searchable, on the timeline. A pipeline
+/// that consumed a message to produce an event would mean a customer losing the raw text
+/// of exactly the messages the product understood best, which is the opposite of what
+/// understanding them is for.
+///
+/// So this is a second, optional output of one message, and `None` is the ordinary answer
+/// — most log lines are not security events.
+///
+/// # What it takes from the syslog envelope
+///
+/// The structured data, unflattened back to its last segment by `uops_security`, and the
+/// app name as context. The app name is how `sshd` and `sslvpnd` tell an authentication
+/// from a tunnel, and it is envelope rather than content — which is the only reason it is
+/// trusted at all.
+#[must_use]
+pub fn to_event(
+    received: &Received,
+    attribution: &Attribution,
+    row: &LogRow,
+) -> Option<uops_store_ch::EventRow> {
+    let message = &received.message;
+
+    let found = uops_security::read(
+        &message.message,
+        &message.structured_data,
+        message.app_name.as_deref().unwrap_or_default(),
+    )?;
+
+    // The log row's attributes, then the event's. The envelope facts — `host.name`,
+    // `service.name`, the sender's address — are as true of the event as of the line, and
+    // an event that lacked them would be an event nobody could join to anything.
+    //
+    // The security fields win a collision: `read` established them from the message body,
+    // and the envelope's guess about the same key is the weaker of the two.
+    let mut attributes = row.attributes.clone();
+    for (key, value) in found.attributes {
+        attributes.insert(key, value);
+    }
+
+    Some(uops_store_ch::EventRow {
+        tenant_id: attribution.tenant_id,
+        resource_id: attribution.resource_id,
+        site_id: attribution.site_id,
+        observed_at: row.observed_at,
+        ingested_at: row.ingested_at,
+        source_kind: SOURCE_KIND.to_owned(),
+        // The vendor this product knows from the *resource*, not the one the message
+        // claimed about itself — M11 §2.1. A CEF header's vendor is kept as an attribute
+        // below, where it reads as "the message said this" rather than as a fact.
+        source_vendor: attribution.vendor.clone(),
+        // The device's own severity. M11 §2.8: this product does not decide an event is
+        // high, because once a number is on the row every screen sorts by it.
+        severity: row.severity.clone(),
+        event_category: found.category.as_str().to_owned(),
+        event_type: found.kind.as_str().to_owned(),
+        summary: found.summary,
+        attributes: {
+            if let Some(vendor) = found.vendor {
+                attributes.insert("observer.vendor".to_owned(), vendor);
+            }
+            attributes
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +352,88 @@ mod tests {
         let ids = identifiers(&received("<34>malformed"));
         assert_eq!(ids.len(), 1);
         assert_eq!(ids[0].kind, uops_core::IdentifierKind::MgmtIp);
+    }
+    // ---- security events — M11 --------------------------------------------------
+
+    #[test]
+    fn a_firewall_message_produces_an_event_and_still_produces_the_log_line() {
+        // The property M11 §3 asks for first, and the one worth a test of its own: an
+        // event never consumes the message it came from. A customer losing the raw text of
+        // exactly the lines the product understood best would be the opposite of what
+        // understanding them is for.
+        let received = received(
+            "<134>Sep 16 12:00:00 fw-01 fortigate: src=10.0.0.5 dst=203.0.113.9 dpt=445              proto=TCP act=deny",
+        );
+        let attribution = attribution();
+
+        let row = to_row(&received, &attribution);
+        assert!(row.body.contains("act=deny"), "the log line keeps the raw body");
+
+        let event = to_event(&received, &attribution, &row).expect("a security event");
+        assert_eq!(event.event_category, "network");
+        assert_eq!(event.event_type, "denied");
+        assert_eq!(event.attributes["source.ip"], "10.0.0.5");
+        assert_eq!(event.attributes["destination.port"], "445");
+    }
+
+    #[test]
+    fn an_ordinary_message_produces_no_event_and_that_is_not_a_failure() {
+        // Most log lines are not security events. The row is written either way, and
+        // nothing is logged about the absence — a product that warned about every
+        // unclassified line would be warning about almost every line.
+        let received = received("<134>Sep 16 12:00:00 sw-01 %LINK-3-UPDOWN: Gi0/1 is down");
+        let attribution = attribution();
+
+        let row = to_row(&received, &attribution);
+        assert!(!row.body.is_empty());
+        assert!(to_event(&received, &attribution, &row).is_none());
+    }
+
+    #[test]
+    fn an_event_carries_the_envelope_facts_as_well_as_its_own() {
+        // An event without `host.name` and the sender's address is an event nobody can
+        // join to anything, which would make it strictly less useful than the log line.
+        let received = received(
+            "<134>Sep 16 12:00:00 fw-01 fortigate: src=10.0.0.5 dst=8.8.8.8 dpt=53 act=accept",
+        );
+        let attribution = attribution();
+        let row = to_row(&received, &attribution);
+        let event = to_event(&received, &attribution, &row).expect("an event");
+
+        assert_eq!(event.attributes["host.name"], "fw-01");
+        assert_eq!(event.attributes["syslog.source.address"], "192.0.2.10");
+        assert_eq!(event.resource_id, attribution.resource_id);
+        assert_eq!(event.observed_at, row.observed_at);
+    }
+
+    #[test]
+    fn the_vendor_on_an_event_is_the_one_the_product_knows_not_the_one_claimed() {
+        // M11 §2.1. A CEF header states a vendor in a standard position, and it is still a
+        // claim the message made about itself. The column carries what identity resolution
+        // established; the claim is kept beside it, where it reads as a claim.
+        let received = received(
+            "<134>Sep 16 12:00:00 fw-01 cef: CEF:0|Palo Alto Networks|PAN-OS|10.2|threat|             Traffic Denied|5|src=10.0.0.5 dst=203.0.113.9 dpt=445 act=deny",
+        );
+        let attribution = attribution();
+        let row = to_row(&received, &attribution);
+        let event = to_event(&received, &attribution, &row).expect("an event");
+
+        assert_eq!(event.source_vendor, "cisco", "from the resource");
+        assert_eq!(event.attributes["observer.vendor"], "Palo Alto Networks");
+    }
+
+    #[test]
+    fn the_severity_on_an_event_is_the_devices_own() {
+        // §2.8. Severity is the easiest place to manufacture confidence: once a number is
+        // on the row every screen sorts by it and nobody reads the event.
+        let received = received(
+            "<131>Sep 16 12:00:00 fw-01 fortigate: src=1.1.1.1 dst=2.2.2.2 dpt=22 act=deny",
+        );
+        let attribution = attribution();
+        let row = to_row(&received, &attribution);
+        let event = to_event(&received, &attribution, &row).expect("an event");
+
+        assert_eq!(event.severity, row.severity);
+        assert_eq!(event.severity, "error", "<131> is local0.err");
     }
 }

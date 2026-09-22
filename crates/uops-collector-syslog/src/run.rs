@@ -71,6 +71,16 @@ pub struct Metrics {
     pub dropped: AtomicU64,
     /// The batcher's own counters, as of its last report.
     pub batch: std::sync::Mutex<batch::Stats>,
+    /// Security events dropped because their queue was full — M11.
+    ///
+    /// **Counted separately from `dropped`, and deliberately not added into
+    /// [`Metrics::lost`].** A lost log line is data loss; a lost event is a derived row
+    /// whose source log line was written anyway, and adding the two together would make
+    /// "did we lose anything" answer yes for a message that is safely stored.
+    ///
+    /// It is still counted, because a number that is always zero is worth having when it
+    /// stops being zero.
+    pub dropped_events: Arc<AtomicU64>,
 }
 
 impl Metrics {
@@ -134,6 +144,14 @@ pub async fn resolve_tenants(store: &PgStore, config: &Config) -> Result<Vec<Bou
 pub struct Ingest {
     pipeline: Arc<Pipeline<PgStore, PgEnricher>>,
     rows: mpsc::Sender<LogRow>,
+    dropped_events: Arc<AtomicU64>,
+    /// Security events — M11. A second channel rather than a second kind of row on the
+    /// first, because they go to a different table and the batcher is generic over one.
+    ///
+    /// **Never instead of a log row.** See `uops_syslog::normalize::to_event`: an event is
+    /// a second output of one message, and a pipeline that consumed the message to produce
+    /// it would lose the raw text of exactly the lines the product understood best.
+    events: mpsc::Sender<uops_store_ch::EventRow>,
 }
 
 impl std::fmt::Debug for Ingest {
@@ -168,6 +186,19 @@ impl Ingest {
         }
 
         let row = uops_syslog::normalize::to_row(received, &attribution);
+
+        // M11. Derived before the row is moved, and sent on its own channel. `None` is the
+        // ordinary answer — most log lines are not security events — and nothing is logged
+        // about it, because a line per unclassified message would be a line per message.
+        if let Some(event) = uops_syslog::normalize::to_event(received, &attribution, &row) {
+            // A full event queue does **not** stop the log line. Events are derived and the
+            // log is the record; dropping the message because the smaller queue is full
+            // would trade the thing that matters for the thing that does not.
+            if self.events.try_send(event).is_err() {
+                self.dropped_events.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
         self.rows.send(row).await.is_ok()
     }
 }
@@ -202,6 +233,7 @@ pub async fn serve(
 /// The scale test needs them mid-flight — a throughput figure computed after the process
 /// has drained is a figure for a system that was allowed to catch up, which is not the
 /// number SPEC asks for.
+#[allow(clippy::too_many_lines, reason = "the order the daemon starts things in")]
 pub async fn serve_with_metrics(
     store: PgStore,
     telemetry: ChStore,
@@ -232,6 +264,22 @@ pub async fn serve_with_metrics(
         ),
         None => None,
     };
+
+    // One batcher **per table**. The module docs' argument against a second batcher is
+    // about two batchers on one table — that halves every insert and doubles the part
+    // count. Events go to a different table, so this is a different insert either way, and
+    // the alternative would be interleaving two row types down one channel and sorting
+    // them out at the far end.
+    //
+    // A smaller queue: events are a small proportion of any real feed by construction, and
+    // a queue sized for the log rate would be memory reserved for rows that never arrive.
+    let (events_tx, events_rx) = mpsc::channel::<uops_store_ch::EventRow>(config.queue / 8 + 1);
+    let events_batcher = tokio::spawn(batch::run(
+        telemetry.clone(),
+        events_rx,
+        batch::Config::default(),
+        |_stats| {},
+    ));
 
     // One batcher. See the module docs: a second would halve every insert.
     let (rows_tx, rows_rx) = mpsc::channel::<LogRow>(config.queue);
@@ -268,6 +316,8 @@ pub async fn serve_with_metrics(
         let ingest = Arc::new(Ingest {
             pipeline: Arc::clone(&pipeline),
             rows: rows_tx.clone(),
+            events: events_tx.clone(),
+            dropped_events: Arc::clone(&metrics.dropped_events),
         });
 
         // Per listener, so one tenant's burst does not consume another's queue.
@@ -290,6 +340,7 @@ pub async fn serve_with_metrics(
 
     // Same reason: the batcher returns when the last row sender is gone.
     drop(rows_tx);
+    drop(events_tx);
 
     shutdown.await;
     println!("uops-collector-syslog: stopping, draining what is in flight");
@@ -303,6 +354,17 @@ pub async fn serve_with_metrics(
     for worker in workers {
         let _ = worker.await;
     }
+    // Drained before the log batcher is reported on, so that a shutdown does not return
+    // while an event insert is still in flight.
+    if let Ok(stats) = events_batcher.await
+        && stats.rows_written > 0
+    {
+        println!(
+            "uops-collector-syslog: {} security event(s) written",
+            stats.rows_written
+        );
+    }
+
     match batcher.await {
         Ok(stats) => {
             println!(
