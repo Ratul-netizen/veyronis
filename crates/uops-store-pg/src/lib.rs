@@ -82,6 +82,7 @@ pub use discovery::{DiscoveredChild, DiscoveryReport};
 pub use enrich::PgEnricher;
 pub use facts::{DeviceFacts, IdentityReport};
 pub use groups::{GroupSummary, NewGroup};
+pub use incidents::IncidentRow;
 pub use maintenance::{MaintenanceWindow, NewWindow};
 pub use notify::{Attempt, Channel, NewChannel, Outcome, Reservation, SentRecord};
 pub use page::{Cursor, DEFAULT_PAGE, MAX_PAGE, Page};

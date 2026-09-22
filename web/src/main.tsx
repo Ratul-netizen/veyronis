@@ -34,6 +34,7 @@ import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
 import { ServicesPage } from "./servicespage";
+import { IncidentsPage } from "./incidentspage";
 import { OverviewPage } from "./overview";
 import { LoginPage } from "./pages";
 import { AlertsPage, ChannelsPage, RulesPage } from "./alerts";
@@ -139,6 +140,12 @@ const flowRoute = createRoute({
   component: FlowPage,
 });
 
+const incidentsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/incidents",
+  component: IncidentsPage,
+});
+
 const servicesRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/services",
@@ -219,6 +226,7 @@ const routeTree = rootRoute.addChildren([
     resourceRoute,
     flowRoute,
     servicesRoute,
+    incidentsRoute,
     exploreRoute,
     alertsRoute,
     rulesRoute,

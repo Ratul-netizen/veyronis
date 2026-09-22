@@ -541,6 +541,46 @@ impl PgStore {
         Ok(())
     }
 
+    /// Acknowledge an incident.
+    ///
+    /// Silences the notification and never the incident — the same rule `alert_state`
+    /// holds. An acknowledgement that hid it would mean the next person to look at the
+    /// screen concludes the problem went away.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for another tenant's incident or one that does not exist.
+    pub async fn acknowledge_incident(
+        &self,
+        scope: &TenantScope,
+        incident: IncidentId,
+        by: ActorId,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        let done = sqlx::query!(
+            r#"
+            UPDATE incident
+               SET acked_by = $3, acked_at = $4
+             WHERE id = $1 AND tenant_id = $2
+            "#,
+            incident as IncidentId,
+            scope.tenant_id() as uops_core::TenantId,
+            by as ActorId,
+            at,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| map("incident", incident.to_string(), e))?;
+
+        if done.rows_affected() == 0 {
+            return Err(Error::NotFound {
+                kind: "incident",
+                id: incident.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     /// Move an incident to `quiet` when every alert in it has resolved — §2.1.
     ///
     /// **Never to `closed`.** The router stopping its flapping at 02:14 is not the same

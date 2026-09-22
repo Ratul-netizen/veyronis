@@ -113,6 +113,10 @@ const UNSCOPED: { prefix: string; because: string }[] = [
   // and answer a different question — M8 §2.1.
   { prefix: "/services", because: "a service runs on many hosts, so this is the tenant's" },
   { prefix: "/alerts", because: "the alert list is not yet narrowed by resource" },
+  // Not "not wired yet" either: an incident is a *group* of alerts across resources —
+  // §2.2 groups by topology precisely because a failure crosses machines — so
+  // narrowing to one would hide the half of the cascade that makes it an incident.
+  { prefix: "/incidents", because: "an incident spans the resources it connected" },
   { prefix: "/alerts/rules", because: "a rule's own selector decides what it watches" },
   { prefix: "/alerts/channels", because: "channels belong to the tenant" },
   { prefix: "/dashboards", because: "a dashboard's panels carry their own selectors" },

@@ -1400,6 +1400,16 @@ h2 {
  * drawn the way every other "you are here" in this product is drawn: the current one
  * inverts.
  */
+/* A row of buttons that act on the thing above them — the incident view's acknowledge
+   and close. Its own class rather than a bare div, because the gap and the wrap are what
+   keep two buttons from becoming one wide one on a phone. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--space));
+  margin: calc(var(--space) * 2) 0;
+}
+
 .subnav {
   display: flex;
   flex-wrap: wrap;

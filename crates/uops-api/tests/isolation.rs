@@ -326,6 +326,39 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Scoped,
         body: None,
     },
+    // Incidents -- M9. All Scoped, and the timeline is the one that matters: it reads
+    // telemetry for whichever resources the incident holds, so a leak there is a leak of
+    // another tenant's logs, metrics, flows and traces at once. Its tenant check is the
+    // membership read itself — an incident nobody can see has no members — rather than a
+    // separate existence lookup that could get out of step with it.
+    RouteCase {
+        path: "/api/v1/incidents",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/incidents/{id}/timeline",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/incidents/{id}/ack",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/incidents/{id}/close",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     // The service map -- M8 §2.6. Scoped, and the interesting attack is not this one: the
     // statement's join has a *second* tenant predicate on its parent side, because a span
     // id is chosen by whoever instrumented the application and a tenant can pick one that

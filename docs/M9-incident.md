@@ -198,26 +198,34 @@ incident", in the schema rather than in code.
 
 ## 4. Acceptance criteria
 
-- [ ] A cascade — one switch down, its downstream hosts going silent — produces **one**
+- [x] A cascade — one switch down, its downstream hosts going silent — produces **one**
       incident, not forty, and the incident names the switch as the candidate
-- [ ] Two unrelated failures in the same minute produce **two** incidents
-- [ ] Two failures on the same resource a week apart produce **two** incidents
-- [ ] An estate with no topology produces an incident per alert, and each says why it was
-      not grouped — §2.3
-- [ ] Topology suppression sends **one** notification naming what it suppressed, and every
-      suppressed alert is still visible on the incident
-- [ ] Suppression is off by default; switching it on is a per-tenant decision with an
-      audit entry
-- [ ] A downstream failure followed by an upstream one notifies for the upstream — the
+- [x] Two unrelated failures in the same minute produce **two** incidents
+- [x] Two failures on the same resource a week apart produce **two** incidents
+- [x] An estate with no topology produces an incident per alert, and each says why it was
+      not grouped — §2.3, carried from `GroupReason` through the API to the screen
+- [~] Topology suppression silences the downstream notification and every suppressed
+      alert is still visible on the incident — `suppressed` is on the list row and on the
+      API response. **The notification does not yet name what it suppressed**: the count
+      reaches the screen but not the notifier's message body
+- [~] Suppression is off by default and is a per-tenant column — tested. The **audit
+      entry** for switching it on is not written, because no route changes it yet: today
+      it is a database update
+- [x] A downstream failure followed by an upstream one notifies for the upstream — the
       direction rule, §2.4
-- [ ] Resolving every alert moves an incident to `quiet` and not to `closed`; only a
-      human closes it — §2.1
-- [ ] The timeline shows metrics, logs, events, states, flows and spans for the incident's
-      resources on one axis, and says which signals expired rather than showing a gap
+- [x] Resolving every alert moves an incident to `quiet` and not to `closed`; only a
+      human closes it — §2.1, and closing twice is refused rather than treated as
+      idempotent
+- [x] The timeline shows metrics, logs, events, states, flows and spans for the incident's
+      resources on one axis, and says which signals expired rather than showing a gap —
+      `uops_query::timeline`'s `Coverage`, through the API, onto the screen
 - [ ] The timeline for a one-hour incident over 100M rows is answered from the sort key,
-      measured rather than assumed — W1's method, and W1's 9 ms is the number to beat
-- [ ] Incidents from tenant A are unreachable from tenant B, by the same adversarial test
-      every milestone since M7 has used
+      measured rather than assumed — W1's method, and W1's 9 ms is the number to beat.
+      **The only criterion still fully open**, and the one that needs a populated table
+      rather than a test
+- [x] Incidents from tenant A are unreachable from tenant B, by the same adversarial test
+      every milestone since M7 has used — and the timeline's membership read *is* its
+      tenant check, so the two cannot drift apart
 
 ---
 

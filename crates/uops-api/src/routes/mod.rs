@@ -15,6 +15,7 @@ pub mod dashboards;
 pub mod discovery;
 pub mod groups;
 pub mod health;
+pub mod incidents;
 pub mod maintenance;
 pub mod query;
 pub mod resources;
@@ -111,6 +112,18 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/alerts", get(alerts::list_alerts))
         .route("/api/v1/alerts/{id}/ack", post(alerts::acknowledge))
+        // Incidents -- M9. Read is Viewer; acknowledging and closing are Operator,
+        // because both are statements a person makes about the estate. There is no POST
+        // that *creates* one: §2.1 says an incident is produced by the alert engine and
+        // by nothing else, and one that can be raised by hand is the first half of a
+        // ticketing system.
+        .route("/api/v1/incidents", get(incidents::list))
+        .route(
+            "/api/v1/incidents/{id}/timeline",
+            get(incidents::timeline_of),
+        )
+        .route("/api/v1/incidents/{id}/ack", post(incidents::acknowledge))
+        .route("/api/v1/incidents/{id}/close", post(incidents::close))
         // A saved search is a stored Query AST — the same object the route below takes,
         // and the same one an M4 alert rule will be an instance of. Reading is Viewer;
         // saving is Operator, because a saved search is the team's question rather than

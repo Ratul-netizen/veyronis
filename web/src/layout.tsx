@@ -50,6 +50,7 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
   {
     heading: "Operations",
     items: [
+      { to: "/incidents", label: "Incidents" },
       { to: "/alerts", label: "Alerts", exact: true },
       { to: "/alerts/rules", label: "Rules" },
       { to: "/alerts/channels", label: "Channels" },
