@@ -166,6 +166,33 @@ M12 §2.2 already record every authentication against this installation. A secur
 milestone whose first detection cannot see attacks on the monitoring platform itself is
 one that missed the target closest to it.
 
+> **Amended while building it.** This paragraph assumed a product sign-in could become an
+> `events` row like any other. It cannot, and the reason is one this project has already
+> met once: **authentication precedes knowing a tenant.** M12 §2.2 discovered it and made
+> SSO an *organization* property; the same fact applies here, and `events` is partitioned
+> by tenant.
+>
+> Writing one event row per tenant in the organization would put an organization-level fact
+> into N tenant partitions, each copy inviting a tenant-scoped detection to count a sign-in
+> that was not against it. So sign-in records go where break-glass sign-ins already go — the
+> organization audit log, which is organization-scoped by construction — as
+> `auth.sign_in.success` and `auth.sign_in.failure`, with the reason, the address and the
+> first parseable forwarded hop.
+>
+> **The cost is that a detection cannot fire on them**, and that is named rather than
+> hidden. The alert engine evaluates a `Query` against `ClickHouse` under a tenant scope,
+> and these are `PostgreSQL` rows with no tenant. What is missing is an organization-scoped
+> evaluation path, and that is a concrete precondition rather than a vague "later" — the
+> same shape M10 §2.8 uses for auto-remediation. Until it exists these are evidence an
+> investigator reads, not a trigger.
+>
+> **An address that resolves to no user is deliberately not recorded.** There is no
+> organization to attribute it to, and showing it to *an* organization would tell them about
+> an attempt that was not against them — in a hosted deployment, a leak between customers.
+> Blind spraying at addresses that do not exist is what SPEC §M0.8's per-IP rate limit on
+> auth endpoints is for. This records what can be attributed truthfully, which is less than
+> everything.
+
 ### 2.5 DNS analytics is the two questions a resolver log can answer, and neither is "is this malicious".
 
 A DNS log is the richest security signal on most networks and the one most often turned
@@ -231,12 +258,26 @@ a person's judgement rather than a product's guess — and an event does not.
       and logs for the same resource, on the same axis, with no new timeline code
 - [ ] Failed authentications group by `(user.name, source.ip)` and the three shapes in
       §2.4 are distinguishable in the output
-- [ ] A detection is a saved query with a condition, evaluated by the **same** engine as an
+- [x] A detection is a saved query with a condition, evaluated by the **same** engine as an
       alert rule — verified by pointing an existing alert rule at `events` and getting a
       firing alert with no new evaluation path
+      > `uops-alert/tests/evaluate.rs`. The detection is `cpu_rule` with `SignalType::Metric`
+      > changed to `SignalType::Event` and `avg(value)` changed to `count()`. Nothing else
+      > moved, and it produces the *identical* phase sequence — pending, firing at the dwell,
+      > resolved, quiet — with two notifications over twenty minutes.
+      >
+      > A second test puts a hundred `allowed` events in the window and requires the rule to
+      > stay quiet, because without it the first would pass against a rule with no filter at
+      > all: seventy-five events a minute is over the threshold whether or not any of them
+      > were denials, and a detection that counts everything is not a detection.
 - [ ] A detection firing produces an incident through M9's existing grouping, and topology
       suppression applies to it exactly as it does to any other alert
-- [ ] Sign-ins against this product itself are a source of authentication events
+- [~] Sign-ins against this product itself are a source of authentication events
+      > **Recorded, not detectable.** They are `auth.sign_in.success` /
+      > `auth.sign_in.failure` in the organization audit log, with the reason, the address
+      > and the source hop — see the amendment in §2.4 for why they cannot be `events`
+      > rows. A detection over them needs an organization-scoped evaluation path that does
+      > not exist, and that is the named precondition.
 - [ ] An `NXDOMAIN` frequency table is answerable through the Query AST with no new
       aggregate
 - [ ] A firewall `denied` event and the flow record for the same conversation are shown

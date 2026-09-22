@@ -83,11 +83,76 @@ fn absent_user_hash() -> &'static PasswordHashString {
     })
 }
 
+/// Record a sign-in against this installation — M11 §2.4.
+///
+/// # Why the organization audit log and not the `events` table
+///
+/// M11 §2.4 asked for product sign-ins to be *"the first source"* of authentication
+/// events, and building it is what showed the shape was wrong. `events` is partitioned by
+/// tenant, and **authentication precedes knowing a tenant** — the same fact M12 §2.2
+/// discovered when it made SSO an organization property rather than a tenant one. A user
+/// signs in to an organization and chooses a tenant afterwards.
+///
+/// Writing one event row per tenant in the organization would put an organization-level
+/// fact into N tenant partitions, each copy inviting a tenant-scoped detection to count a
+/// sign-in that was not against it. So these go where break-glass sign-ins already go: the
+/// organization audit log, which is organization-scoped by construction.
+///
+/// **What that costs is named rather than hidden.** A detection cannot fire on these,
+/// because the alert engine evaluates a `Query` against `ClickHouse` under a tenant scope
+/// and this is a `PostgreSQL` row with no tenant. Detecting on them needs an
+/// organization-scoped evaluation path, which does not exist — see the amendment in
+/// §2.4.
+///
+/// # An address that resolves to no user is deliberately not recorded
+///
+/// There is no organization to attribute it to, and showing it to *an* organization would
+/// tell them about an attempt that was not against them — which in a hosted deployment is
+/// a leak between customers. Blind spraying at addresses that do not exist is what the
+/// per-IP rate limit on auth endpoints is for (SPEC §M0.8); this records what can be
+/// attributed truthfully.
+async fn note_sign_in(
+    state: &AppState,
+    user_id: uops_core::ActorId,
+    outcome: &'static str,
+    why: &'static str,
+    headers: &HeaderMap,
+) {
+    let Ok(Some(profile)) = state.store.user_profile(user_id).await else {
+        return;
+    };
+
+    // Failure is swallowed, and this is the one place in the auth path where that is
+    // right: a sign-in that worked must not be turned into a 500 because an audit insert
+    // failed, and a sign-in that failed has already failed. The break-glass record above
+    // is the opposite case — it is the entry worth failing a request over — and the
+    // difference is that one of them is the only trace of a bypass.
+    let _ = state
+        .store
+        .record_org_audit(
+            profile.org_id,
+            &format!("user:{user_id}"),
+            outcome,
+            &profile.email,
+            Some(serde_json::json!({ "reason": why })),
+            crate::audit::ip_from_headers(headers),
+        )
+        .await;
+}
+
+/// What a sign-in record is called.
+///
+/// ECS's `event.outcome` vocabulary, so that the day these become real events — see the
+/// note on [`note_sign_in`] — the words do not have to change.
+const SIGN_IN_OK: &str = "auth.sign_in.success";
+const SIGN_IN_FAILED: &str = "auth.sign_in.failure";
+
 /// Verify an address and password, doing equal work whether or not the user exists.
 async fn verify_credentials(
     state: &AppState,
     email: &str,
     supplied: &Secret<String>,
+    headers: &HeaderMap,
 ) -> ApiResult<Verified> {
     let found = state.store.user_credentials_by_email(email).await?;
 
@@ -111,6 +176,18 @@ async fn verify_credentials(
         return Err(ApiError::Unauthenticated);
     };
     if !correct || credentials.disabled {
+        note_sign_in(
+            state,
+            credentials.user_id,
+            SIGN_IN_FAILED,
+            if credentials.disabled {
+                "the account is disabled"
+            } else {
+                "the password did not match"
+            },
+            headers,
+        )
+        .await;
         return Err(ApiError::Unauthenticated);
     }
 
@@ -123,6 +200,14 @@ async fn verify_credentials(
     // who can time a request.
     let policy = state.store.password_policy(credentials.user_id).await?;
     if !policy.allows_password() {
+        note_sign_in(
+            state,
+            credentials.user_id,
+            SIGN_IN_FAILED,
+            "this organization requires SSO and this is not its break-glass account",
+            headers,
+        )
+        .await;
         return Err(ApiError::Unauthenticated);
     }
 
@@ -160,7 +245,7 @@ pub async fn login(
     Json(body): Json<LoginRequest>,
 ) -> ApiResult<Response> {
     let supplied = Secret::new(body.password);
-    let verified = verify_credentials(&state, &body.email, &supplied).await?;
+    let verified = verify_credentials(&state, &body.email, &supplied, &headers).await?;
     let user_id = verified.user_id;
 
     if verified.break_glass {
@@ -187,6 +272,8 @@ pub async fn login(
                 .await?;
         }
     }
+
+    note_sign_in(&state, user_id, SIGN_IN_OK, "password", &headers).await;
 
     let user_agent = headers
         .get(header::USER_AGENT)

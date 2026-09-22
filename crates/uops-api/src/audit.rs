@@ -155,22 +155,26 @@ impl Audit {
 /// It is `None` only when there is neither: a request synthesised in a test, or a
 /// transport with no peer.
 fn reported_ip(request: &Request) -> Option<IpAddr> {
-    // The first *parseable* hop, not simply the first. A client that sends
-    // `X-Forwarded-For: garbage` before a proxy that appends would otherwise erase its
-    // own address from the audit log — the header is attacker-controlled and the socket
-    // is not, so junk in the header must never be able to suppress the fallback.
-    let forwarded = request
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').find_map(|hop| hop.trim().parse().ok()));
-
-    forwarded.or_else(|| {
+    ip_from_headers(request.headers()).or_else(|| {
         request
             .extensions()
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
             .map(|peer| peer.0.ip())
     })
+}
+
+/// The client address a request's headers claim.
+///
+/// Split out of [`reported_ip`] so that the sign-in record — M11 §2.4 — can reach it from
+/// a handler rather than from middleware. A second copy of the first-parseable-hop rule
+/// would be a second place for it to be wrong, and this one is load-bearing: a client that
+/// sends `X-Forwarded-For: garbage` before a proxy that appends must not be able to erase
+/// its own address from a failed-login record.
+pub(crate) fn ip_from_headers(headers: &axum::http::HeaderMap) -> Option<IpAddr> {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').find_map(|hop| hop.trim().parse().ok()))
 }
 
 /// Write the row once the response is known.

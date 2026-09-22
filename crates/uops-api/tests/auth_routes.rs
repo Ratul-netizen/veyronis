@@ -21,6 +21,7 @@ async fn store() -> PgStore {
 
 struct Fixture {
     store: PgStore,
+    org: OrgId,
     tenant: TenantId,
     email: String,
     user: ActorId,
@@ -60,6 +61,7 @@ async fn fixture(slug: &str) -> Fixture {
 
     Fixture {
         store,
+        org,
         tenant,
         email,
         user,
@@ -390,4 +392,124 @@ async fn a_stolen_cookie_without_the_csrf_token_cannot_mutate() {
         .await
         .unwrap();
     assert_eq!(still.status(), StatusCode::OK);
+}
+
+// ---- sign-in records — M11 §2.4 ------------------------------------------------
+
+/// The organization audit entries for this fixture's org, newest first.
+async fn sign_in_records(f: &Fixture) -> Vec<(String, String, Option<serde_json::Value>)> {
+    f.store
+        .org_audit_entries(f.org, 50)
+        .await
+        .expect("org audit")
+        .into_iter()
+        .filter(|e| e.action.starts_with("auth.sign_in"))
+        .map(|e| (e.action, e.target, e.detail))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_successful_sign_in_is_recorded_against_the_organization() {
+    // M11 §2.4. Not in `events`: authentication precedes knowing a tenant — the same fact
+    // M12 §2.2 found for SSO — so an organization-level fact goes in the organization
+    // audit log rather than into N tenant partitions.
+    let f = fixture("signin-ok").await;
+
+    let response = app(&f.store)
+        .oneshot(login_request(&f.email, "correct horse"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let records = sign_in_records(&f).await;
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].0, "auth.sign_in.success");
+    assert_eq!(records[0].1, f.email, "the address is the target");
+}
+
+#[tokio::test]
+async fn a_wrong_password_is_recorded_and_says_which_failure_it_was() {
+    // The record an investigation actually reads. "Somebody failed to sign in" is not
+    // enough: a wrong password and a disabled account are different events, and a burst of
+    // one is a different thing from a burst of the other.
+    let f = fixture("signin-bad").await;
+
+    let response = app(&f.store)
+        .oneshot(login_request(&f.email, "not the password"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let records = sign_in_records(&f).await;
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].0, "auth.sign_in.failure");
+    let reason = records[0].2.as_ref().expect("a reason");
+    assert_eq!(reason["reason"], "the password did not match");
+}
+
+#[tokio::test]
+async fn a_disabled_account_is_recorded_as_a_different_failure() {
+    let f = fixture("signin-disabled").await;
+    f.store.disable_user(f.user).await.expect("disable");
+
+    let response = app(&f.store)
+        .oneshot(login_request(&f.email, "correct horse"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let records = sign_in_records(&f).await;
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].0, "auth.sign_in.failure");
+    assert_eq!(
+        records[0].2.as_ref().expect("a reason")["reason"],
+        "the account is disabled"
+    );
+}
+
+#[tokio::test]
+async fn an_address_that_resolves_to_no_user_is_deliberately_not_recorded() {
+    // There is no organization to attribute it to, and showing it to *an* organization
+    // would tell them about an attempt that was not against them — which in a hosted
+    // deployment is a leak between customers. Blind spraying at addresses that do not
+    // exist is what the per-IP rate limit on auth endpoints is for.
+    let f = fixture("signin-nobody").await;
+
+    let response = app(&f.store)
+        .oneshot(login_request("nobody@example.invalid", "whatever"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    assert!(
+        sign_in_records(&f).await.is_empty(),
+        "an unknown address must not be attributed to this organization"
+    );
+}
+
+#[tokio::test]
+async fn the_record_carries_the_address_the_attempt_came_from() {
+    // The field that makes the three shapes in §2.4 distinguishable — many failures from
+    // one source is the one worth waking somebody for. It is the first *parseable* hop, so
+    // a client that sends junk before a proxy that appends cannot erase itself.
+    let f = fixture("signin-ip").await;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-forwarded-for", "garbage, 198.51.100.7")
+        .body(Body::from(
+            serde_json::json!({ "email": f.email, "password": "wrong" }).to_string(),
+        ))
+        .unwrap();
+    let response = app(&f.store).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let entries = f.store.org_audit_entries(f.org, 50).await.expect("audit");
+    let record = entries
+        .iter()
+        .find(|e| e.action == "auth.sign_in.failure")
+        .expect("recorded");
+    assert_eq!(record.ip.as_deref(), Some("198.51.100.7"));
 }

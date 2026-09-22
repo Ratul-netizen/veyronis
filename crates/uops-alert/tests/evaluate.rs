@@ -533,3 +533,179 @@ ok",
     assert_eq!(ledger[0].outcome, uops_store_pg::Outcome::Sent);
     assert_eq!(ledger[0].rule_id, rule.id);
 }
+
+// ---- detections — M11 §2.3 -----------------------------------------------------
+
+/// One security event.
+fn security_event(
+    tenant: TenantId,
+    resource: ResourceId,
+    category: &str,
+    kind: &str,
+    at: DateTime<Utc>,
+) -> uops_store_ch::EventRow {
+    uops_store_ch::EventRow {
+        tenant_id: tenant,
+        resource_id: resource,
+        site_id: uops_core::SiteId::nil(),
+        observed_at: at,
+        ingested_at: at,
+        source_kind: "syslog".to_owned(),
+        source_vendor: "fortinet".to_owned(),
+        severity: "warn".to_owned(),
+        event_category: category.to_owned(),
+        event_type: kind.to_owned(),
+        summary: "Denied 198.51.100.7 → 10.0.0.5:22".to_owned(),
+        attributes: BTreeMap::new(),
+    }
+}
+
+/// `count() > 20 for 5m` over denied network events, in the last minute.
+///
+/// The same `NewRule` an alert takes. **Nothing about it says "detection"** — that is the
+/// whole point of M11 §2.3, and it is why this is a rule constructor beside `cpu_rule`
+/// rather than a type of its own.
+fn denial_detection(name: &str, hold_seconds: u32) -> NewRule {
+    let end = Utc::now();
+    NewRule {
+        name: name.to_owned(),
+        description: "more than twenty denials in a minute".to_owned(),
+        query: Query {
+            aggregations: vec![Aggregation {
+                func: AggFunc::Count,
+                field: None,
+                alias: "v".to_owned(),
+            }],
+            filter: Some(uops_query::ast::Expr::Compare {
+                field: Field::EventType,
+                cmp: uops_query::ast::CompareOp::Eq,
+                value: uops_query::ast::Value::Str("denied".to_owned()),
+            }),
+            ..Query::new(
+                // The one changed line against `cpu_rule`, and the claim under test.
+                SignalType::Event,
+                TimeRange::new(end - Duration::minutes(1), end),
+            )
+        },
+        condition: Condition::Threshold {
+            op: Comparison::Gt,
+            value: 20.0,
+            hold_seconds,
+        },
+        severity: AlertSeverity::Critical,
+        enabled: true,
+        eval_interval: Duration::seconds(60),
+        notify: serde_json::json!([]),
+    }
+}
+
+/// M11 §3: *"a detection is a saved query with a condition, evaluated by the **same**
+/// engine as an alert rule"*.
+///
+/// This is the claim M11 §2.3 rests on, and it was written into the document as a decision
+/// before anything verified it. If it were false the milestone would need a second
+/// evaluation path — which PLAN's frozen decision about the Query AST forbids — so it is
+/// worth its own test rather than an assumption.
+///
+/// The rule is `cpu_rule` with `SignalType::Metric` changed to `SignalType::Event` and an
+/// aggregate changed from `avg(value)` to `count()`. Everything else — the engine, the
+/// condition, the phase machine, the dwell — is untouched.
+#[tokio::test]
+async fn a_detection_over_events_is_an_alert_rule_and_uses_the_same_engine() {
+    let (pg, ch) = stores().await;
+    let (scope, device) = tenant(&pg, "detection").await;
+    let engine = Engine::new(pg.clone(), ch.clone());
+    let rule = rule(&pg, &scope, &denial_detection("Denials", 300)).await;
+
+    // Twenty minutes of events: a burst of 25 denials a minute for the first twelve, then
+    // two a minute. The same shape `a_sustained_breach_fires_once_and_resolves_once` uses,
+    // so a difference in the result is a difference in the signal and nothing else.
+    let start = Utc::now() - Duration::minutes(20);
+    let mut rows = Vec::new();
+    for minute in 0..20 {
+        let at = start + Duration::minutes(minute);
+        let denials = if minute < 12 { 25 } else { 2 };
+        for n in 0..denials {
+            rows.push(security_event(
+                scope.tenant_id(),
+                device,
+                "network",
+                "denied",
+                at + Duration::milliseconds(n * 10),
+            ));
+        }
+        // Allowed events in the same window, which the filter must exclude. Without them
+        // the test would pass with no filter at all.
+        for n in 0..50 {
+            rows.push(security_event(
+                scope.tenant_id(),
+                device,
+                "network",
+                "allowed",
+                at + Duration::milliseconds(n * 10),
+            ));
+        }
+    }
+    uops_store_ch::EventStore::insert_events(&ch, &rows)
+        .await
+        .expect("insert events");
+
+    let mut phases = Vec::new();
+    let mut notifications = 0;
+    for minute in 0..20 {
+        let now = start + Duration::minutes(minute) + Duration::seconds(30);
+        let outcome = engine.evaluate(&scope, &rule, now).await.expect("evaluate");
+        notifications += outcome.notifications();
+        phases.push(outcome.decisions.first().map_or(Phase::Ok, |d| d.phase));
+    }
+
+    // Exactly the shape the metric rule produces. The engine did not learn anything about
+    // events to do this, which is the result.
+    assert_eq!(phases[0], Phase::Pending, "{phases:?}");
+    assert_eq!(phases[4], Phase::Pending, "five minutes is not yet elapsed");
+    assert_eq!(phases[5], Phase::Firing, "{phases:?}");
+    assert_eq!(phases[11], Phase::Firing, "still firing while the burst continues");
+    assert_eq!(phases[12], Phase::Resolved, "{phases:?}");
+    assert_eq!(phases[13], Phase::Ok, "{phases:?}");
+    assert_eq!(notifications, 2, "one firing, one resolution: {phases:?}");
+}
+
+/// The filter is doing the work, not the volume.
+///
+/// Without this, the test above would pass against a rule with no filter at all — 75
+/// events a minute is over the threshold whether or not any of them were denials, and a
+/// detection that counts everything is not a detection.
+#[tokio::test]
+async fn a_detection_counts_only_what_its_filter_matches() {
+    let (pg, ch) = stores().await;
+    let (scope, device) = tenant(&pg, "filtered").await;
+    let engine = Engine::new(pg.clone(), ch.clone());
+    let rule = rule(&pg, &scope, &denial_detection("Denials only", 0)).await;
+
+    // Far over the threshold in total, and none of them denials.
+    let at = Utc::now() - Duration::minutes(2);
+    let rows: Vec<_> = (0..100)
+        .map(|n| {
+            security_event(
+                scope.tenant_id(),
+                device,
+                "network",
+                "allowed",
+                at + Duration::milliseconds(n * 10),
+            )
+        })
+        .collect();
+    uops_store_ch::EventStore::insert_events(&ch, &rows)
+        .await
+        .expect("insert events");
+
+    let outcome = engine
+        .evaluate(&scope, &rule, at + Duration::seconds(30))
+        .await
+        .expect("evaluate");
+    assert_eq!(
+        outcome.decisions.first().map_or(Phase::Ok, |d| d.phase),
+        Phase::Ok,
+        "a hundred allowed events are not twenty denials"
+    );
+}
