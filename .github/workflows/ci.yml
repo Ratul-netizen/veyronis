@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # M12 §2.5 asks for the SBOM and the licence report "per release". Without this
+  # trigger that would mean "per push to main, and somebody goes and finds the artifact
+  # from the right run" — which is the version of the promise that quietly is not kept.
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
@@ -1044,11 +1049,75 @@ jobs:
       - name: Generate SBOM
         run: cargo cyclonedx --all --format json
 
-      - name: Upload SBOM
+      # M12 §2.5: the evidence a buyer asks for is generated, not written once. cargo-deny
+      # above *enforces* the licence policy and answers yes or no; this *reports* it, and
+      # a procurement review needs the list rather than the verdict.
+      #
+      # Deliberately not the same job as the enforcement: a report that could fail the
+      # build is a report somebody is tempted to trim.
+      - name: Generate the dependency licence report
+        run: |
+          python3 scripts/licence-report.py > licences.md
+          echo "--- summary ---"
+          sed -n '/^## Summary/,/^$/p' licences.md | head -30
+
+      - name: Upload SBOM and licence report
         uses: actions/upload-artifact@v4
         with:
-          name: sbom
-          path: "**/*.cdx.json"
+          name: supply-chain-evidence
+          path: |
+            **/*.cdx.json
+            licences.md
+
+      # Attach both to the release, which is the version of "produced by CI per release"
+      # that a buyer can actually reach: an artifact expires, a release asset does not.
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            licences.md
+            **/*.cdx.json
+
+      # The security overview is the one piece of this evidence that cannot be generated,
+      # so the risk is different: it goes stale silently. Nothing about a document reveals
+      # that the thing it describes has changed.
+      #
+      # This does not try to check that the *content* is true — nothing can. It checks the
+      # two claims the document makes about itself: that it is dated, and that it says it
+      # claims no certification. A document that loses either has stopped being the thing
+      # §2.5 asked for.
+      - name: The security overview is dated and claims nothing it should not
+        run: |
+          set -euo pipefail
+          F=docs/security-overview.md
+
+          grep -qE '^\*\*Last reviewed:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}\.?$' "$F" || {
+            echo "::error::$F has no 'Last reviewed: YYYY-MM-DD' line. A security document that is not dated is one nobody can tell is stale."
+            exit 1
+          }
+
+          grep -q 'No certification' "$F" || {
+            echo "::error::$F no longer states that it claims no certification. If a certification has genuinely been obtained, change this guard deliberately."
+            exit 1
+          }
+
+          # Claiming one is worse than claiming neither — see the document. This catches
+          # the sentence drifting into an assertion, which is the way it would happen.
+          if grep -inE '(is|are) (ISO ?27001|SOC ?2)[- ]?(certified|compliant|audited)' "$F"; then
+            echo "::error::$F asserts a certification. Both are organisational rather than technical; claiming one casually is worse than claiming neither."
+            exit 1
+          fi
+
+          reviewed="$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' <<< "$(grep '^\*\*Last reviewed:' "$F")" | head -1)"
+          age=$(( ( $(date -u +%s) - $(date -u -d "$reviewed" +%s) ) / 86400 ))
+          echo "security overview last reviewed ${reviewed} (${age} days ago)"
+          # A warning rather than a failure: a stale document is a thing to fix in a
+          # working week, not a thing to block an unrelated pull request on.
+          if [ "$age" -gt 180 ]; then
+            echo "::warning::$F was last reviewed ${age} days ago. Re-read it against the code and move the date."
+          fi
+          echo "ok"
 
   crypto-builds:
     name: build ${{ matrix.name }}

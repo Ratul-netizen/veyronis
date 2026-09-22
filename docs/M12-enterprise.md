@@ -215,6 +215,10 @@ read it *before* the restore rather than during one.
 
 ### 2.5 The evidence a buyer asks for is generated, not written once.
 
+*Built. [`docs/security-overview.md`](./security-overview.md) and
+[`SECURITY.md`](../SECURITY.md) are the two that cannot be generated; the SBOM and the
+dependency licence report come out of CI and are attached to every release.*
+
 An SBOM, a dependency licence report and a list of what the product talks to are facts
 about a build. Anything regenerated per release stays true; anything typed into a document
 is true on the day it is typed.
@@ -262,9 +266,15 @@ in every milestone since M7.
       found a defect that a procedure would not have: restoring with the materialized
       views attached **doubled every aggregate** and tripled `metrics_1h`, silently, with
       every raw table exactly right
-- [ ] An SBOM and a licence report are produced by CI for a release
-- [ ] A security overview exists, is dated, names the release it describes, and claims no
-      certification
+- [x] An SBOM and a licence report are produced by CI for a release — CycloneDX from
+      `cargo cyclonedx`, and a licence report generated from `cargo metadata` by
+      `scripts/licence-report.py` rather than maintained by hand. Both are uploaded on
+      every run and attached as assets on a published release, which is the version of
+      "per release" a buyer can actually reach
+- [x] A security overview exists, is dated, names the release it describes, and claims no
+      certification — and CI checks the two claims the document makes about *itself*,
+      because the risk with a written document is not that it is wrong on the day but
+      that it goes stale silently. It also warns after 180 days without a review
 - [~] Cross-tenant isolation holds for every new surface, by the same adversarial test
       every milestone since M7 has used — the eight SSO routes and the five collector
       routes are in `isolation.rs`, and the property they actually have is *organization*

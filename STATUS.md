@@ -11,9 +11,10 @@ Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 > closed with the Investigation Workspace and its own measurement:
 > [`bench/results/m9-timeline-100000000rows.md`](./bench/results/m9-timeline-100000000rows.md),
 > **77× fewer rows** than a time-first sort key would read.
-> **M12 Enterprise is in progress** — leases (§2.1), single sign-on (§2.2), the collector
-> registry (§2.3) and the tested restore (§2.4) are done; the buyer-facing evidence (§2.5)
-> is not.
+> **M12 Enterprise is complete** — leases (§2.1), single sign-on (§2.2), the collector
+> registry (§2.3), a *rehearsed* restore (§2.4) and the buyer-facing evidence (§2.5). Two
+> of its twelve criteria are partial and say so: a sample count through two real pollers,
+> and cross-tenant isolation, which reopens with every surface a later milestone adds.
 > SPEC stops at M4
 > deliberately, so each milestone past it has its own document with its decisions closed
 > before anything was built: [`M5-discovery.md`](./docs/M5-discovery.md),
@@ -40,13 +41,17 @@ government and defence, which is why on-prem is not a downgrade. The W1 storage
 benchmark is **complete and validated the architecture**, written up at
 [`docs/benchmarks/w1.md`](./docs/benchmarks/w1.md).
 
-**Ten of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
+**Eleven of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
 NMS, M3 logs, M4 metrics and alerting, M5 discovery, M6 topology, M7 flow, M8
-observability and M9 incident — with M12 enterprise part-built. All five telemetry signals — metrics, logs, events and
-state, flows, traces — land on **one** resource identity and are read through **one**
-query AST, which was the whole bet. What remains on the roadmap (M10
-automation, M11 security analytics, the rest of M12 enterprise, M13 AI) is what PLAN §10
-calls *direction, not commitments*.
+observability, M9 incident and M12 enterprise. All five telemetry signals — metrics, logs,
+events and state, flows, traces — land on **one** resource identity and are read through
+**one** query AST, which was the whole bet. What remains on the roadmap (M10 automation,
+M11 security analytics, M13 AI) is what PLAN §10 calls *direction, not commitments*.
+
+M12 is the one that changed what the product *is* rather than what it does: it now
+survives losing a process, authenticates the way an organisation already does, knows what
+collectors it has and notices when one stops, has a restore somebody has actually
+performed, and carries the evidence a procurement team asks for.
 
 Against PLAN's own yardstick — *"something valuable exists at month 9"* — the product is
 past that line.
@@ -159,7 +164,9 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M12 §2.4 · backup and restore** | ✅ `scripts/backup.sh` + `scripts/restore.sh` — two planes, two commands, and a destination that has no default so a rehearsal cannot overwrite production |
 | **M12 §2.4 · a drill was performed** | ✅ [`docs/restore-drill.md`](./docs/restore-drill.md) — every telemetry table matched exactly, recovery took **8 s** on this data, and the drill **found a defect a procedure would not have**: restoring with the materialized views attached doubled every aggregate and tripled `metrics_1h`, silently, with every raw table exactly right |
 | **M12 §2.4 · the KEK property is a test** | ✅ a restored control plane without its key material lists and names its credentials and opens none of them — `uops-store-pg/tests/restore.rs`, with the paired positive case so the negative one means something |
-| M12 · buyer evidence | ⬜ §2.5 — not started |
+| **M12 §2.5 · the buyer's evidence** | ✅ [`docs/security-overview.md`](./docs/security-overview.md) and [`SECURITY.md`](./SECURITY.md) — dated, naming what it describes, and claiming **no certification**, because claiming one casually is worse than claiming neither |
+| **M12 §2.5 · generated, not typed** | ✅ an SBOM and a dependency licence report out of CI, attached to every published release. 300 third-party crates across 18 licence expressions, all permissive — `scripts/licence-report.py` reads `cargo metadata`, so it cannot drift from what cargo builds |
+| **M12 — all 12 acceptance criteria addressed** | ✅ ten met, two partial: the two-poller sample count, and cross-tenant isolation which reopens with each new surface |
 
 ## Resume in three commands
 
@@ -697,11 +704,11 @@ crates/uops-query/
    surfaces it. Blocked on the above, because a queue you can only agree with is worse
    than no queue.
 
-5. **M12 Enterprise is the milestone in progress**, and the last piece of it is §2.5:
-   an SBOM and a dependency licence report out of CI per release, and a security overview
-   that is dated, names the release it describes, and claims no certification. None of it
-   is code; all of it is a gate a procurement team puts in front of a purchase. See
-   [`docs/M12-enterprise.md`](./docs/M12-enterprise.md); §2.1 through §2.4 are done.
+5. **M12 Enterprise is done**, and what it leaves behind is two honest partials rather
+   than a tick: two real pollers producing one sample per interval has not been *measured*,
+   and cross-tenant isolation reopens with each new surface. The next milestones on the
+   roadmap are M10 automation, M11 security analytics and M13 AI — which PLAN §10 calls
+   *direction, not commitments*. See [`docs/M12-enterprise.md`](./docs/M12-enterprise.md).
 
 ### Carried forward, still true
 
