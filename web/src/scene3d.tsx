@@ -1,5 +1,5 @@
 /**
- * The topology in three dimensions — UI-SPEC §14.7.
+ * The topology in three dimensions — UI-SPEC §14.7, `docs/UI-3D-DEVICE-EXPLORER.md`.
  *
  * # What the third dimension carries
  *
@@ -16,12 +16,29 @@
  * difference between a second view of one network and two views that have to be learned
  * separately.
  *
+ * # What this file is, after the split
+ *
+ * Lifecycle and nothing else: build the scene, wire the pointer, draw on demand, dispose.
+ * The decisions moved out to where they can be tested without a browser —
+ *
+ * | | |
+ * |---|---|
+ * | which shape a resource is | `devicemodel.ts` |
+ * | what the shapes are made of | `scene3d-models.ts` |
+ * | which colour means what | `scene3d-materials.ts` |
+ * | where the camera may go | `scene3d-interaction.ts` |
+ * | every fact, in words | `scene3d-overlay.tsx` |
+ *
+ * That split is not tidiness. A bound on how far the camera may zoom is a one-line rule
+ * whose absence makes the view unusable, and inside a `useEffect` beside a
+ * `WebGLRenderer` the only way to check it is to start a browser and try.
+ *
  * # Why three.js and not a React renderer for it
  *
  * The dependency rule in part 2: a dependency must solve a problem that is materially
  * expensive or unsafe to solve ourselves. WebGL qualifies. React *bindings* for WebGL are
- * convenience — this scene has no per-frame React state, it is spheres and lines — so
- * they do not, and `@react-three/fiber` also pins a React version older than this app's.
+ * convenience — this scene has no per-frame React state — so they do not, and
+ * `@react-three/fiber` also pins a React version older than this app's.
  *
  * # Why it is loaded on demand
  *
@@ -30,10 +47,24 @@
  * nothing here is imported by the 2D path.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
+import { modelFor } from "./devicemodel";
 import type { GraphEdge, Placed } from "./graph";
+import { Materials, readPalette } from "./scene3d-materials";
+import { buildCatalogue, UNIT, type Part } from "./scene3d-models";
+import {
+  clampPhi,
+  clampRadius,
+  framingDistance,
+  orbitFor,
+  positionOf,
+  FIELD_OF_VIEW,
+  type CameraPreset,
+  type Orbit,
+} from "./scene3d-interaction";
+import Scene3dOverlay, { type SceneMode } from "./scene3d-overlay";
 
 /**
  * Vertical distance between two layers, in world units.
@@ -43,39 +74,6 @@ import type { GraphEdge, Placed } from "./graph";
  * separation has to be a large fraction of the spread, not a rounding error on it.
  */
 const LAYER = 170;
-const NODE_SIZE = 9;
-
-/**
- * Resolve a CSS custom property to something WebGL can use.
- *
- * The scene cannot read `var(--ok)`; the tokens are the single source of the semantic
- * five and duplicating their values here would be a second palette to keep in step. So
- * they are read off the document at build time of the scene, which also means the scene
- * follows a theme change on the next open.
- */
-function token(name: string, fallback: string): THREE.Color {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  try {
-    return new THREE.Color(raw || fallback);
-  } catch {
-    return new THREE.Color(fallback);
-  }
-}
-
-function colourOf(status: string): string {
-  switch (status) {
-    case "up":
-      return "--ok";
-    case "down":
-      return "--danger";
-    case "degraded":
-      return "--warn";
-    case "maintenance":
-      return "--maintenance";
-    default:
-      return "--unknown";
-  }
-}
 
 export interface Scene3dProps {
   nodes: Placed[];
@@ -83,6 +81,8 @@ export interface Scene3dProps {
   depths: Map<string, number>;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  /** `Open resource` from the inspector. Absent until the route exists. */
+  onOpen?: (id: string) => void;
 }
 
 export default function Scene3d({
@@ -91,14 +91,49 @@ export default function Scene3d({
   depths,
   selected,
   onSelect,
+  onOpen,
 }: Scene3dProps) {
   const host = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
-  // Kept in a ref as well, so the render loop can read it without re-running the effect
-  // and rebuilding the whole scene on every pointer move.
+  const [mode, setMode] = useState<SceneMode>("estate");
+
+  // Kept in refs as well, so the render loop can read them without re-running the effect
+  // and rebuilding the whole scene on every pointer move or selection.
   const hoverRef = useRef<string | null>(null);
   const selectRef = useRef<string | null>(selected);
   selectRef.current = selected;
+  const modeRef = useRef<SceneMode>(mode);
+  modeRef.current = mode;
+
+  // The scene exposes two imperative hooks to the HTML beside it: move the camera, and
+  // redraw. Both are set by the effect and read by the overlay's buttons.
+  const cameraTo = useRef<(preset: CameraPreset) => void>(() => {});
+  const focusOn = useRef<(id: string | null) => void>(() => {});
+  const markDirty = useRef<() => void>(() => {});
+
+  const chooseMode = useCallback((next: SceneMode) => {
+    setMode(next);
+    modeRef.current = next;
+    if (next === "focus") focusOn.current(selectRef.current);
+    else cameraTo.current("reset");
+    markDirty.current();
+  }, []);
+
+  const choose = useCallback(
+    (id: string | null) => {
+      onSelect(id);
+      selectRef.current = id;
+      if (id === null && modeRef.current === "focus") {
+        setMode("estate");
+        modeRef.current = "estate";
+        cameraTo.current("reset");
+      } else if (modeRef.current === "focus") {
+        focusOn.current(id);
+      }
+      markDirty.current();
+    },
+    [onSelect],
+  );
 
   useEffect(() => {
     const mount = host.current;
@@ -109,90 +144,185 @@ export default function Scene3d({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
 
-    const camera = new THREE.PerspectiveCamera(45, 1, 1, 6000);
+    const camera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 1, 12000);
+
+    const palette = readPalette();
+    const materials = new Materials(palette);
+    const catalogue = buildCatalogue();
+
+    const heightOf = (id: string) => -(depths.get(id) ?? 0) * LAYER;
 
     // The graph's own extent, so the camera frames whatever it is given rather than a
     // size somebody guessed.
     const maxDepth = Math.max(...nodes.map((n) => depths.get(n.id) ?? 0), 0);
-    // Negative, because layers descend: a node's height is `-depth * LAYER`, so the middle
-    // of the stack is below zero. Looking at `+maxDepth/2` aimed the camera above the
-    // whole graph and put one node in a corner of an otherwise empty scene.
+    // Negative, because layers descend: the middle of the stack is below zero. Looking at
+    // `+maxDepth/2` aimed the camera above the whole graph.
     const centre = new THREE.Vector3(500, -(maxDepth * LAYER) / 2, 500);
 
-    const nodeColour = new Map<string, THREE.Color>();
-    for (const n of nodes) {
-      nodeColour.set(n.id, token(colourOf(n.status), "#888888"));
-    }
-    const dim = token("--border-strong", "#333333");
-    const ink = token("--text", "#eeeeee");
-
     // --- nodes -------------------------------------------------------------
-    // One geometry and one mesh per node: at NODE_BUDGET this is a few hundred draw
-    // calls, which is nothing, and it keeps picking and per-node colour simple. Instanced
-    // rendering would be the answer at ten thousand, and ten thousand is not legible.
-    const geometry = new THREE.SphereGeometry(NODE_SIZE, 20, 16);
-    const meshes: THREE.Mesh[] = [];
+    // A `Group` per node whose children are meshes over *shared* geometry: at the node
+    // budget this is a few hundred draw calls, which is nothing, and it keeps picking and
+    // per-node colour simple. Instanced rendering would be the answer at ten thousand, and
+    // ten thousand is not legible — §5.2.
+    interface Drawn {
+      id: string;
+      status: string;
+      group: THREE.Group;
+      /** What is currently built, so a frame that changes nothing rebuilds nothing. */
+      detail: "low" | "rich";
+      dimmed: boolean;
+      chosen: boolean;
+    }
+    const drawn: Drawn[] = [];
+    const pickable: THREE.Object3D[] = [];
+
+    function build(group: THREE.Group, parts: Part[], status: string, dimmed: boolean) {
+      for (const part of parts) {
+        const material = part.accent
+          ? materials.accent(dimmed)
+          : dimmed
+            ? materials.chassis(status, true)
+            : materials.chassis(status, false);
+        const mesh = new THREE.Mesh(part.geometry, material);
+        mesh.position.set(part.position[0], part.position[1], part.position[2]);
+        mesh.userData["id"] = group.userData["id"];
+        group.add(mesh);
+        pickable.push(mesh);
+      }
+    }
+
+    function rebuild(node: Drawn, detail: "low" | "rich", dimmed: boolean, chosen: boolean) {
+      // Children are disposed of by removal only — the geometry is shared and owned by the
+      // catalogue, the materials are shared and owned by `Materials`. Nothing per-mesh is
+      // allocated that needs freeing, which is the point of both caches.
+      for (const child of [...node.group.children]) {
+        node.group.remove(child);
+        const at = pickable.indexOf(child);
+        if (at >= 0) pickable.splice(at, 1);
+      }
+      const original = nodes.find((n) => n.id === node.id);
+      const model = catalogue.models[modelFor(original ?? { kind: "" })];
+      build(node.group, detail === "rich" ? model.rich : model.low, node.status, dimmed);
+      if (chosen) {
+        // The selected node's chassis takes the lifted colour. Only the chassis: an accent
+        // part is structure, and lighting all of it would make selection read as a status.
+        const chassis = node.group.children[0] as THREE.Mesh | undefined;
+        if (chassis) chassis.material = materials.selected(node.status);
+      }
+      node.detail = detail;
+      node.dimmed = dimmed;
+      node.chosen = chosen;
+    }
+
     for (const n of nodes) {
-      const material = new THREE.MeshBasicMaterial({
-        color: nodeColour.get(n.id) ?? dim,
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(n.x, -(depths.get(n.id) ?? 0) * LAYER, n.y);
-      mesh.userData["id"] = n.id;
-      scene.add(mesh);
-      meshes.push(mesh);
+      const group = new THREE.Group();
+      group.userData["id"] = n.id;
+      group.position.set(n.x, heightOf(n.id), n.y);
+      const entry: Drawn = {
+        id: n.id,
+        status: n.status,
+        group,
+        detail: "low",
+        dimmed: false,
+        chosen: false,
+      };
+      build(group, catalogue.models[modelFor(n)].low, n.status, false);
+      scene.add(group);
+      drawn.push(entry);
     }
 
     // --- edges -------------------------------------------------------------
     const at = new Map(nodes.map((n) => [n.id, n]));
     const lines: { line: THREE.Line; a: string; b: string }[] = [];
+    const lineMaterials: THREE.Material[] = [];
+    // Two materials for the whole graph rather than one per edge: opacity is set per frame
+    // on whichever of the two an edge is using, so dimming needs four in total.
+    const solidLit = new THREE.LineBasicMaterial({ color: palette.neutral });
+    const solidDim = new THREE.LineBasicMaterial({
+      color: palette.neutral,
+      transparent: true,
+      opacity: 0.1,
+    });
+    const dashLit = new THREE.LineDashedMaterial({
+      color: palette.neutral,
+      dashSize: 8,
+      gapSize: 6,
+    });
+    const dashDim = new THREE.LineDashedMaterial({
+      color: palette.neutral,
+      dashSize: 8,
+      gapSize: 6,
+      transparent: true,
+      opacity: 0.1,
+    });
+    lineMaterials.push(solidLit, solidDim, dashLit, dashDim);
+
     for (const e of edges) {
       const a = at.get(e.source);
       const b = at.get(e.target);
       if (!a || !b) continue;
       const points = [
-        new THREE.Vector3(a.x, -(depths.get(a.id) ?? 0) * LAYER, a.y),
-        new THREE.Vector3(b.x, -(depths.get(b.id) ?? 0) * LAYER, b.y),
+        new THREE.Vector3(a.x, heightOf(a.id), a.y),
+        new THREE.Vector3(b.x, heightOf(b.id), b.y),
       ];
       // ARP dashed, as in 2D: the same evidence is drawn the same way in both modes, or
       // the two views disagree about how much to trust a link.
-      const material =
-        e.discovered_by === "arp"
-          ? new THREE.LineDashedMaterial({ color: dim, dashSize: 8, gapSize: 6 })
-          : new THREE.LineBasicMaterial({ color: dim });
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
-      if (e.discovered_by === "arp") line.computeLineDistances();
+      const arp = e.discovered_by === "arp";
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        arp ? dashLit : solidLit,
+      );
+      if (arp) line.computeLineDistances();
       scene.add(line);
       lines.push({ line, a: e.source, b: e.target });
     }
 
     // --- camera control ----------------------------------------------------
     // Hand-rolled orbit: drag rotates, wheel zooms. Forty lines against a dependency that
-    // would also bring a scene-graph helper library with it.
-    // Framed from the graph's own bounding sphere rather than a distance somebody guessed:
-    // a four-node pair and a four-hundred-node estate need very different camera
-    // distances, and a fixed one is wrong for both.
+    // would also bring a scene-graph helper library with it. Framed from the graph's own
+    // bounding sphere rather than a distance somebody guessed.
     const spread = Math.max(
-      ...nodes.map((n) =>
-        Math.hypot(n.x - centre.x, -(depths.get(n.id) ?? 0) * LAYER - centre.y, n.y - centre.z),
-      ),
-      1,
+      ...nodes.map((n) => Math.hypot(n.x - centre.x, heightOf(n.id) - centre.y, n.y - centre.z)),
+      UNIT,
     );
-    const fit = (spread / Math.sin((45 * Math.PI) / 180 / 2)) * 1.15;
-    const orbit = { theta: Math.PI * 0.25, phi: Math.PI * 0.32, radius: fit };
+    const fit = framingDistance(spread);
+    let target = centre.clone();
+    const orbit: Orbit = orbitFor("reset", fit);
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
 
     function place() {
-      const r = orbit.radius;
-      camera.position.set(
-        centre.x + r * Math.sin(orbit.phi) * Math.cos(orbit.theta),
-        centre.y + r * Math.cos(orbit.phi),
-        centre.z + r * Math.sin(orbit.phi) * Math.sin(orbit.theta),
-      );
-      camera.lookAt(centre);
+      const at = positionOf(orbit, target);
+      camera.position.set(at.x, at.y, at.z);
+      camera.lookAt(target);
     }
+
+    cameraTo.current = (preset: CameraPreset) => {
+      const next = orbitFor(preset, fit);
+      orbit.theta = next.theta;
+      orbit.phi = next.phi;
+      orbit.radius = next.radius;
+      if (preset === "reset") target = centre.clone();
+      place();
+      dirty = true;
+    };
+
+    focusOn.current = (id: string | null) => {
+      const node = id ? at.get(id) : undefined;
+      if (!node) {
+        target = centre.clone();
+      } else {
+        // Centre on the device and come close enough that its neighbours are the scene.
+        // Not so close that the rest disappears: §4.2 dims unrelated devices rather than
+        // hiding them, because the surrounding graph is what makes the selection mean
+        // something.
+        target = new THREE.Vector3(node.x, heightOf(node.id), node.y);
+        orbit.radius = clampRadius(fit * 0.35, fit, spread);
+      }
+      place();
+      dirty = true;
+    };
 
     const onDown = (event: PointerEvent) => {
       dragging = true;
@@ -212,18 +342,14 @@ export default function Scene3d({
       );
       if (!dragging) return;
       orbit.theta -= (event.clientX - lastX) * 0.006;
-      // Clamped short of the poles: at exactly vertical the up vector is undefined and
-      // the view flips.
-      orbit.phi = Math.min(Math.PI - 0.15, Math.max(0.15, orbit.phi - (event.clientY - lastY) * 0.006));
+      orbit.phi = clampPhi(orbit.phi - (event.clientY - lastY) * 0.006);
       lastX = event.clientX;
       lastY = event.clientY;
       place();
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      // Bounded relative to what is on screen, so zooming out cannot lose the graph and
-      // zooming in cannot pass through it.
-      orbit.radius = Math.min(fit * 4, Math.max(spread * 0.35, orbit.radius * (1 + event.deltaY * 0.001)));
+      orbit.radius = clampRadius(orbit.radius * (1 + event.deltaY * 0.001), fit, spread);
       place();
     };
 
@@ -233,16 +359,24 @@ export default function Scene3d({
 
     const onClick = () => {
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObjects(meshes)[0];
+      const hit = raycaster.intersectObjects(pickable)[0];
       const id = hit ? (hit.object.userData["id"] as string) : null;
-      onSelect(id === selectRef.current ? null : id);
+      choose(id === selectRef.current ? null : id);
     };
+
+    // Escape clears, as in 2D, and it is on the canvas rather than the window so it does
+    // not steal the key from a dialog somewhere else on the page.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") choose(null);
+    };
+    renderer.domElement.tabIndex = 0;
 
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointerup", onUp);
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
     renderer.domElement.addEventListener("click", onClick);
+    renderer.domElement.addEventListener("keydown", onKey);
 
     function resize() {
       const w = mount?.clientWidth ?? 1;
@@ -254,6 +388,7 @@ export default function Scene3d({
       camera.aspect = w / Math.max(h, 1);
       camera.updateProjectionMatrix();
       place();
+      dirty = true;
     }
     const observer = new ResizeObserver(resize);
     observer.observe(mount);
@@ -265,17 +400,18 @@ export default function Scene3d({
     // just as much to a permanent render loop on a wall display.
     let frame = 0;
     let dirty = true;
-    const markDirty = () => {
+    const setDirty = () => {
       dirty = true;
     };
-    renderer.domElement.addEventListener("pointermove", markDirty);
-    renderer.domElement.addEventListener("wheel", markDirty);
+    markDirty.current = setDirty;
+    renderer.domElement.addEventListener("pointermove", setDirty);
+    renderer.domElement.addEventListener("wheel", setDirty);
 
     function tick() {
       frame = requestAnimationFrame(tick);
 
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObjects(meshes)[0];
+      const hit = raycaster.intersectObjects(pickable)[0];
       const over = hit ? (hit.object.userData["id"] as string) : null;
       if (over !== hoverRef.current) {
         hoverRef.current = over;
@@ -297,23 +433,31 @@ export default function Scene3d({
         }
       }
 
-      for (const mesh of meshes) {
-        const id = mesh.userData["id"] as string;
-        const lit = !chosen || near.has(id);
-        const material = mesh.material as THREE.MeshBasicMaterial;
-        material.color.copy(nodeColour.get(id) ?? dim);
-        material.opacity = lit ? 1 : 0.15;
-        material.transparent = !lit;
-        const emphasised = id === chosen || id === hoverRef.current;
-        mesh.scale.setScalar(emphasised ? 1.5 : 1);
-        if (id === chosen) material.color.lerp(ink, 0.35);
+      for (const node of drawn) {
+        const lit = !chosen || near.has(node.id);
+        const emphasised = node.id === chosen || node.id === hoverRef.current;
+        // Rich detail for the selected node, and — in focus mode only — its neighbours.
+        // §5.2: a fully detailed front face on four hundred nodes is both slower and less
+        // legible, because the detail stops distinguishing anything once it is everywhere.
+        const wants: "low" | "rich" =
+          node.id === chosen || (modeRef.current === "focus" && near.has(node.id))
+            ? "rich"
+            : "low";
+        // Only when something about it actually changed. Rebuilding every node every
+        // frame is invisible at four nodes and is the whole frame budget at four hundred —
+        // and the render loop is on-demand precisely so that a frame that changes nothing
+        // costs nothing.
+        if (node.detail !== wants || node.dimmed === lit || node.chosen !== (node.id === chosen)) {
+          rebuild(node, wants, !lit, node.id === chosen);
+        }
+        node.group.scale.setScalar(emphasised ? 1.5 : 1);
       }
 
       for (const { line, a, b } of lines) {
         const lit = !chosen || (near.has(a) && near.has(b));
-        const material = line.material as THREE.LineBasicMaterial;
-        material.opacity = lit ? 1 : 0.1;
-        material.transparent = !lit;
+        const dashed = (line.material as THREE.Material) === dashLit ||
+          (line.material as THREE.Material) === dashDim;
+        line.material = dashed ? (lit ? dashLit : dashDim) : lit ? solidLit : solidDim;
       }
 
       renderer.render(scene, camera);
@@ -326,33 +470,44 @@ export default function Scene3d({
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);
-      renderer.domElement.removeEventListener("pointermove", markDirty);
+      renderer.domElement.removeEventListener("pointermove", setDirty);
       renderer.domElement.removeEventListener("wheel", onWheel);
-      renderer.domElement.removeEventListener("wheel", markDirty);
+      renderer.domElement.removeEventListener("wheel", setDirty);
       renderer.domElement.removeEventListener("click", onClick);
+      renderer.domElement.removeEventListener("keydown", onKey);
+      cameraTo.current = () => {};
+      focusOn.current = () => {};
+      markDirty.current = () => {};
       // A WebGL context is not garbage collected on its own, and a browser allows only a
       // handful at once — leaking one per visit to this screen means the fifteenth visit
       // renders nothing.
-      geometry.dispose();
-      for (const mesh of meshes) (mesh.material as THREE.Material).dispose();
-      for (const { line } of lines) {
-        line.geometry.dispose();
-        (line.material as THREE.Material).dispose();
-      }
+      catalogue.dispose();
+      materials.dispose();
+      for (const material of lineMaterials) material.dispose();
+      for (const { line } of lines) line.geometry.dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
     };
-  }, [nodes, edges, depths, onSelect]);
-
-  const under = hovered ?? selected;
-  const name = under ? nodes.find((n) => n.id === under)?.name : null;
+  }, [nodes, edges, depths, choose]);
 
   return (
-    <div className="scene3d" ref={host}>
+    <div className="scene3d-host">
       {/* Names are not drawn in the scene: text in WebGL costs a font atlas and a
           dependency, and §14's split is that 3D carries shape while the panel beside it
-          carries the facts. What is under the pointer is named here instead. */}
-      {name && <span className="scene3d-readout">{name}</span>}
+          carries the facts. */}
+      <div className="scene3d" ref={host} />
+      <Scene3dOverlay
+        nodes={nodes}
+        edges={edges}
+        depths={depths}
+        selected={selected}
+        hovered={hovered}
+        mode={mode}
+        onSelect={choose}
+        onMode={chooseMode}
+        onCamera={(preset) => cameraTo.current(preset)}
+        onOpen={onOpen}
+      />
     </div>
   );
 }

@@ -1221,6 +1221,16 @@ jobs:
       - name: build
         run: npm run build
 
+      # docs/UI-3D-DEVICE-EXPLORER.md §9: this product has to run air-gapped. The check is
+      # against the *built* bundle rather than the source, because the failure is rarely
+      # written by hand — a font helper, an icon set, a model loader with a default CDN
+      # base. An air-gapped deployment otherwise discovers it as a render that never
+      # finishes, which is the worst possible place to find out.
+      #
+      # After `build`, necessarily: there is nothing to check before it.
+      - name: Nothing in the bundle is fetched from the internet
+        run: node scripts/no-remote-assets.mjs
+
       # The session cookie is HttpOnly and cannot be read by script; the CSRF cookie is
       # read by src/api.ts and nothing else. Neither belongs in storage, where it would
       # outlive the session and be readable by anything running on the origin.

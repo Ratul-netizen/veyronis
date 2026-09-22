@@ -2384,6 +2384,108 @@ button.following {
   pointer-events: none;
 }
 
+/* The scene and the words beside it — docs/UI-3D-DEVICE-EXPLORER.md §7.
+   Side by side on a wide screen, stacked on a narrow one. The panel is never below the
+   fold on a laptop, because it is the only part of this mode a keyboard can reach. */
+.scene3d-host {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 22rem);
+  gap: calc(var(--space) * 2);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .scene3d-host {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.scene3d-panel {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 1.5);
+  min-width: 0;
+}
+
+.scene3d-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space);
+}
+
+/* Not positioned over the canvas any more: it is announced with `aria-live`, and an
+   overlay that sits on top of a canvas is an overlay that a pointer fights with. */
+.scene3d-panel .scene3d-readout {
+  position: static;
+  padding: 6px 10px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--t-label);
+  pointer-events: auto;
+}
+
+.scene3d-inspect h3 {
+  margin: 0 0 4px;
+  font-size: var(--t-body);
+}
+
+.scene3d-inspect h4 {
+  margin: calc(var(--space) * 1.5) 0 4px;
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.scene3d-inspect p {
+  margin: 0 0 4px;
+  font-size: var(--t-label);
+}
+
+.scene3d-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--t-label);
+}
+
+/* 24 CSS pixels of target, per WCAG 2.2 — §9. A list of links that are one line of text
+   tall is a list nobody can hit on a touch screen. */
+.scene3d-links button.link,
+.scene3d-actions button {
+  min-height: 24px;
+}
+
+.scene3d-actions {
+  display: flex;
+  gap: var(--space);
+  margin-top: calc(var(--space) * 1.5);
+}
+
+.scene3d-legend {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space);
+}
+
+.scene3d-legend ul {
+  list-style: none;
+  margin: 0 0 var(--space);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--t-label);
+}
+
+.scene3d-legend p {
+  margin: 0;
+  font-size: var(--t-label);
+}
+
 .topo-loading {
   aspect-ratio: 1;
   max-height: 72vh;

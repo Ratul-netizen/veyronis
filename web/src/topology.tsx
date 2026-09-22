@@ -23,7 +23,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useCallback, useMemo, useState } from "react";
 
 import { listTopology, type TopologyEdge } from "./discovery";
@@ -70,12 +70,26 @@ function dashOf(edge: TopologyEdge): string | undefined {
   return edge.discovered_by === "arp" ? "6 5" : undefined;
 }
 
+/**
+ * Which view is on screen — `docs/UI-3D-DEVICE-EXPLORER.md` §6.2.
+ *
+ * A named type rather than the `solid: boolean` this used to be. The boolean read fine
+ * with two states and would have read as nonsense the moment there was a third, and
+ * `view === "3d"` says at the call site what `solid` needed a comment to say.
+ *
+ * The 3D *mode* — estate or focus — deliberately does **not** live here. It is a property
+ * of the scene, means nothing to the 2D view, and hoisting it would put a piece of state
+ * in this component that half of it has to ignore.
+ */
+type TopologyView = "2d" | "3d";
+
 export function TopologyPage() {
   const { tenant } = useShell();
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<string | null>(null);
   const [onlyUnhealthy, setOnlyUnhealthy] = useState(false);
   const [find, setFind] = useState("");
-  const [solid, setSolid] = useState(false);
+  const [view, setView] = useState<TopologyView>("2d");
 
   const graph = useQuery({
     queryKey: ["topology", tenant.tenant_id],
@@ -108,6 +122,14 @@ export function TopologyPage() {
 
   const pick = useCallback((id: string | null) => setSelected(id), []);
 
+  // The inspector's one primary action — §7. Routed here rather than from inside the
+  // scene, because navigation is the page's business and the WebGL layer stays a
+  // rendering layer.
+  const openResource = useCallback(
+    (id: string) => navigate({ to: "/resources/$id", params: { id } }),
+    [navigate],
+  );
+
   const near = useMemo(
     () => (selected ? neighboursOf(selected, placed.edges) : null),
     [selected, placed.edges],
@@ -134,7 +156,7 @@ export function TopologyPage() {
       <h1>Topology</h1>
       <p className="dim">
         What the estate reports about itself. Links come from LLDP, CDP and ARP.
-        {solid && " Height is hops from the most connected device."}
+        {view === "3d" && " Height is hops from the most connected device."}
       </p>
 
       {/* Controls belong to the screen, not to global settings — §14.5. */}
@@ -157,10 +179,10 @@ export function TopologyPage() {
             control which is present and does nothing is the dead-navigation problem in
             miniature — so this arrived with the thing it switches to, not before it. */}
         <span className="presets">
-          <button type="button" aria-pressed={!solid} onClick={() => setSolid(false)}>
+          <button type="button" aria-pressed={view === "2d"} onClick={() => setView("2d")}>
             2D
           </button>
-          <button type="button" aria-pressed={solid} onClick={() => setSolid(true)}>
+          <button type="button" aria-pressed={view === "3d"} onClick={() => setView("3d")}>
             3D
           </button>
         </span>
@@ -189,7 +211,7 @@ export function TopologyPage() {
         </p>
       ) : (
         <div className="topo">
-          {solid ? (
+          {view === "3d" ? (
             <Suspense fallback={<p className="dim topo-loading">Loading the 3D view…</p>}>
               <Scene3d
                 nodes={placed.nodes}
@@ -197,6 +219,7 @@ export function TopologyPage() {
                 depths={layers}
                 selected={selected}
                 onSelect={pick}
+                onOpen={openResource}
               />
             </Suspense>
           ) : (
