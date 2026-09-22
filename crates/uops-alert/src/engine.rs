@@ -58,6 +58,14 @@ pub struct Decision {
     /// and never while notifications are suppressed.
     pub notify: bool,
     pub value: Option<f64>,
+    /// How many alerts this one's incident had already silenced when it was decided — M9
+    /// §2.4.
+    ///
+    /// Zero on nearly everything, including on the alert that *causes* a cascade: when
+    /// the switch fires, the forty hosts behind it have not gone quiet yet. See
+    /// `group_into_incident` for why that is not a bug and why delaying the page to find
+    /// out would be worse.
+    pub suppressed: u32,
 }
 
 /// What one pass over one rule did.
@@ -236,6 +244,7 @@ impl Engine {
             // The softer half of a maintenance window: the phase moves, the history is
             // kept, nobody is woken up.
             let mut notify = transition.notify && !quiet.is_some_and(|s| s.notifications);
+            let mut suppressed = 0u32;
 
             // M9 §2.2. An alert that has just *entered* firing is grouped into an
             // incident, and grouping may take its notification away — §2.4. Only on the
@@ -247,7 +256,10 @@ impl Engine {
             {
                 {
                     match self.group_into_incident(scope, rule, row, now).await {
-                        Ok(permitted) => notify = permitted,
+                        Ok((permitted, count)) => {
+                            notify = permitted;
+                            suppressed = count;
+                        }
                         // Grouping is not allowed to lose an alert. A failure here leaves
                         // the alert ungrouped and notifying, which is the same behaviour
                         // the product had before M9 — SPEC §M0.2 rule 1 applied one level
@@ -268,6 +280,7 @@ impl Engine {
                 since: transition.since,
                 notify,
                 value: Some(series.value),
+                suppressed,
             });
         }
 
@@ -285,13 +298,26 @@ impl Engine {
     /// membership — which is what just changed. An incident that grew a new root has a new
     /// candidate, and holding the old one would mean the screen names a switch that turned
     /// out to be downstream of the thing that actually broke.
+    /// # Why the cause's own page cannot name what it suppressed
+    ///
+    /// §2.4 asks the notification for a cause to say *"and 39 downstream resources"*. At
+    /// the moment the switch's alert fires, the hosts behind it are still up: the
+    /// suppressions happen over the following seconds, after the page has gone out.
+    ///
+    /// Waiting to find out would mean delaying the notification for the outage in order
+    /// to describe it better, which trades the thing that matters for the thing that
+    /// decorates it — the same rule §M0.2 holds one level down.
+    ///
+    /// So the count is read **at notify time** and is honest about that: it is what the
+    /// incident had silenced when this alert was decided. The complete figure lives on
+    /// the incident, where the screen and the API both show it.
     async fn group_into_incident(
         &self,
         scope: &TenantScope,
         rule: &AlertRule,
         alert: &uops_store_pg::AlertStateRow,
         now: DateTime<Utc>,
-    ) -> uops_core::Result<bool> {
+    ) -> uops_core::Result<(bool, u32)> {
         let firing = Firing {
             resource_id: alert.resource_id,
             rule_id: rule.id,
@@ -359,7 +385,11 @@ impl Engine {
             .set_candidate(scope, incident, picked.map_err(NoCandidate::as_str))
             .await?;
 
-        Ok(decision.notify)
+        let suppressed = self.pg.incident_suppressed(scope, incident).await?;
+        Ok((
+            decision.notify,
+            u32::try_from(suppressed).unwrap_or(u32::MAX),
+        ))
     }
 
     /// Run the evaluation query, and for an absence rule add the resources that produced

@@ -135,6 +135,7 @@ fn notification(resource: ResourceId, phase: Phase) -> Notification {
         value: Some(94.5),
         since: Utc::now(),
         at: Utc::now(),
+        suppressed: 0,
     }
 }
 

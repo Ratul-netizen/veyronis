@@ -247,6 +247,7 @@ async fn deliver(
             value: decision.value,
             since: decision.since,
             at: Utc::now(),
+            suppressed: decision.suppressed,
         };
 
         match notifier.deliver(scope, &rule.notify, &notification).await {

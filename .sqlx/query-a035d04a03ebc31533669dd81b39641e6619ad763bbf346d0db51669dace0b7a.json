@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT count(*) AS \"n!\" FROM incident_alert\n             WHERE tenant_id = $1 AND incident_id = $2 AND NOT notified\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a035d04a03ebc31533669dd81b39641e6619ad763bbf346d0db51669dace0b7a"
+}

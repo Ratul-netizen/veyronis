@@ -541,6 +541,32 @@ impl PgStore {
         Ok(())
     }
 
+    /// How many alerts in this incident were silenced by §2.4.
+    ///
+    /// Read at notify time rather than carried, because the number changes as the cascade
+    /// arrives and a notification should say what was true when it was sent.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn incident_suppressed(
+        &self,
+        scope: &TenantScope,
+        incident: IncidentId,
+    ) -> Result<i64> {
+        sqlx::query_scalar!(
+            r#"
+            SELECT count(*) AS "n!" FROM incident_alert
+             WHERE tenant_id = $1 AND incident_id = $2 AND NOT notified
+            "#,
+            scope.tenant_id() as uops_core::TenantId,
+            incident as IncidentId,
+        )
+        .fetch_one(self.pool())
+        .await
+        .map_err(|e| map("incident_alert", "suppressed".to_owned(), e))
+    }
+
     /// Acknowledge an incident.
     ///
     /// Silences the notification and never the incident — the same rule `alert_state`

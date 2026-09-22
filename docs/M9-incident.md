@@ -126,8 +126,35 @@ into somebody else's incident and nobody is told. So:
   information.
 * **It is off by default in v0.1**, per tenant. A feature that can hide an outage earns
   its way on after an operator has seen it group correctly on their own estate.
-* **The notification for the cause says what it suppressed**: *"and 39 downstream
-  resources"*. A suppression nobody can see is indistinguishable from a bug.
+* **The notification says what it suppressed**: *"+ 39 more downstream"* on the subject
+  line and a sentence in the body. A suppression nobody can see is indistinguishable from
+  a bug, and the page at 4am is where it is hardest to see.
+
+### 2.4a What that last point could not mean, found while building it
+
+The sentence above originally said *the notification **for the cause** says what it
+suppressed*, and that turns out to be impossible without making the product worse.
+
+When the switch's alert fires, the forty hosts behind it are **still up**. The
+suppressions happen over the following seconds — after the page has already gone out. The
+only way for the cause's own notification to carry the final count would be to delay it
+until the cascade finished arriving, which means delaying the page for the outage in order
+to describe it more completely. That trades the thing that matters for the thing that
+decorates it, which is §M0.2 rule 1 one level up.
+
+So the count is read **at notify time** and is honest about being a running one:
+
+* On the alert that *causes* a cascade it is almost always **zero**, because nothing has
+  been suppressed yet.
+* On any later notification from the same incident it is what had been silenced when that
+  alert was decided — an upstream failure arriving after its downstream symptoms carries
+  the real figure, which is exactly the case §2.4's direction rule exists for.
+* **The complete number lives on the incident**, where the list row and the API response
+  both carry it and neither has to be sent at a particular instant.
+
+The alternative — a follow-up digest once a cascade settles — is a second notification
+path with its own timing, its own rate limit and its own way of being wrong, for a number
+the screen already shows.
 
 ### 2.5 The product says **candidate**, and it says why.
 
@@ -204,10 +231,10 @@ incident", in the schema rather than in code.
 - [x] Two failures on the same resource a week apart produce **two** incidents
 - [x] An estate with no topology produces an incident per alert, and each says why it was
       not grouped — §2.3, carried from `GroupReason` through the API to the screen
-- [~] Topology suppression silences the downstream notification and every suppressed
-      alert is still visible on the incident — `suppressed` is on the list row and on the
-      API response. **The notification does not yet name what it suppressed**: the count
-      reaches the screen but not the notifier's message body
+- [x] Topology suppression silences the downstream notification, names what it silenced
+      on the subject line and in the body, and every suppressed alert is still visible on
+      the incident. The count is a *running* one — see §2.4a for why the cause's own page
+      cannot carry the final figure without delaying the outage it is reporting
 - [~] Suppression is off by default and is a per-tenant column — tested. The **audit
       entry** for switching it on is not written, because no route changes it yet: today
       it is a database update

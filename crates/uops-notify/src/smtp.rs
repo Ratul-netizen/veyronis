@@ -375,6 +375,7 @@ mod tests {
             value: Some(94.5),
             since: DateTime::from_timestamp(1_700_000_000, 0).expect("an instant"),
             at: DateTime::from_timestamp(1_700_000_600, 0).expect("an instant"),
+            suppressed: 0,
         }
     }
 

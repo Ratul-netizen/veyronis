@@ -133,6 +133,7 @@ fn notification(rule: &str) -> Notification {
         value: Some(94.5),
         since: Utc::now(),
         at: Utc::now(),
+        suppressed: 0,
     }
 }
 

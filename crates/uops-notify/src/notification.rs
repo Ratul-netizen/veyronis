@@ -38,6 +38,27 @@ pub struct Notification {
     /// just now.
     pub since: DateTime<Utc>,
     pub at: DateTime<Utc>,
+
+    /// How many *other* alerts this one's incident silenced — M9 §2.4.
+    ///
+    /// Zero on almost everything, and the field exists for the case where it is not.
+    /// When a switch fails and forty hosts go quiet behind it, exactly one notification
+    /// is sent and this says how much it stands for. Without it the page reads as one
+    /// device having a problem, which is the wrong size of event to wake up to.
+    ///
+    /// §2.4 is explicit that a suppression nobody can see is indistinguishable from a
+    /// bug, and the page at 4am is the one place it is hardest to see.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub suppressed: u32,
+}
+
+/// Serde's `skip_serializing_if` needs a predicate by name.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde requires a reference"
+)]
+const fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Notification {
@@ -52,7 +73,7 @@ impl Notification {
             Phase::Resolved => "resolved",
             _ => "firing",
         };
-        match self.value {
+        let head = match self.value {
             Some(v) => format!(
                 "[{}] {} — {} {} ({:.3})",
                 self.severity.as_str(),
@@ -68,6 +89,14 @@ impl Notification {
                 self.rule,
                 verb
             ),
+        };
+        // M9 §2.4, on the subject line rather than buried in the body: the difference
+        // between one device and forty is the difference between finishing dinner and
+        // getting in the car, and it has to survive being read on a lock screen.
+        match self.suppressed {
+            0 => head,
+            1 => format!("{head} + 1 more downstream"),
+            n => format!("{head} + {n} more downstream"),
         }
     }
 
@@ -87,6 +116,16 @@ impl Notification {
         ];
         if let Some(value) = self.value {
             lines.push(format!("Value:    {value:.3}"));
+        }
+        if self.suppressed > 0 {
+            // Named, not just counted. An operator who cannot tell *why* forty pages did
+            // not arrive has to assume the notifier is broken, which is worse than forty
+            // pages.
+            lines.push(format!(
+                "Also:     {} downstream alert(s) grouped into this incident and not sent \
+                 separately",
+                self.suppressed
+            ));
         }
         lines.push(format!("Alert:    {}", self.dedup_key));
         lines.join("\n")
@@ -124,6 +163,7 @@ mod tests {
             value,
             since: DateTime::from_timestamp(1_700_000_000, 0).expect("an instant"),
             at: DateTime::from_timestamp(1_700_000_600, 0).expect("an instant"),
+            suppressed: 0,
         }
     }
 
@@ -181,6 +221,51 @@ mod tests {
                 .as_str()
                 .unwrap_or_default()
                 .contains("Since:")
+        );
+    }
+
+    #[test]
+    fn a_page_for_a_cascade_says_how_much_it_stands_for() {
+        // M9 §2.4. One notification for forty devices must not read like one device
+        // having a problem — that is the wrong size of event to wake up to, and the
+        // difference between finishing dinner and getting in the car.
+        let mut n = notification(Phase::Firing, None);
+        n.suppressed = 39;
+
+        assert!(
+            n.summary().ends_with("+ 39 more downstream"),
+            "on the subject line, so it survives a lock screen: {}",
+            n.summary()
+        );
+        assert!(
+            n.text()
+                .contains("39 downstream alert(s) grouped into this incident"),
+            "and named in the body, because a count with no explanation reads as a bug: {}",
+            n.text()
+        );
+    }
+
+    #[test]
+    fn one_suppressed_alert_is_not_pluralised_wrongly() {
+        let mut n = notification(Phase::Firing, None);
+        n.suppressed = 1;
+        assert!(
+            n.summary().ends_with("+ 1 more downstream"),
+            "{}",
+            n.summary()
+        );
+    }
+
+    #[test]
+    fn an_ordinary_alert_says_nothing_about_suppression() {
+        // Zero on nearly everything. A field that appears on every page is a field
+        // nobody reads, and the point is that a cascade stands out.
+        let n = notification(Phase::Firing, None);
+        assert!(!n.summary().contains("downstream"), "{}", n.summary());
+        assert!(!n.text().contains("downstream"), "{}", n.text());
+        assert!(
+            !n.payload().to_string().contains("suppressed"),
+            "and it is absent from the webhook body rather than sent as a zero"
         );
     }
 }
