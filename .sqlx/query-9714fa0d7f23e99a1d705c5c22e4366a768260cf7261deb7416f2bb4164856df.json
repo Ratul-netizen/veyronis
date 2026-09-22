@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO runbook_approval\n                (run_id, tenant_id, approved_by, started_by, targets_fingerprint)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (run_id, approved_by) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9714fa0d7f23e99a1d705c5c22e4366a768260cf7261deb7416f2bb4164856df"
+}

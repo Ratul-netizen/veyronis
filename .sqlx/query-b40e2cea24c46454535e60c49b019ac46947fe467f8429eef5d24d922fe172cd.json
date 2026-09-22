@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE runbook_run\n               SET state       = $3::text::runbook_run_state,\n                   failure     = COALESCE($4, failure),\n                   started_at  = CASE WHEN $3 = 'running' THEN now() ELSE started_at END,\n                   finished_at = CASE\n                                   WHEN $3 IN ('succeeded','failed','refused','cancelled')\n                                   THEN now() ELSE finished_at\n                                 END\n             WHERE id = $1 AND tenant_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b40e2cea24c46454535e60c49b019ac46947fe467f8429eef5d24d922fe172cd"
+}

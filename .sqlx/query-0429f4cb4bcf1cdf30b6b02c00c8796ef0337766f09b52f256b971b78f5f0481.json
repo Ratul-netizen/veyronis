@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE runbook SET retired_at = now()\n             WHERE id = $1 AND tenant_id = $2 AND retired_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0429f4cb4bcf1cdf30b6b02c00c8796ef0337766f09b52f256b971b78f5f0481"
+}

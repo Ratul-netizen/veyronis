@@ -23,6 +23,7 @@
 //! | what a runbook may be ([`model`]) | storing one (`uops-store-pg`) |
 //! | what is refused ([`validate`]) | the screens that show the refusal (`web`) |
 //! | substitution ([`render`]) | opening an SSH connection (`uops-runner`) |
+//! | keeping a transcript from becoming a credential store ([`redact`]) | storing it |
 //! | who may approve ([`approval`]) | the routes that record it (`uops-api`) |
 //! | what a run would do ([`plan`]) | doing it (`uops-runner`) |
 //!
@@ -66,6 +67,7 @@ pub mod approval;
 pub mod error;
 pub mod model;
 pub mod plan;
+pub mod redact;
 pub mod render;
 pub mod validate;
 
@@ -76,5 +78,6 @@ pub use model::{
     Runbook, Step,
 };
 pub use plan::{Plan, PlannedStep, Target, plan};
+pub use redact::{MASK, MAX_OUTPUT};
 pub use render::{Context, render};
 pub use validate::{DESTRUCTIVE_WORDS, Problem, validate};

@@ -3001,6 +3001,7 @@ dependencies = [
  "uops-pipeline",
  "uops-profile",
  "uops-query",
+ "uops-runbook",
  "uops-secrets",
  "uops-snmp",
  "uuid",

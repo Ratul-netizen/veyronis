@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO runbook_run_step\n                (run_id, tenant_id, resource_id, step_index, name, rendered,\n                 destructive, state, output, exit_code, finished_at)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text::runbook_step_state, $9, $10, now())\n            ON CONFLICT (run_id, resource_id, step_index) DO UPDATE\n               SET state       = EXCLUDED.state,\n                   output      = EXCLUDED.output,\n                   exit_code   = EXCLUDED.exit_code,\n                   finished_at = now()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "63859dece1da9753dba0fe1d198b6875975b4e6ac70e37dfdfd41ec4dd2e905f"
+}

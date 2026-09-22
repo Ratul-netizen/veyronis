@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO runbook_version\n                (runbook_id, tenant_id, version, description, targets, steps,\n                 max_targets, concurrency, approvals, maintenance_only, created_by)\n            -- Bound as text and cast, rather than teaching sqlx four enum types for\n            -- values that are already `&'static str`. The same shape `record_audit`\n            -- uses for `inet`, and PostgreSQL still validates it: a name the enum does\n            -- not have fails the cast rather than being stored.\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::runbook_approvals, $10, $11)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Int4",
+        "Int4",
+        "Text",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2ef6911e24ca27b14b982004edc2e904b1a3706c44f890e84736323e4a28c20d"
+}

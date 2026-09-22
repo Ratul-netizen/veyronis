@@ -15,6 +15,8 @@ uops-core = { workspace = true, features = ["sqlx"] }
 uops-incident.workspace = true
 uops-identity.workspace = true
 uops-oidc.workspace = true
+# M10's rules. The validation and the approval decision are there; the rows are here.
+uops-runbook.workspace = true
 uops-secrets.workspace = true
 uops-profile.workspace = true
 # For Range and Sweep. A discovery job is validated with the same gate the sweeper uses,

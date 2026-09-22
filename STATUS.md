@@ -169,7 +169,9 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M12 — all 12 acceptance criteria addressed** | ✅ ten met, two partial: the two-poller sample count, and cross-tenant isolation which reopens with each new surface |
 | **M10 · decisions closed** | ✅ [`docs/M10-automation.md`](./docs/M10-automation.md) — the first milestone that **writes** to a customer's network, so every decision in it is about what stops it |
 | **M10 · the rules** | ✅ `uops-runbook` — 59 tests on what the product refuses: a `reload` marked read-only, a destructive step with no declared rollback, a value that could end the command it is substituted into, a run approved by the person who started it |
-| M10 · storage, runner, API, screens | ⬜ next |
+| **M10 · storage** | ✅ migration 0026 — and three things the *schema* makes unrepresentable rather than checking: a version that changed, one person approving twice, and **approving your own run** |
+| **M10 · a transcript is not a credential store** | ✅ `uops_runbook::redact` — redacted in the store on the way in, so no path writes a raw one. A net rather than a boundary, and the module says so at the top |
+| M10 · runner, API, screens | ⬜ next |
 
 ## Resume in three commands
 

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO runbook (tenant_id, name, created_by)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (tenant_id, name) DO UPDATE\n               SET retired_at = NULL\n            RETURNING id, created_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "cbd097c4e79d4cc965cd22a22cffb6a9bdbf7b6736c607bf7fe689e3f28d3376"
+}

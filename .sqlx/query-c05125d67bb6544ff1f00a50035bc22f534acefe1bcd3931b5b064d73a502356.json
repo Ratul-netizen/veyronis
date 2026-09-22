@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT started_by AS \"started_by: ActorId\", targets_fingerprint,\n                   state AS \"state: RunState\"\n              FROM runbook_run\n             WHERE id = $1 AND tenant_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "started_by: ActorId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "targets_fingerprint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "state: RunState",
+        "type_info": {
+          "Custom": {
+            "name": "runbook_run_state",
+            "kind": {
+              "Enum": [
+                "awaiting_approval",
+                "ready",
+                "running",
+                "succeeded",
+                "failed",
+                "refused",
+                "cancelled"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c05125d67bb6544ff1f00a50035bc22f534acefe1bcd3931b5b064d73a502356"
+}

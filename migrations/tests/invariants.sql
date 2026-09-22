@@ -1281,6 +1281,189 @@ SELECT pg_temp.check(
       WHERE collector_id = '00000000-0000-0000-0000-0000000000e5'),
     'deleting a collector takes its assignments with it');
 
+-- ================================================================
+-- A runbook version cannot change, and nobody approves their own run
+-- ================================================================
+--
+-- Migration 0026, M10. Every table before it records something that happened to an
+-- estate; these record something this product *did* to one. The three properties below
+-- are the ones the schema makes unrepresentable rather than merely checking, and each is
+-- the kind of rule an application enforces right up until somebody writes a row by
+-- another route.
+
+INSERT INTO app_user (id, org_id, email, display_name, password_hash) VALUES
+    ('00000000-0000-0000-0000-0000000000ba',
+     '00000000-0000-0000-0000-0000000000f0', 'starter@acme.example.com', 'Starter',
+     '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+    ('00000000-0000-0000-0000-0000000000bb',
+     '00000000-0000-0000-0000-0000000000f0', 'approver@acme.example.com', 'Approver',
+     '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+INSERT INTO runbook (id, tenant_id, name) VALUES
+    ('00000000-0000-0000-0000-0000000000bc',
+     '00000000-0000-0000-0000-00000000000a', 'restart-bgp');
+
+INSERT INTO runbook_version
+    (id, runbook_id, tenant_id, version, targets, steps, max_targets, concurrency, approvals)
+VALUES
+    ('00000000-0000-0000-0000-0000000000bd',
+     '00000000-0000-0000-0000-0000000000bc',
+     '00000000-0000-0000-0000-00000000000a',
+     1, '{"type":"all"}', '[]', 10, 2, 'one');
+
+-- 1. A version never changes.
+--
+-- Editing a runbook writes a new version; a run names the version it executed. Without
+-- this, "what did this actually do in March" is a claim resting on nobody having run an
+-- UPDATE, which is not a claim an audit accepts.
+SELECT pg_temp.must_fail($$
+    UPDATE runbook_version SET steps = '[{"evil": true}]'
+     WHERE id = '00000000-0000-0000-0000-0000000000bd'
+$$, '23001');
+
+-- And a *new* version is how an edit is expressed, which must still work.
+INSERT INTO runbook_version
+    (runbook_id, tenant_id, version, targets, steps, max_targets, concurrency, approvals)
+VALUES
+    ('00000000-0000-0000-0000-0000000000bc',
+     '00000000-0000-0000-0000-00000000000a',
+     2, '{"type":"all"}', '[]', 10, 2, 'two');
+SELECT pg_temp.check(
+    (SELECT count(*) = 2 FROM runbook_version
+      WHERE runbook_id = '00000000-0000-0000-0000-0000000000bc'),
+    'editing a runbook writes a new version rather than changing one');
+
+-- Two versions cannot share a number: a run says "version 4" and that has to resolve.
+SELECT pg_temp.must_fail($$
+    INSERT INTO runbook_version
+        (runbook_id, tenant_id, version, targets, steps, max_targets, concurrency, approvals)
+    VALUES
+        ('00000000-0000-0000-0000-0000000000bc',
+         '00000000-0000-0000-0000-00000000000a',
+         1, '{"type":"all"}', '[]', 10, 2, 'one')
+$$, '23505');
+
+-- The blast-radius bounds are the schema's, not only the application's.
+SELECT pg_temp.must_fail($$
+    INSERT INTO runbook_version
+        (runbook_id, tenant_id, version, targets, steps, max_targets, concurrency, approvals)
+    VALUES
+        ('00000000-0000-0000-0000-0000000000bc',
+         '00000000-0000-0000-0000-00000000000a',
+         3, '{"type":"all"}', '[]', 2, 40, 'one')
+$$, '23514');
+
+-- ---- a run ---------------------------------------------------------------------
+
+INSERT INTO runbook_run
+    (id, tenant_id, runbook_id, version_id, targets, targets_fingerprint, started_by)
+VALUES
+    ('00000000-0000-0000-0000-0000000000be',
+     '00000000-0000-0000-0000-00000000000a',
+     '00000000-0000-0000-0000-0000000000bc',
+     '00000000-0000-0000-0000-0000000000bd',
+     '[]', 'sha:abc', '00000000-0000-0000-0000-0000000000ba');
+
+-- A run defaults to a dry run. M10 §2.2: the default is the safe one rather than the
+-- convenient one, and that belongs in the column rather than only in an API handler.
+SELECT pg_temp.check(
+    (SELECT dry_run FROM runbook_run
+      WHERE id = '00000000-0000-0000-0000-0000000000be'),
+    'a run is a dry run unless somebody says otherwise');
+
+-- 2. Approving your own run is unrepresentable.
+--
+-- The whole of two-person integrity, and the rule an application enforces right up until
+-- somebody writes the row another way. `started_by` is carried on the approval and bound
+-- to the run by a composite key, so it cannot be anything other than the person who
+-- started it — and the CHECK then compares the two.
+SELECT pg_temp.must_fail($$
+    INSERT INTO runbook_approval (run_id, tenant_id, approved_by, started_by, targets_fingerprint)
+    VALUES ('00000000-0000-0000-0000-0000000000be',
+            '00000000-0000-0000-0000-00000000000a',
+            '00000000-0000-0000-0000-0000000000ba',
+            '00000000-0000-0000-0000-0000000000ba', 'sha:abc')
+$$, '23514');
+
+-- Nor by claiming somebody else started it: the composite key to
+-- `runbook_run (id, started_by)` refuses that instead.
+SELECT pg_temp.must_fail($$
+    INSERT INTO runbook_approval (run_id, tenant_id, approved_by, started_by, targets_fingerprint)
+    VALUES ('00000000-0000-0000-0000-0000000000be',
+            '00000000-0000-0000-0000-00000000000a',
+            '00000000-0000-0000-0000-0000000000ba',
+            '00000000-0000-0000-0000-0000000000bb', 'sha:abc')
+$$, '23503');
+
+-- Somebody else approving is exactly what should work.
+INSERT INTO runbook_approval (run_id, tenant_id, approved_by, started_by, targets_fingerprint)
+VALUES ('00000000-0000-0000-0000-0000000000be',
+        '00000000-0000-0000-0000-00000000000a',
+        '00000000-0000-0000-0000-0000000000bb',
+        '00000000-0000-0000-0000-0000000000ba', 'sha:abc');
+
+-- 3. One person cannot approve twice.
+--
+-- Two approvals from one person are one person agreeing twice, which is the exact thing
+-- two-person integrity exists to refuse.
+SELECT pg_temp.must_fail($$
+    INSERT INTO runbook_approval (run_id, tenant_id, approved_by, started_by, targets_fingerprint)
+    VALUES ('00000000-0000-0000-0000-0000000000be',
+            '00000000-0000-0000-0000-00000000000a',
+            '00000000-0000-0000-0000-0000000000bb',
+            '00000000-0000-0000-0000-0000000000ba', 'sha:def')
+$$, '23505');
+
+-- ---- a step transcript stays inside its tenant -----------------------------------
+
+-- Devices of this block's own, rather than the fixtures at the top: earlier sections of
+-- this file delete from `resource` to test cascades, so depending on what they leave
+-- behind would make this pass or fail based on what ran before it.
+INSERT INTO resource (id, tenant_id, kind, name) VALUES
+    ('00000000-0000-0000-0000-0000000000bf',
+     '00000000-0000-0000-0000-00000000000a', 'device', 'runbook-target-a'),
+    ('00000000-0000-0000-0000-0000000000c0',
+     '00000000-0000-0000-0000-00000000000b', 'device', 'runbook-target-b');
+
+-- A run on one tenant recording a step against another tenant's device would be this
+-- product writing one customer's transcript into another's audit trail.
+SELECT pg_temp.must_fail($$
+    INSERT INTO runbook_run_step
+        (run_id, tenant_id, resource_id, step_index, name, rendered, destructive)
+    VALUES ('00000000-0000-0000-0000-0000000000be',
+            '00000000-0000-0000-0000-00000000000a',
+            '00000000-0000-0000-0000-0000000000c0', 0, 'check', 'show version', false)
+$$, '23503');
+
+-- Its own tenant's device is fine.
+INSERT INTO runbook_run_step
+    (run_id, tenant_id, resource_id, step_index, name, rendered, destructive)
+VALUES ('00000000-0000-0000-0000-0000000000be',
+        '00000000-0000-0000-0000-00000000000a',
+        '00000000-0000-0000-0000-0000000000bf', 0, 'check', 'show version', false);
+SELECT pg_temp.check(
+    (SELECT count(*) = 1 FROM runbook_run_step),
+    'a run records a transcript per device it acted on');
+
+-- Deleting a run takes its approvals and its transcript with it — they describe it and
+-- mean nothing without it.
+DELETE FROM runbook_run WHERE id = '00000000-0000-0000-0000-0000000000be';
+SELECT pg_temp.check(
+    (SELECT count(*) = 0 FROM runbook_approval) AND (SELECT count(*) = 0 FROM runbook_run_step),
+    'deleting a run takes its approvals and its transcript');
+
+-- ---- the runner's lease ------------------------------------------------------------
+
+-- M10 §2.9 adds a fourth job to the lease table from 0023, and the name check has to have
+-- grown with it — otherwise the runner would claim a lease nobody else contends for,
+-- which looks exactly like working code.
+SELECT pg_temp.check(
+    (SELECT count(*) = 1 FROM lease WHERE name = 'run'),
+    'the runner has a lease row, pre-seeded and expired');
+SELECT pg_temp.must_fail($$
+    INSERT INTO lease (name, holder, expires_at) VALUES ('runn', 'x', now())
+$$, '23514');
+
 -- Every foreign key has an index on its referencing side.
 --
 -- PostgreSQL indexes the referenced side automatically and the referencing side never,

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT coalesce(max(version), 0) + 1 AS \"next!\"\n              FROM runbook_version\n             WHERE runbook_id = $1 AND tenant_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "next!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8d2cffa4efc4dff34520c804bff8fbf00607f2452e57bd4038b9c09407be0c47"
+}

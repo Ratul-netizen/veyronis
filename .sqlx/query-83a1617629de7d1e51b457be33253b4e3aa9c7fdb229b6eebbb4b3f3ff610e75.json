@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT v.runbook_id, r.name, v.description, v.targets, v.steps,\n                   v.max_targets, v.concurrency, v.approvals::text AS \"approvals!\",\n                   v.maintenance_only\n              FROM runbook_version v\n              JOIN runbook r ON r.id = v.runbook_id AND r.tenant_id = v.tenant_id\n             WHERE v.id = $1 AND v.tenant_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "runbook_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "targets",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "steps",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "max_targets",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "concurrency",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "approvals!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "maintenance_only",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "83a1617629de7d1e51b457be33253b4e3aa9c7fdb229b6eebbb4b3f3ff610e75"
+}

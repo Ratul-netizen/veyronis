@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO runbook_run\n                (tenant_id, runbook_id, version_id, state, dry_run, targets,\n                 targets_fingerprint, reason, started_by, break_glass)\n            VALUES ($1, $2, $3, $4::text::runbook_run_state, $5, $6, $7, $8, $9, $10)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Jsonb",
+        "Text",
+        "Text",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a44767dd0d5bb0771c8e028747bfbcca5c07b55d6bee1a9f1f9f5c921a5989bc"
+}
