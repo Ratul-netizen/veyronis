@@ -95,15 +95,64 @@ where
     let window = Arc::new(Mutex::new(Window::default()));
     let mut since_reload = RELOAD;
 
+    // M12 §2.1. Exactly one evaluator at a time: two against one database is two pages
+    // for one alert, and an operator cannot tell that from a duplicate-delivery bug.
+    let me = uops_store_pg::identity();
+    let mut holding = false;
+    // In `std::time` because that is what the tick is measured in; `RENEW_EVERY` is a
+    // `chrono` span because the lease's arithmetic happens in the database.
+    let renew_every = uops_store_pg::RENEW_EVERY
+        .to_std()
+        .unwrap_or(std::time::Duration::from_secs(10));
+    let mut since_renew = renew_every;
+
     tokio::pin!(shutdown);
 
     loop {
         tokio::select! {
             () = &mut shutdown => {
                 println!("alerts: stopping");
+                // A clean shutdown hands the lease over now rather than leaving the
+                // replacement to wait out a period nobody is using — the optimisation a
+                // rolling restart wants. A crash cannot do this, which is why the lease
+                // expires on its own.
+                if holding
+                    && let Err(e) = store.release(uops_store_pg::Job::Alert, &me).await
+                {
+                    eprintln!("alerts: the lease could not be released: {e}");
+                }
                 return;
             }
             _ = ticker.tick() => {}
+        }
+
+        // Renewed on a schedule rather than every tick: three renewals per period, so two
+        // consecutive failures do not lose it.
+        since_renew += TICK;
+        if since_renew >= renew_every {
+            since_renew = std::time::Duration::ZERO;
+            match store.claim(uops_store_pg::Job::Alert, &me).await {
+                Ok(claim) => {
+                    let now_holding = claim.is_held();
+                    if now_holding && !holding {
+                        println!("alerts: holding the evaluation lease as {me}");
+                    } else if !now_holding && holding {
+                        // Another process took it. Stop immediately rather than finishing
+                        // the cycle politely — somebody else is already doing that cycle.
+                        println!("alerts: the evaluation lease was taken; standing by");
+                    }
+                    holding = now_holding;
+                }
+                // A database failure is **not** a lost lease. The claim runs out on its
+                // own if this really cannot reach PostgreSQL, and stopping every
+                // scheduler on a blip would be a worse outage than the one the lease
+                // prevents.
+                Err(e) => eprintln!("alerts: the lease could not be renewed: {e}"),
+            }
+        }
+
+        if !holding {
+            continue;
         }
 
         since_reload += TICK;

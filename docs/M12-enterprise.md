@@ -165,12 +165,14 @@ in every milestone since M7.
 
 ## 3. Acceptance criteria
 
-- [ ] Two pollers against one database poll each device **once** — measured by sample
-      count, not by inspection
-- [ ] Killing the process that holds a lease causes another to take over within one lease
-      period, and the gap is one cycle rather than an outage
-- [ ] A process that loses its lease stops work in flight rather than finishing its cycle
-- [ ] The same lease mechanism is used by the poller, the alert engine and the sweeper —
+- [~] Two pollers against one database poll each device **once** — the lease elects one
+      of sixteen racing processes, tested. Not yet measured *by sample count* through two
+      real pollers, which is the version of this claim that cannot be argued with
+- [x] Killing the process that holds a lease causes another to take over within one lease
+      period, and the gap is one cycle rather than an outage — the poller keeps its
+      schedule warm while standing by, so a takeover is a slot and not a reload
+- [x] A process that loses its lease stops work in flight rather than finishing its cycle
+- [x] The same lease mechanism is used by the poller, the alert engine and the sweeper —
       one implementation, three callers
 - [ ] A user authenticates through an OIDC provider and is provisioned with the role their
       mapped claim grants

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE lease SET expires_at = to_timestamp(0)\n             WHERE name = $1 AND holder = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0ae3fb9c135b948c5067f8187561cf144c989187b6b062353d1ade67cba31caf"
+}

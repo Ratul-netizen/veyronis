@@ -546,11 +546,48 @@ pub async fn serve(
     let mut due: Vec<JobKey> = Vec::new();
     let mut shutdown = std::pin::pin!(shutdown);
 
+    // M12 §2.1. Exactly one poller at a time: two against one database is double the SNMP
+    // load on a customer's fleet and two samples per interval in `metrics`, which makes
+    // every rate computed from them wrong rather than merely doubled.
+    let me = uops_store_pg::identity();
+    let mut holding = false;
+    let mut lease = tokio::time::interval(
+        uops_store_pg::RENEW_EVERY
+            .to_std()
+            .unwrap_or(std::time::Duration::from_secs(10)),
+    );
+    lease.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             () = &mut shutdown => {
                 println!("uops-poller: stopping");
+                // Hand over now rather than leaving the replacement to wait out a period
+                // nobody is using. A crash cannot do this, which is why it also expires.
+                if holding
+                    && let Err(e) = runner.store.release(uops_store_pg::Job::Poll, &me).await
+                {
+                    eprintln!("uops-poller: the lease could not be released: {e}");
+                }
                 return Ok(());
+            }
+            _ = lease.tick() => {
+                match runner.store.claim(uops_store_pg::Job::Poll, &me).await {
+                    Ok(claim) => {
+                        let now_holding = claim.is_held();
+                        if now_holding != holding {
+                            println!(
+                                "uops-poller: {} the poll lease as {me}",
+                                if now_holding { "holding" } else { "stood down from" }
+                            );
+                        }
+                        holding = now_holding;
+                    }
+                    // Not a lost lease. The claim lapses on its own if this really cannot
+                    // reach PostgreSQL, and stopping the fleet on a blip would be a worse
+                    // outage than the double-poll the lease prevents.
+                    Err(e) => eprintln!("uops-poller: the lease could not be renewed: {e}"),
+                }
             }
             _ = reload_at.tick() => {
                 if let Err(e) = reload(&runner, &mut schedule, config.device_limit).await {
@@ -560,7 +597,12 @@ pub async fn serve(
                 }
             }
             _ = tick.tick() => {
-                note(&tick_once(&runner, &executor, &mut schedule, &mut due).await);
+                // A process that does not hold the lease keeps its schedule warm and
+                // sends nothing. Standing by with a loaded fleet is what makes a takeover
+                // a one-slot gap rather than a reload.
+                if holding {
+                    note(&tick_once(&runner, &executor, &mut schedule, &mut due).await);
+                }
             }
         }
     }

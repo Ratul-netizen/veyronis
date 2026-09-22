@@ -209,7 +209,44 @@ where
 {
     tokio::pin!(shutdown);
 
+    // M12 §2.1. Exactly one sweeper: two would send the same discovery probes twice
+    // across a customer's network, which is the one workload here that is visible to
+    // somebody else's intrusion detection.
+    let me = uops_store_pg::identity();
+    let mut holding = false;
+
     loop {
+        // The turn is longer than a lease period, so the claim is renewed once per turn
+        // rather than on a timer of its own — there is no work in between to interrupt.
+        match store.claim(uops_store_pg::Job::Sweep, &me).await {
+            Ok(claim) => {
+                let now_holding = claim.is_held();
+                if now_holding != holding {
+                    println!(
+                        "discovery: {} the sweep lease as {me}",
+                        if now_holding {
+                            "holding"
+                        } else {
+                            "stood down from"
+                        }
+                    );
+                }
+                holding = now_holding;
+            }
+            // Not a lost lease — see the poller. A blip must not stop discovery.
+            Err(e) => eprintln!("discovery: the lease could not be renewed: {e}"),
+        }
+
+        if !holding {
+            tokio::select! {
+                () = tokio::time::sleep(TURN) => continue,
+                () = &mut shutdown => {
+                    println!("discovery: stopping");
+                    return;
+                }
+            }
+        }
+
         // Asked every turn rather than once at start-up, so a tenant created since the
         // process booted is swept without waiting for a restart.
         let tenants = store.all_tenant_ids().await.unwrap_or_default();
@@ -225,6 +262,9 @@ where
             () = tokio::time::sleep(TURN) => {}
             () = &mut shutdown => {
                 println!("discovery: stopping");
+                if let Err(e) = store.release(uops_store_pg::Job::Sweep, &me).await {
+                    eprintln!("discovery: the lease could not be released: {e}");
+                }
                 return;
             }
         }
