@@ -22,6 +22,7 @@ pub mod resources;
 pub mod searches;
 pub mod servicemap;
 pub mod sites;
+pub mod sso;
 pub mod topology;
 
 use axum::routing::{any, delete, get, patch, post, put};
@@ -44,6 +45,31 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/auth/login", post(auth::login))
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
+        // Single sign-on -- M12 §2.2. The first three are unauthenticated because they
+        // are reached by somebody who has not signed in; routes/sso.rs has the table of
+        // what that exposes and what closes each hole. The rest need the admin role on
+        // every tenant in the organization, which `OrgAdmin` explains.
+        .route("/api/v1/auth/methods", get(sso::methods))
+        .route("/api/v1/auth/oidc/{provider}/start", get(sso::start))
+        .route("/api/v1/auth/oidc/callback", get(sso::callback))
+        .route(
+            "/api/v1/sso/providers",
+            get(sso::list_providers).post(sso::create_provider),
+        )
+        .route(
+            "/api/v1/sso/providers/{id}/enabled",
+            patch(sso::set_provider_enabled),
+        )
+        .route(
+            "/api/v1/sso/providers/{id}/grants",
+            get(sso::list_grants).post(sso::grant).delete(sso::revoke_grant),
+        )
+        // Turning off password login for everybody but the break-glass account. A PUT
+        // rather than a POST because it is a setting with two values, not an event.
+        .route("/api/v1/sso/require", put(sso::set_required))
+        // The organization-level half of the audit log: who signed in through a
+        // provider, who was refused, and every use of the break-glass account.
+        .route("/api/v1/sso/audit", get(sso::audit))
         .route(
             "/api/v1/resources",
             get(resources::list).post(resources::create),

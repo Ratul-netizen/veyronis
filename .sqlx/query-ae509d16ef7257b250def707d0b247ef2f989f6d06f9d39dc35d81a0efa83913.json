@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE app_user\n                       SET email = $2, display_name = $3, idp_last_login_at = now()\n                     WHERE id = $1\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ae509d16ef7257b250def707d0b247ef2f989f6d06f9d39dc35d81a0efa83913"
+}

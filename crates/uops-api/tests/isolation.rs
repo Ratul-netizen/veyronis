@@ -102,6 +102,71 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Unscoped,
         body: None,
     },
+    // Single sign-on — M12 §2.2. Every one of these is `Unscoped`, and the reason is
+    // worth stating because it is not "we could not think of a tenant":
+    //
+    // The first three are reached *before* anybody has a session, so there is no tenant
+    // to be wrong about. The configuration routes are organization-level and take
+    // `OrgAdmin`, which requires the admin role on every tenant in the organization —
+    // so a caller who reaches them can already see everything they could name. Their
+    // isolation property is a different one, tested separately below: an admin of one
+    // organization must not be able to read or change another's provider.
+    RouteCase {
+        path: "/api/v1/auth/methods",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/auth/oidc/{provider}/start",
+        probe: Some("/api/v1/auth/oidc/00000000-0000-0000-0000-0000000000ff/start"),
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/auth/oidc/callback",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/sso/providers",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/sso/providers/{id}/enabled",
+        probe: Some("/api/v1/sso/providers/00000000-0000-0000-0000-0000000000ff/enabled"),
+        method: "PATCH",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"enabled":false}"#),
+    },
+    RouteCase {
+        path: "/api/v1/sso/providers/{id}/grants",
+        probe: Some("/api/v1/sso/providers/00000000-0000-0000-0000-0000000000ff/grants"),
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/sso/require",
+        probe: None,
+        method: "PUT",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"required":false}"#),
+    },
+    RouteCase {
+        path: "/api/v1/sso/audit",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/resources",
         probe: None,

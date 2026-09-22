@@ -123,7 +123,7 @@ async fn an_empty_database_gets_an_admin_who_can_immediately_log_in() {
         .expect("the bootstrapped user must be findable by email");
     assert_eq!(creds.user_id, first.user);
     assert!(
-        password::verify(&plaintext, &creds.password_hash),
+        password::verify(&plaintext, creds.password_hash.as_ref().expect("the first-run account is a password account")),
         "the generated password must verify against the stored hash"
     );
 
@@ -172,7 +172,7 @@ async fn a_second_run_declines_and_changes_nothing() {
         .unwrap();
     assert_eq!(creds.user_id, first.user, "the admin must not be replaced");
     assert!(
-        !password::verify(&second_plaintext, &creds.password_hash),
+        !password::verify(&second_plaintext, creds.password_hash.as_ref().expect("the first-run account is a password account")),
         "the declined run must not have overwritten the password"
     );
 

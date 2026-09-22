@@ -809,6 +809,30 @@ td {
   color: var(--text-dim);
 }
 
+/* `.muted` says the same thing as `.dim` and is what the map page reaches for. Aliased
+   rather than renamed: both spellings are in use across the product, and a rename is a
+   sweep that touches files this change has no other business in. */
+.muted {
+  color: var(--text-dim);
+}
+
+/* One line of failure, inline — "sites could not be loaded". Not `.problem`, which is a
+   bordered block for a form's rejection; this sits in the flow of a page. */
+.error {
+  color: var(--danger);
+}
+
+/* A statement about what is on screen, not a failure: "this window predates the
+   retention period", "the map is showing the first 500 edges". It reads as information
+   rather than alarm, which is why it is dim text with a rule rather than a red box. */
+.notice {
+  margin: 8px 0;
+  padding: 6px 0 6px 10px;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--t-label);
+}
+
 /* --- login -------------------------------------------------------------- */
 
 .login {
@@ -837,6 +861,34 @@ td {
 
 .login input {
   width: 100%;
+}
+
+/* The identity-provider buttons, above the password form.
+ *
+ * Anchors rather than buttons — the flow is a redirect to the provider and back, so the
+ * browser has to navigate. `.primary` is shared with the submit button below them, and
+ * an anchor does not inherit a button's box, so the display and alignment are restated
+ * here rather than the class being forked. */
+.login .sso {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.login .sso a.primary {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+}
+
+/* The divider between the two ways in. A line through the middle would need a
+ * pseudo-element either side; centred small text says the same thing. */
+.login .sso .or {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 12px;
 }
 
 /* --- explorer and detail ------------------------------------------------ */
@@ -2001,6 +2053,15 @@ button.following {
 .palette-results li.on {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+/* The command itself, against `.palette-hint`'s shortcut on the right. It takes the
+   space the hint does not, so a long label truncates rather than pushing the shortcut
+   off the row. */
+.palette-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .palette-hint {

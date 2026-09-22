@@ -52,6 +52,7 @@
 
 pub mod aead;
 pub mod audit;
+pub mod envelope;
 pub mod error;
 pub mod generate;
 pub mod kek;
@@ -64,6 +65,7 @@ pub mod vault;
 
 pub use aead::{AeadProvider, KEY_LEN, Key, NONCE_LEN, Nonce, default_provider};
 pub use audit::{AccessContext, AccessLog, AccessOutcome, AccessRecord, MemoryAccessLog};
+pub use envelope::{Envelope, SealedValue};
 pub use error::{Error, Result};
 pub use generate::password as generate_password;
 pub use kek::KekRing;

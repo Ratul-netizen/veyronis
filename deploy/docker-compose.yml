@@ -186,6 +186,15 @@ services:
       # signed in, for a reason nothing logs. Anything serving this over a network puts
       # TLS in front and removes this line.
       UOPS_INSECURE_COOKIES: "1"
+      # Where a *browser* reaches this deployment, which is not the same as what the
+      # server binds to. Only single sign-on uses it, and it uses it absolutely: the
+      # redirect URI sent to the identity provider is built from this, and the provider
+      # compares it against the one registered with it character for character.
+      #
+      # Deliberately not derived from the request's Host header -- whoever controls that
+      # header would otherwise choose where a sign-in's authorization code is sent. Any
+      # deployment that is not this localhost one has to set it. See docs/sso.md.
+      UOPS_PUBLIC_URL: http://localhost:8080
       UOPS_ORG_NAME: "Example organization"
       UOPS_TENANT_NAME: "Example tenant"
       UOPS_ADMIN_EMAIL: admin@example.invalid

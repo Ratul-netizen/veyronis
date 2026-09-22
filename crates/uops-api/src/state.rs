@@ -44,6 +44,19 @@ pub struct AppState {
     ///
     /// The route says so plainly rather than 500-ing: see `routes::credentials`.
     pub vault: Option<Arc<Vault>>,
+    /// What a sign-in through an identity provider needs while the server runs — see
+    /// [`crate::sso`]. Always present, unlike the vault: a *public* client works without
+    /// any key material, and a deployment with no identity provider configured simply
+    /// never reaches it.
+    pub sso: Arc<crate::sso::Sso>,
+    /// The redirect URI registered at the identity provider.
+    ///
+    /// Configured rather than derived from the request, and that is the decision worth
+    /// recording: deriving it from `Host` would let whoever controls that header point a
+    /// sign-in's authorization code at a host of their choosing, and the provider —
+    /// which is comparing against its own registered list — would be the only thing
+    /// standing in the way. A constant string cannot be influenced.
+    pub oidc_redirect_uri: String,
 }
 
 impl std::fmt::Debug for AppState {
@@ -54,6 +67,7 @@ impl std::fmt::Debug for AppState {
         f.debug_struct("AppState")
             .field("secure_cookies", &self.secure_cookies)
             .field("vault", &self.vault.is_some())
+            .field("sso", &self.sso)
             .finish_non_exhaustive()
     }
 }
@@ -61,13 +75,38 @@ impl std::fmt::Debug for AppState {
 impl AppState {
     /// Production defaults, with no vault. See [`AppState::with_vault`].
     #[must_use]
-    pub const fn new(store: PgStore, telemetry: ChStore) -> Self {
+    pub fn new(store: PgStore, telemetry: ChStore) -> Self {
         Self {
             store,
             telemetry,
             secure_cookies: Secure::Yes,
             vault: None,
+            sso: Arc::new(crate::sso::Sso::new()),
+            // Overwritten by `with_public_url`. The default is what a single-host
+            // deployment on localhost needs, and a provider's registered list is what
+            // refuses it anywhere else.
+            oidc_redirect_uri: "http://localhost:8080/api/v1/auth/oidc/callback".to_owned(),
         }
+    }
+
+    /// Where this deployment is reachable from a browser.
+    ///
+    /// The redirect URI is built from it once, at boot, rather than per request. See
+    /// [`AppState::oidc_redirect_uri`].
+    #[must_use]
+    pub fn with_public_url(mut self, base: &str) -> Self {
+        self.oidc_redirect_uri = format!(
+            "{}/api/v1/auth/oidc/callback",
+            base.trim_end_matches('/')
+        );
+        self
+    }
+
+    /// Give this API what it needs to complete a sign-in.
+    #[must_use]
+    pub fn with_sso(mut self, sso: crate::sso::Sso) -> Self {
+        self.sso = Arc::new(sso);
+        self
     }
 
     /// Give this API somewhere to seal device credentials.

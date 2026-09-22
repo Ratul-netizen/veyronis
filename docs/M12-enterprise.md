@@ -85,6 +85,10 @@ because the whole point is that somebody else is already doing that cycle.
 
 ### 2.2 SSO is OIDC, and local passwords stay.
 
+*Built. [`docs/sso.md`](./sso.md) is the operator's side of it — registering the
+application at Entra ID, Okta or Keycloak, writing the group mapping, and what each
+failure in the server log means.*
+
 **OIDC rather than SAML first.** Every identity provider an enterprise is likely to have —
 Entra ID, Okta, Google Workspace, Keycloak — speaks it; the libraries are smaller; and the
 protocol is JSON and HTTP rather than signed XML, which is a meaningful difference in
@@ -93,8 +97,34 @@ the second one to add, for the organisations that only have that.
 
 **Local passwords are not removed.** An air-gapped deployment may have no identity
 provider at all, and an installation whose IdP is unreachable must still be enterable by
-the person fixing it. The rule instead is that a tenant may *require* SSO, which disables
-password login for everyone but a named break-glass account whose use is an audit event.
+the person fixing it. The rule instead is that an *organization* may **require** SSO,
+which disables password login for everyone but a named break-glass account whose use is
+an audit event.
+
+> **Amended while building it.** This paragraph said *a tenant may require SSO*, and
+> writing the schema is what showed that sentence to be unimplementable. Authentication
+> in this product happens before any tenant is known: a user types an address,
+> `app_user` is keyed on `(org_id, email)`, and `user_tenant_role` — where tenants first
+> appear — is consulted *after* the password has already been checked. A per-tenant rule
+> would have to be enforced at a point where the answer it needs does not exist yet.
+>
+> `require_sso` therefore sits on `organization`, which is also the right boundary on its
+> own terms: requiring SSO is a statement about an identity provider, an identity
+> provider belongs to a company, and a company is an organization here. Migration 0024
+> carries the same note, because that is where somebody will next ask the question.
+
+**One break-glass account per organization, and it must have a password.** Both are
+schema constraints rather than conventions. The account's whole value is that its use is
+exceptional and noticed; a second one halves that and a fifth ends it. And one without a
+password would be useless on the only day it exists for — the day the identity provider
+is unreachable.
+
+**Configuring any of this requires the admin role on *every* tenant in the
+organization**, not on any one of them. The weaker rule is a privilege escalation with a
+specific shape: an MSP gives a customer's own staff the admin role on that customer's
+tenant, which is the ordinary arrangement, and one of them then configures the MSP's
+identity provider and maps a group they belong to onto every other customer. In a
+single-company deployment the stronger rule is exactly "is an admin" and costs nothing.
 
 **Group-to-role mapping is configuration, not inference.** The product does not guess that
 a group called `network-admins` means `Admin`. An operator maps claims to roles
@@ -174,10 +204,12 @@ in every milestone since M7.
 - [x] A process that loses its lease stops work in flight rather than finishing its cycle
 - [x] The same lease mechanism is used by the poller, the alert engine and the sweeper —
       one implementation, three callers
-- [ ] A user authenticates through an OIDC provider and is provisioned with the role their
-      mapped claim grants
-- [ ] A tenant that requires SSO refuses password login for everyone except a break-glass
-      account, and that account's use is an audit event
+- [x] A user authenticates through an OIDC provider and is provisioned with the role their
+      mapped claim grants — against a real ES256 signature and a real JWKS, not a stub,
+      and with seven correctly-signed tokens that must still be refused
+- [x] An *organization* that requires SSO refuses password login for everyone except a
+      break-glass account, and that account's use is an audit event — see the amendment
+      in §2.2 for why "organization" rather than "tenant"
 - [ ] A collector enrols with a token, appears in an inventory, and is marked quiet when it
       stops reporting
 - [ ] No inbound connection to a collector is required for any of it
@@ -186,8 +218,10 @@ in every milestone since M7.
 - [ ] An SBOM and a licence report are produced by CI for a release
 - [ ] A security overview exists, is dated, names the release it describes, and claims no
       certification
-- [ ] Cross-tenant isolation holds for every new surface, by the same adversarial test
-      every milestone since M7 has used
+- [~] Cross-tenant isolation holds for every new surface, by the same adversarial test
+      every milestone since M7 has used — the eight SSO routes are in `isolation.rs`, and
+      the property they actually have is *organization* isolation, tested separately in
+      `crates/uops-api/tests/sso.rs`. Reopens with each surface this milestone adds
 
 ---
 

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT o.require_sso, u.break_glass\n              FROM app_user u JOIN organization o ON o.id = u.org_id\n             WHERE u.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "require_sso",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "break_glass",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "385ce3b973f8a97d63b5c0b4f6771d7be3ea64cc0acac9d823e93a1b42fc1d14"
+}

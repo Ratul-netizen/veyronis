@@ -18,6 +18,7 @@ uops-core.workspace = true
 uops-notify.workspace = true
 uops-identity.workspace = true
 uops-query.workspace = true
+uops-oidc.workspace = true
 uops-secrets.workspace = true
 uops-store-ch.workspace = true
 uops-store-pg.workspace = true
@@ -42,6 +43,12 @@ sqlx.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tower = { workspace = true, features = ["util"] }
 uuid.workspace = true
+serde_json.workspace = true
+# The SSO integration test signs a real ID token rather than stubbing verification: a
+# stub would exercise the plumbing and skip the part that decides whether a forged token
+# is accepted, which is the part worth testing.
+p256 = { workspace = true, features = ["ecdsa"] }
+uops-oidc.workspace = true
 
 [lints]
 workspace = true

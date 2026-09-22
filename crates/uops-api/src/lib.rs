@@ -19,12 +19,14 @@ pub mod csrf;
 pub mod error;
 pub mod extract;
 pub mod routes;
+pub mod sso;
 pub mod state;
 
 pub use audit::Audit;
 pub use cookie::{CSRF_COOKIE, SESSION_COOKIE, Secure};
 pub use csrf::{CSRF_HEADER, CsrfChecked};
 pub use error::{ApiError, ApiResult};
-pub use extract::{Authenticated, Caller, TENANT_HEADER};
+pub use extract::{Authenticated, Caller, OrgAdmin, TENANT_HEADER};
 pub use routes::router;
+pub use sso::Sso;
 pub use state::{AppState, Vault};

@@ -1,0 +1,47 @@
+[package]
+name = "uops-oidc"
+description = "OpenID Connect: ID token verification, the authorization-code flow, and claim-to-role mapping."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+uops-core.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+getrandom.workspace = true
+sha2.workspace = true
+
+# RS256 and ES256. Between them these two cover every identity provider an enterprise
+# is likely to have: Entra ID and Okta sign RS256, Google offers both.
+#
+# Verification only — this crate holds no private key and performs no decryption, which
+# is what makes RUSTSEC-2023-0071 inapplicable here. See deny.toml for the whole
+# argument; it is recorded there because that is where a reader will look for it.
+rsa = { workspace = true }
+p256 = { workspace = true }
+
+# The one HTTP client in this workspace with TLS switched on, and `fetch.rs` says why:
+# an identity provider is on the internet rather than behind the reverse proxy every
+# other client here assumes. `native-tls` rather than rustls for the trust store — it is
+# the operating system's, which is the only way a customer's internal Keycloak signed by
+# their own certificate authority works without shipping them a bundle to edit. It also
+# keeps the licence allow-list intact: schannel, security-framework and openssl-sys are
+# all already permitted, where ring and aws-lc-rs are not.
+#
+# `native-tls-no-default` rather than `native-tls`: the latter also switches on ureq's
+# bundled Mozilla root list, which is both the opposite of using the machine's store and
+# a licence (CDLA-Permissive-2.0) outside the allow-list. cargo-deny caught it.
+ureq = { workspace = true, features = ["native-tls-no-default"] }
+
+[dev-dependencies]
+p256 = { workspace = true, features = ["ecdsa"] }
+
+[lints]
+workspace = true

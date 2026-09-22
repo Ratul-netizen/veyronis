@@ -88,13 +88,19 @@ async fn verify_credentials(
     state: &AppState,
     email: &str,
     supplied: &Secret<String>,
-) -> ApiResult<uops_core::ActorId> {
+) -> ApiResult<Verified> {
     let found = state.store.user_credentials_by_email(email).await?;
 
     // The hash to verify against: the user's, or a stand-in. Both cost the same.
+    //
+    // An account provisioned through SSO has no password at all — migration 0024 — and
+    // lands on the stand-in too. That is deliberate: a password-less account and an
+    // absent one must be indistinguishable, or the login form becomes a way to ask which
+    // of a company's addresses use SSO.
     let hash = found
         .as_ref()
-        .map_or_else(|| absent_user_hash().clone(), |c| c.password_hash.clone());
+        .and_then(|c| c.password_hash.clone())
+        .unwrap_or_else(|| absent_user_hash().clone());
 
     let correct = password::verify(supplied, &hash);
 
@@ -108,9 +114,22 @@ async fn verify_credentials(
         return Err(ApiError::Unauthenticated);
     }
 
+    // M12 §2.2. An organization may require SSO, which switches off password login for
+    // everyone except one named break-glass account.
+    //
+    // Checked *after* the password, not before, and that ordering is the point: refusing
+    // early would answer in a millisecond where a wrong password answers in twenty, and
+    // the gap would say "this address exists and its organization uses SSO" to anybody
+    // who can time a request.
+    let policy = state.store.password_policy(credentials.user_id).await?;
+    if !policy.allows_password() {
+        return Err(ApiError::Unauthenticated);
+    }
+
     // The one moment the plaintext is in hand, so the one moment a hash written under
     // weaker parameters can be upgraded without asking the user for anything.
-    if password::needs_rehash(&credentials.password_hash)
+    if let Some(stored) = credentials.password_hash.as_ref()
+        && password::needs_rehash(stored)
         && let Ok(stronger) = password::hash(supplied)
     {
         state
@@ -119,7 +138,19 @@ async fn verify_credentials(
             .await?;
     }
 
-    Ok(credentials.user_id)
+    Ok(Verified {
+        user_id: credentials.user_id,
+        break_glass: policy.is_break_glass_use(),
+    })
+}
+
+/// A login that passed every check, and whether it was the exceptional one.
+#[derive(Clone, Copy, Debug)]
+struct Verified {
+    user_id: uops_core::ActorId,
+    /// The organization requires SSO and this is the account that may still use a
+    /// password. M12 §2.2: its use is an audit event.
+    break_glass: bool,
 }
 
 /// `POST /api/v1/auth/login`
@@ -129,7 +160,33 @@ pub async fn login(
     Json(body): Json<LoginRequest>,
 ) -> ApiResult<Response> {
     let supplied = Secret::new(body.password);
-    let user_id = verify_credentials(&state, &body.email, &supplied).await?;
+    let verified = verify_credentials(&state, &body.email, &supplied).await?;
+    let user_id = verified.user_id;
+
+    if verified.break_glass {
+        // M12 §2.2's acceptance criterion, and the reason the break-glass account exists
+        // at all: an organization that requires SSO has exactly one way in that does not
+        // go through its identity provider, and every use of it is on the record.
+        //
+        // Recorded before the session is issued rather than after. A failure to write
+        // this must not be a break-glass login that happened and left no trace, which is
+        // the one audit entry in this product worth failing a request over.
+        if let Some(profile) = state.store.user_profile(user_id).await? {
+            state
+                .store
+                .record_org_audit(
+                    profile.org_id,
+                    &format!("user:{user_id}"),
+                    "auth.break_glass",
+                    &profile.email,
+                    Some(serde_json::json!({
+                        "reason": "this organization requires SSO; a password was accepted                                    for the named break-glass account",
+                    })),
+                    None,
+                )
+                .await?;
+        }
+    }
 
     let user_agent = headers
         .get(header::USER_AGENT)

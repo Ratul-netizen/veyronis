@@ -126,6 +126,24 @@ jobs:
           fi
           echo "ok"
 
+      # The whole of the RUSTSEC-2023-0071 ignore in deny.toml rests on one claim: this
+      # product never performs an RSA private-key operation. That claim is true today and
+      # is one `use` away from being false, so it is checked rather than trusted.
+      #
+      # The names below are the crate's private-key surface. A signing key, a decryption
+      # key, or key generation appearing anywhere means the advisory now applies and the
+      # ignore has to go.
+      - name: RSA is verification only
+        run: |
+          PRIVATE='RsaPrivateKey|SigningKey|DecryptingKey|to_pkcs8|from_pkcs8'
+          hits=$(grep -rnE "\b($PRIVATE)\b" --include='*.rs' crates/uops-oidc/ | grep -vE ':[0-9]+:[[:space:]]*//' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::an RSA private-key operation appeared; RUSTSEC-2023-0071 now applies and the deny.toml ignore must be removed"
+            exit 1
+          fi
+          echo "ok: public-key verification only"
+
   integration:
     name: schemas · repositories · api
     runs-on: ubuntu-latest
@@ -309,6 +327,51 @@ jobs:
       # because it reads as covered — and this repository has been caught by that
       # twice: the compile_fail doctests in uops-core, and a login-timing assertion
       # that measured everything except the thing it was protecting.
+
+      # M12 §2.2. The audience check is the one people leave out, and the one that
+      # matters most in a large organisation: every application behind the same Entra ID
+      # tenant is signed by the same key, so without it a token minted for the cafeteria
+      # booking system is a correctly signed, unexpired, right-issuer login here.
+      #
+      # The mutation leaves every other check in place, so the suite must fail on exactly
+      # the test that names this.
+      - name: The SSO tests fail when the audience check is removed
+        run: |
+          F=crates/uops-oidc/src/token.rs
+          cp "$F" "$RUNNER_TEMP/token.bak"
+          sed -i 's/^        if !values.iter().any(|a| a == expected.client_id) {$/        if false {/' "$F"
+          if git diff --quiet -- "$F"; then
+            echo "::error::the mutation did not apply; this guard is no longer guarding anything"
+            exit 1
+          fi
+          if cargo test -p uops-api --test sso > /dev/null 2>&1; then
+            cp "$RUNNER_TEMP/token.bak" "$F"
+            echo "::error::the SSO tests passed with the audience check removed"
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/token.bak" "$F"
+          echo "ok: a token minted for another application fails the suite"
+
+      # The other half of §2.2: an organization that requires SSO refuses password login
+      # for everyone except its named break-glass account. The mutation makes the policy
+      # permit everybody, which is exactly what the setting is for and looks like nothing
+      # in a diff of one line.
+      - name: The SSO tests fail when requiring SSO stops refusing passwords
+        run: |
+          F=crates/uops-api/src/routes/auth.rs
+          cp "$F" "$RUNNER_TEMP/auth.bak"
+          sed -i 's/^    if !policy.allows_password() {$/    if false {/' "$F"
+          if git diff --quiet -- "$F"; then
+            echo "::error::the mutation did not apply; this guard is no longer guarding anything"
+            exit 1
+          fi
+          if cargo test -p uops-api --test sso > /dev/null 2>&1; then
+            cp "$RUNNER_TEMP/auth.bak" "$F"
+            echo "::error::the SSO tests passed with password login allowed where SSO is required"
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/auth.bak" "$F"
+          echo "ok: a password accepted where SSO is required fails the suite"
 
       - name: The schema invariants fail when an invariant is removed
         run: |
@@ -953,6 +1016,17 @@ jobs:
       # Comment lines are dropped, as in the Rust hygiene guards: src/api.ts explains at
       # the top why there is no token in localStorage, and a guard that forbids saying so
       # gets the explanation deleted instead of the rule followed.
+      # The same mistake has been made three times -- `.num` in M7, `.actions` in M9,
+      # and four more found only when this check was written. A class the markup names
+      # and the stylesheet does not define fails nothing: no console warning, no build
+      # error, and an element that simply inherits the page and looks slightly wrong to
+      # somebody who is not looking for it.
+      #
+      # The checker is a script rather than an inline heredoc so that it can be run
+      # locally, by the same command, before a push.
+      - name: Every CSS class the markup names exists
+        run: node scripts/css-classes.mjs
+
       - name: No credential or tenant state in browser storage
         run: |
           hits=$(grep -rnE '\b(localStorage|sessionStorage|indexedDB)\b' src/ \

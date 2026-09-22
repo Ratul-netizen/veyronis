@@ -1045,6 +1045,147 @@ SELECT pg_temp.check(
       WHERE id = '00000000-0000-0000-0000-0000000000e2'),
     'deleting a discovery job keeps the runs that recorded what it scanned');
 
+-- ================================================================
+-- Single sign-on stays inside the organization that configured it
+-- ================================================================
+--
+-- Migration 0024. An identity provider is the one thing in this schema that can create
+-- users and grant roles without a human in the loop, so every boundary around it is a
+-- boundary around "who can silently be given access to a customer's network".
+
+-- A second organization, so every check below is "can org 1's provider reach org 2's
+-- tenant" rather than a statement about one company's own rows.
+INSERT INTO organization (id, name) VALUES
+    ('00000000-0000-0000-0000-0000000000d0', 'A different company');
+INSERT INTO tenant (id, org_id, name, slug) VALUES
+    ('00000000-0000-0000-0000-0000000000d1',
+     '00000000-0000-0000-0000-0000000000d0', 'Their customer', 'theirs');
+
+INSERT INTO identity_provider (id, org_id, name, issuer, client_id) VALUES
+    ('00000000-0000-0000-0000-0000000000c1',
+     '00000000-0000-0000-0000-0000000000f0', 'Acme SSO',
+     'https://idp.acme.example.com', 'uops');
+
+-- A grant naming another organization's tenant. This is the one that matters: the MSP
+-- configures its own provider, and without the composite key a mistyped tenant id would
+-- silently hand a group of its own staff a role on somebody else's customer.
+SELECT pg_temp.must_fail($$
+    INSERT INTO identity_provider_grant (provider_id, org_id, group_name, tenant_id, role)
+    VALUES ('00000000-0000-0000-0000-0000000000c1',
+            '00000000-0000-0000-0000-0000000000f0', 'noc',
+            '00000000-0000-0000-0000-0000000000d1', 'admin')
+$$, '23503');
+
+-- Claiming the other organization's id on the row does not help: then the provider half
+-- of the key stops matching instead. Both halves have to agree, which is the point of
+-- carrying `org_id` on the grant at all.
+SELECT pg_temp.must_fail($$
+    INSERT INTO identity_provider_grant (provider_id, org_id, group_name, tenant_id, role)
+    VALUES ('00000000-0000-0000-0000-0000000000c1',
+            '00000000-0000-0000-0000-0000000000d0', 'noc',
+            '00000000-0000-0000-0000-0000000000d1', 'admin')
+$$, '23503');
+
+-- Within one organization it is allowed, and to any of its tenants. Isolation must not
+-- become over-constraint: the MSP case is exactly one group granting a role on many.
+INSERT INTO identity_provider_grant (provider_id, org_id, group_name, tenant_id, role)
+VALUES ('00000000-0000-0000-0000-0000000000c1',
+        '00000000-0000-0000-0000-0000000000f0', 'noc',
+        '00000000-0000-0000-0000-00000000000a', 'admin'),
+       ('00000000-0000-0000-0000-0000000000c1',
+        '00000000-0000-0000-0000-0000000000f0', 'noc',
+        '00000000-0000-0000-0000-00000000000b', 'viewer');
+SELECT pg_temp.check(
+    (SELECT count(*) = 2 FROM identity_provider_grant
+      WHERE provider_id = '00000000-0000-0000-0000-0000000000c1'),
+    'one group may grant different roles on different tenants of the same organization');
+
+-- A user provisioned by another organization's provider. Same boundary, other direction:
+-- an account is created by a sign-in, so this is "can their provider mint an account
+-- inside our company".
+INSERT INTO app_user (id, org_id, email, display_name, idp_id, idp_subject)
+VALUES ('00000000-0000-0000-0000-0000000000c5',
+        '00000000-0000-0000-0000-0000000000f0', 'sso@acme.example.com', 'An SSO user',
+        '00000000-0000-0000-0000-0000000000c1', '00u-1');
+
+SELECT pg_temp.must_fail($$
+    INSERT INTO app_user (id, org_id, email, display_name, idp_id, idp_subject)
+    VALUES ('00000000-0000-0000-0000-0000000000c6',
+            '00000000-0000-0000-0000-0000000000d0', 'intruder@example.com', 'Elsewhere',
+            '00000000-0000-0000-0000-0000000000c1', '00u-2')
+$$, '23503');
+
+-- Two accounts with one subject at one provider. The second sign-in would provision a
+-- duplicate, and thereafter one account would hold the roles and the other receive the
+-- logins.
+SELECT pg_temp.must_fail($$
+    INSERT INTO app_user (id, org_id, email, display_name, idp_id, idp_subject)
+    VALUES ('00000000-0000-0000-0000-0000000000c7',
+            '00000000-0000-0000-0000-0000000000f0', 'other@acme.example.com', 'Twin',
+            '00000000-0000-0000-0000-0000000000c1', '00u-1')
+$$, '23505');
+
+-- An account that nothing can ever authenticate: no password, no provider. Not a locked
+-- account — `disabled_at` is how one of those is written — a row produced by a partial
+-- write.
+SELECT pg_temp.must_fail($$
+    INSERT INTO app_user (id, org_id, email, display_name)
+    VALUES ('00000000-0000-0000-0000-0000000000c8',
+            '00000000-0000-0000-0000-0000000000f0', 'nobody@acme.example.com', 'No way in')
+$$, '23514');
+
+-- A break-glass account with no password is useless on the only day it exists for.
+SELECT pg_temp.must_fail($$
+    INSERT INTO app_user (id, org_id, email, display_name, idp_id, idp_subject, break_glass)
+    VALUES ('00000000-0000-0000-0000-0000000000c9',
+            '00000000-0000-0000-0000-0000000000f0', 'glass@acme.example.com', 'Break glass',
+            '00000000-0000-0000-0000-0000000000c1', '00u-9', true)
+$$, '23514');
+
+-- One break-glass account per organization. Its value is that its use is exceptional and
+-- noticed, and a handful of them ends that.
+INSERT INTO app_user (id, org_id, email, display_name, password_hash, break_glass)
+VALUES ('00000000-0000-0000-0000-0000000000ca',
+        '00000000-0000-0000-0000-0000000000f0', 'glass@acme.example.com', 'Break glass',
+        '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        true);
+SELECT pg_temp.must_fail($$
+    INSERT INTO app_user (id, org_id, email, display_name, password_hash, break_glass)
+    VALUES ('00000000-0000-0000-0000-0000000000cb',
+            '00000000-0000-0000-0000-0000000000f0', 'glass2@acme.example.com', 'Second glass',
+            '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            true)
+$$, '23505');
+
+-- Half a sealed client secret. Six columns that mean one thing, and a row holding a
+-- ciphertext with no KEK id is a secret nobody can open — discovered at the next sign-in
+-- rather than at the write that caused it.
+SELECT pg_temp.must_fail($$
+    UPDATE identity_provider SET ciphertext = decode('0102', 'hex')
+     WHERE id = '00000000-0000-0000-0000-0000000000c1'
+$$, '23514');
+
+-- A provider that has provisioned users cannot simply be deleted. `enabled = false` is
+-- how one is retired; deleting it would leave accounts whose origin nothing records, at
+-- the moment somebody most wants to know where they came from.
+SELECT pg_temp.must_fail($$
+    DELETE FROM identity_provider WHERE id = '00000000-0000-0000-0000-0000000000c1'
+$$, '23503');
+
+-- Its grants, though, are configuration and go with it.
+DELETE FROM app_user WHERE idp_id = '00000000-0000-0000-0000-0000000000c1';
+DELETE FROM identity_provider WHERE id = '00000000-0000-0000-0000-0000000000c1';
+SELECT pg_temp.check(
+    (SELECT count(*) = 0 FROM identity_provider_grant),
+    'deleting an identity provider takes its group mapping with it');
+
+-- Migration 0023. A lease is installation-wide and belongs to no tenant, so there is
+-- nothing here about isolation. The name check is what keeps a typo from creating a
+-- lease nobody else contends for — which looks exactly like working code.
+SELECT pg_temp.must_fail($$
+    INSERT INTO lease (name, holder, expires_at) VALUES ('pol', 'x', now())
+$$, '23514');
+
 -- Every foreign key has an index on its referencing side.
 --
 -- PostgreSQL indexes the referenced side automatically and the referencing side never,

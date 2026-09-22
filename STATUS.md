@@ -5,11 +5,15 @@ Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
 
-> **M0–M8 are complete.** M8's last two criteria were measurements, and they are now
-> run and written up in
+> **M0–M9 are complete.** M8's last two criteria were measurements, run and written up in
 > [`bench/results/m8-spans-100000000rows.md`](./bench/results/m8-spans-100000000rows.md)
-> — the trace lookup's bloom filter and the service map's join, both at 100M spans.
-> **M9 Incident is next.** SPEC stops at M4
+> — the trace lookup's bloom filter and the service map's join, both at 100M spans. M9
+> closed with the Investigation Workspace and its own measurement:
+> [`bench/results/m9-timeline-100000000rows.md`](./bench/results/m9-timeline-100000000rows.md),
+> **77× fewer rows** than a time-first sort key would read.
+> **M12 Enterprise is in progress** — leases (§2.1) and single sign-on (§2.2) are done;
+> collector enrolment, the restore drill and the buyer-facing evidence are not.
+> SPEC stops at M4
 > deliberately, so each milestone past it has its own document with its decisions closed
 > before anything was built: [`M5-discovery.md`](./docs/M5-discovery.md),
 > [`M7-flow.md`](./docs/M7-flow.md), [`M8-observability.md`](./docs/M8-observability.md).
@@ -35,13 +39,13 @@ government and defence, which is why on-prem is not a downgrade. The W1 storage
 benchmark is **complete and validated the architecture**, written up at
 [`docs/benchmarks/w1.md`](./docs/benchmarks/w1.md).
 
-**Nine of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
-NMS, M3 logs, M4 metrics and alerting, M5 discovery, M6 topology, M7 flow, and M8
-observability at eight of ten. All five telemetry signals — metrics, logs, events and
+**Ten of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
+NMS, M3 logs, M4 metrics and alerting, M5 discovery, M6 topology, M7 flow, M8
+observability and M9 incident — with M12 enterprise part-built. All five telemetry signals — metrics, logs, events and
 state, flows, traces — land on **one** resource identity and are read through **one**
-query AST, which was the whole bet. What remains on the roadmap (M9 incident, M10
-automation, M11 security analytics, M12 enterprise, M13 AI) is what PLAN §10 calls
-*direction, not commitments*.
+query AST, which was the whole bet. What remains on the roadmap (M10
+automation, M11 security analytics, the rest of M12 enterprise, M13 AI) is what PLAN §10
+calls *direction, not commitments*.
 
 Against PLAN's own yardstick — *"something valuable exists at month 9"* — the product is
 past that line.
@@ -142,6 +146,14 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | M8 · the Services screen | ✅ every count named `sampled*`, in the API and in the client |
 | **M8 · the two measurements** | ✅ at 100M spans: a trace lookup reads **9–11 granules** against 4 083 without the index, and the service map does an hour in **472–583 ms**. Both bets were right; the bloom filter's false-positive rate was the default and nobody had chosen it — `ch-migrations/0009` |
 | M8 · a trace waterfall | ⬜ the queries exist (`uops_query::correlate`) and the API runs them; no screen draws the tree |
+| **M9 — 9 of 11 criteria met** | ✅ [`docs/M9-incident.md`](./docs/M9-incident.md) |
+| M9 · the Investigation Workspace | ✅ every signal for one resource in one window — the screen PLAN §6 has wanted since M0's sort key was chosen for it |
+| M9 · alerts grouped into incidents | ✅ `uops-incident` — the grouping is pure and exhaustively tested; the topology walk is migration 0022 |
+| **M9 · the timeline, measured** | ✅ **40 960 rows read against 3 735 552** without the resource predicate at 100M rows — the M0 sort key priced |
+| **M12 §2.1 · leases** | ✅ migration 0023 — one `UPDATE`, a row lock for an election, and the same mechanism in the poller, the alert engine and the sweeper. Sixteen processes race for one lease in the tests |
+| **M12 §2.2 · single sign-on** | ✅ [`docs/sso.md`](./docs/sso.md) — `uops-oidc` — the authorization-code flow with PKCE, RS256/ES256 verification, and claim-to-role mapping that is configuration rather than inference. 75 unit tests plus 15 against a scripted provider that **actually signs** |
+| **M12 §2.2 · requiring SSO** | ✅ an organization may switch off password login for everyone but one named break-glass account, whose every use is an audit event |
+| M12 · collectors, restore drill, buyer evidence | ⬜ §2.3–§2.5 — not started |
 
 ## Resume in three commands
 
@@ -156,8 +168,8 @@ bash scripts/db.sh migrate && bash scripts/ch.sh apply
 # about eighty tests without it — and they fail with instructions rather than passing.
 export DATABASE_URL=postgres://uops:uops@localhost:5432/uops
 export CLICKHOUSE_USER=uops CLICKHOUSE_PASSWORD=uops
-cargo test --workspace --all-targets && cargo test --workspace --doc   # 1 242 tests, green
-cd web && npm ci && npm test                                            # 127 more
+cargo test --workspace --all-targets && cargo test --workspace --doc   # 1 400+ tests, green
+cd web && npm ci && npm test                                            # 144 more
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
@@ -679,17 +691,20 @@ crates/uops-query/
    surfaces it. Blocked on the above, because a queue you can only agree with is worse
    than no queue.
 
-5. **M9 Incident** is the next milestone. It is where the Investigation Workspace lands,
-   and PLAN has wanted it since §6 — every signal for one resource in one window, which
-   is the promise the sort key was chosen for in M0 and which nothing has yet collected
-   into a screen. Alerting on a trace percentile belongs here too, because a p99 from
-   `service_5m` is an ordinary metric rule once the aggregate exists.
+5. **M12 Enterprise is the milestone in progress**, and the next pieces of it are §2.3
+   collector enrolment — a collector is *registered* rather than configured, so that
+   forty of them across nine sites is an inventory rather than forty YAML files — and
+   §2.4's restore drill, which is the one item in that document that cannot be met by
+   writing code. See [`docs/M12-enterprise.md`](./docs/M12-enterprise.md); §2.1 and §2.2
+   are done.
 
 ### Carried forward, still true
 
-* **The poller has no lease.** Two pollers against one database would both schedule every
-  device, doubling the load on the fleet and writing each sample twice. One process for
-  now, said out loud in `main.rs`.
+* ~~**The poller has no lease.**~~ **Fixed** — M12 §2.1, migration 0023. All three
+  schedulers take a PostgreSQL lease, and two instances of any of them elect exactly one
+  owner. What is still *not* measured is the version of the claim that cannot be argued
+  with: two real pollers producing one sample per interval, counted rather than reasoned
+  about.
 * **An interface that stops appearing is left alone.** Deleting it would orphan the
   telemetry that references it, and one missed walk is not proof a port was removed.
   `last_seen` stops advancing; acting on it is a product decision.

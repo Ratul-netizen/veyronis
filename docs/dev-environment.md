@@ -14,6 +14,10 @@ deployment topology.
 
 No container needed: PostgreSQL has a Windows build that runs from a directory.
 
+On the machine this was written on the directory sits **beside** the repository rather
+than inside it — `../pgtmp` — so that a `cargo clean` or a fresh clone cannot take the
+database with it. The paths below are relative to wherever it was unpacked.
+
 ```bash
 PG=pgtmp/x/pgsql/bin
 "$PG/pg_ctl.exe" -D pgtmp/data -o "-p 5432 -c listen_addresses=127.0.0.1" -l pgtmp/pg.log start

@@ -6,7 +6,7 @@
  * exists outside the shell, because it is the one a person reaches without a session.
  */
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -17,6 +17,20 @@ export function LoginPage() {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Asked on load rather than behind a toggle: an organization that has switched SSO on
+  // wants its people to see the button first, and a deployment with none configured gets
+  // an empty list and the form it already had.
+  //
+  // A failure here is not an error on this page. The password form still works, and a
+  // sign-in screen that shows a red banner because an unrelated endpoint was slow is a
+  // support call.
+  const methods = useQuery({
+    queryKey: ["auth", "methods"],
+    queryFn: () => api.signInMethods(),
+    retry: false,
+  });
+  const providers = methods.data?.providers ?? [];
 
   const login = useMutation({
     mutationFn: () => api.login(email, password),
@@ -32,6 +46,25 @@ export function LoginPage() {
     <div className="login">
       <h1>uops</h1>
       <p className="dim">Sign in to continue.</p>
+
+      {providers.length > 0 && (
+        <div className="sso">
+          {providers.map((provider) => (
+            // A link, not a button with an onClick. The flow is a redirect to the
+            // identity provider and back, so the browser has to navigate — a fetch
+            // would follow the redirect itself and land the provider's sign-in page
+            // inside a response body nobody can see.
+            <a
+              key={provider.id}
+              className="primary"
+              href={`${provider.start}?return_to=${encodeURIComponent("/")}`}
+            >
+              Sign in with {provider.name}
+            </a>
+          ))}
+          <p className="dim or">or sign in with a password</p>
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {

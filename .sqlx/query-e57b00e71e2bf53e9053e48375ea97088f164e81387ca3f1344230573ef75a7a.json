@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO user_tenant_role (user_id, tenant_id, role)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (user_id, tenant_id) DO UPDATE SET role = EXCLUDED.role\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        {
+          "Custom": {
+            "name": "tenant_role",
+            "kind": {
+              "Enum": [
+                "viewer",
+                "operator",
+                "admin"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e57b00e71e2bf53e9053e48375ea97088f164e81387ca3f1344230573ef75a7a"
+}

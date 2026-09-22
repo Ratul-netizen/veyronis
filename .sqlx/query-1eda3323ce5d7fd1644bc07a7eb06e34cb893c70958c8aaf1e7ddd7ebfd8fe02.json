@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM identity_provider_grant\n             WHERE provider_id = $1 AND org_id = $2 AND group_name = $3 AND tenant_id = $4\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1eda3323ce5d7fd1644bc07a7eb06e34cb893c70958c8aaf1e7ddd7ebfd8fe02"
+}

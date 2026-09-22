@@ -81,13 +81,16 @@ async fn a_password_round_trips_through_storage() {
 
     assert_eq!(found.user_id, id);
     assert!(!found.disabled);
+    // `Option` since migration 0024: an account provisioned through SSO has no password
+    // at all. This one was created with a password, so it has one.
+    let hash = found.password_hash.expect("a password account has a hash");
     assert!(password::verify(
         &uops_core::Secret::new("correct horse".to_owned()),
-        &found.password_hash
+        &hash
     ));
     assert!(!password::verify(
         &uops_core::Secret::new("wrong horse".to_owned()),
-        &found.password_hash
+        &hash
     ));
 }
 
@@ -374,9 +377,7 @@ async fn a_rehash_after_login_does_not_change_the_password() {
         .await
         .unwrap()
         .unwrap();
-    assert!(password::verify(
-        &uops_core::Secret::new("pw".to_owned()),
-        &found.password_hash
-    ));
-    assert!(!password::needs_rehash(&found.password_hash));
+    let hash = found.password_hash.expect("a password account has a hash");
+    assert!(password::verify(&uops_core::Secret::new("pw".to_owned()), &hash));
+    assert!(!password::needs_rehash(&hash));
 }

@@ -7,6 +7,28 @@
 version = 2
 yanked = "deny"
 
+# RUSTSEC-2023-0071 — the Marvin attack against the `rsa` crate.
+#
+# Ignored, with the argument written down rather than assumed, because "we looked and it
+# does not apply" is only worth anything if the next reader can check the reasoning.
+#
+# The advisory is a timing side channel in RSA **private-key** operations: decryption and
+# signing leak information about the private key to an attacker who can time them over a
+# network. `uops-oidc` holds no RSA private key and performs neither operation. Its only
+# use of the crate is `RsaPublicKey` plus `pkcs1v15::VerifyingKey::verify`, which computes
+# `s^e mod n` over values the identity provider publishes. There is no secret in that
+# computation for a timing channel to reveal.
+#
+# There is no patched version — the advisory says so itself — so the alternatives were to
+# implement PKCS#1 v1.5 verification by hand, or to take a TLS-linked JWT library whose
+# licence is outside the allow-list. Between a hand-rolled signature check and a documented
+# non-applicable advisory, the advisory is the smaller risk.
+#
+# The CI job "RSA is verification only" is what keeps this true: it fails the build if a
+# private-key type from the crate ever appears in the tree. If that job is removed, this
+# ignore must be removed with it.
+ignore = [{ id = "RUSTSEC-2023-0071", reason = "verification only; no private key exists in this product — see the CI guard" }]
+
 [bans]
 multiple-versions = "warn"
 # A "*" version on a crates.io dependency means "whatever shipped today", which is the

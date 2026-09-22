@@ -233,7 +233,31 @@ export interface Group {
   members: number;
 }
 
+/**
+ * One identity provider's button on the sign-in page.
+ *
+ * A name and a URL, and nothing else — no issuer, no client id. The endpoint that
+ * produces these is reachable without a session, and an unauthenticated stranger
+ * enumerating a company's identity provider is a gift to whoever is phishing that
+ * company. See `SignInOption` on the server.
+ */
+export interface SignInMethod {
+  id: string;
+  name: string;
+  start: string;
+}
+
 export const api = {
+  /**
+   * The sign-in methods this deployment offers.
+   *
+   * Asked before anybody has signed in, so it takes no tenant and carries no session.
+   * An empty list is the ordinary answer for a deployment with no SSO configured, and
+   * the page simply shows the password form on its own.
+   */
+  signInMethods: () =>
+    request<{ providers: SignInMethod[] }>("/api/v1/auth/methods"),
+
   login: (email: string, password: string) =>
     request<void>("/api/v1/auth/login", { method: "POST", body: { email, password } }),
 

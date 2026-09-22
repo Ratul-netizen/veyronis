@@ -100,6 +100,18 @@ sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio", "postgres", "uuid", "chrono", "json", "macros", "migrate",
 ] }
 
+# --- OIDC (M12) -----------------------------------------------------------------
+# Verifying an ID token's signature, and nothing else. RS256 and ES256 between them
+# cover every identity provider an enterprise is likely to have.
+#
+# RustCrypto rather than a JWT library: every one of those pulls a TLS stack and a
+# base64 crate to save about two hundred lines, and the two hundred lines are the part
+# that decides whether a forged token is accepted. They are better owned than imported.
+# Both are MIT OR Apache-2.0, already in the allow-list, and pure Rust — the same
+# property `snmp2`'s `crypto-rust` feature was chosen for.
+rsa = { version = "0.9", default-features = false, features = ["sha2"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+
 # --- identity (M1) --------------------------------------------------------------
 # A syslog receiver at 50k msg/s cannot hit PostgreSQL per message (SPEC M0.2), so
 # resolution is cache-first. Hand-rolling an LRU is eighty lines of pointer surgery
@@ -163,6 +175,7 @@ uops-collector-flow = { path = "crates/uops-collector-flow" }
 uops-flow = { path = "crates/uops-flow" }
 uops-sweeper = { path = "crates/uops-sweeper" }
 uops-incident = { path = "crates/uops-incident" }
+uops-oidc = { path = "crates/uops-oidc" }
 uops-api = { path = "crates/uops-api" }
 uops-server = { path = "crates/uops-server" }
 uops-store-ch = { path = "crates/uops-store-ch" }

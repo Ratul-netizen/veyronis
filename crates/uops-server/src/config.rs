@@ -58,6 +58,21 @@ pub struct Config {
     /// worst way for this to be misconfigured — see `deploy/docker-compose.yml`, where
     /// both read one file.
     pub kek: Option<KekSource>,
+    /// Where a browser reaches this deployment — `https://uops.example.com`.
+    ///
+    /// Only single sign-on needs it, and it needs it absolutely: the redirect URI sent
+    /// to the identity provider is built from this, and the provider compares it against
+    /// the one registered with it character for character. A mismatch is the single most
+    /// common SSO misconfiguration there is.
+    ///
+    /// Deliberately **not** derived from the request's `Host` header. Whoever controls
+    /// that header would otherwise choose where a sign-in's authorization code is sent,
+    /// with the provider's registered list as the only thing in the way.
+    ///
+    /// Defaults to `http://<bind>`, which is right for a developer on localhost and
+    /// wrong everywhere else — and wrong in a way the provider reports rather than one
+    /// that silently works.
+    pub public_url: String,
     pub kek_id: String,
 }
 
@@ -175,6 +190,10 @@ impl Config {
                 (None, None) => None,
             },
             kek_id: var("UOPS_KEK_ID", "default"),
+            public_url: std::env::var("UOPS_PUBLIC_URL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| format!("http://{bind}")),
             first_run: FirstRunNames {
                 org: var("UOPS_ORG_NAME", "Default organization"),
                 tenant: var("UOPS_TENANT_NAME", "Default tenant"),
@@ -194,7 +213,7 @@ impl Config {
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
-            "bind={} postgres={} clickhouse={} secure_cookies={} alerts={} discovery={} credentials={}",
+            "bind={} postgres={} clickhouse={} secure_cookies={} alerts={} discovery={} credentials={} public_url={}",
             self.bind,
             redact(&self.postgres.url),
             redact(&self.clickhouse.url),
@@ -206,6 +225,7 @@ impl Config {
                 Some(KekSource::Env(v)) => format!("env {v}"),
                 None => "off (no KEK configured)".to_owned(),
             },
+            self.public_url,
         )
     }
 }

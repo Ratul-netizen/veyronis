@@ -32,7 +32,16 @@ pub const ABSOLUTE_TIMEOUT: Duration = Duration::days(7);
 #[derive(Clone, Debug)]
 pub struct UserCredentials {
     pub user_id: ActorId,
-    pub password_hash: PasswordHashString,
+    /// `None` for an account provisioned through SSO, which has no password at all.
+    ///
+    /// Optional since migration 0024, and the honest representation: the alternative —
+    /// a random hash nobody holds — is a row that claims to have a password, and the
+    /// claim is untrue in a way nothing can detect afterwards.
+    ///
+    /// The API treats `None` exactly as it treats an absent user, down to verifying
+    /// against the same decoy hash, so an attacker cannot tell a password-less account
+    /// from one that does not exist.
+    pub password_hash: Option<PasswordHashString>,
     /// Disabled accounts are kept so the audit log can still name them.
     pub disabled: bool,
 }
@@ -121,7 +130,7 @@ impl PgStore {
 
         Ok(row.map(|r| UserCredentials {
             user_id: r.id,
-            password_hash: PasswordHashString::from_stored(r.password_hash),
+            password_hash: r.password_hash.map(PasswordHashString::from_stored),
             disabled: r.disabled_at.is_some(),
         }))
     }
@@ -159,7 +168,7 @@ impl PgStore {
         let r = &rows[0];
         Ok(Some(UserCredentials {
             user_id: r.id,
-            password_hash: PasswordHashString::from_stored(r.password_hash.clone()),
+            password_hash: r.password_hash.clone().map(PasswordHashString::from_stored),
             disabled: r.disabled_at.is_some(),
         }))
     }

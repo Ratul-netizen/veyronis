@@ -197,6 +197,60 @@ impl FromRequestParts<AppState> for Authenticated {
     }
 }
 
+/// An administrator of a whole organization.
+///
+/// For the settings that are not about one customer: who the identity provider is, which
+/// of its groups grant which roles, and whether passwords still work.
+///
+/// # Admin on *every* tenant, not any
+///
+/// The weaker rule would be a privilege escalation with a very specific shape. An MSP
+/// gives a customer's own staff the admin role on that customer's tenant — which is the
+/// ordinary arrangement — and one of them then configures the MSP's identity provider
+/// and maps a group they belong to onto every other customer. A setting that decides who
+/// gets an account has to be held by somebody who can already reach everything.
+///
+/// In a single-company deployment this is exactly "is an admin" and costs nothing.
+#[derive(Clone, Debug)]
+pub struct OrgAdmin {
+    pub user_id: ActorId,
+    pub session_id: SessionId,
+    pub org_id: uops_core::OrgId,
+}
+
+impl OrgAdmin {
+    /// For the audit log: `user:<uuid>`.
+    #[must_use]
+    pub fn actor(&self) -> String {
+        format!("user:{}", self.user_id)
+    }
+}
+
+impl FromRequestParts<AppState> for OrgAdmin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let who = Authenticated::from_request_parts(parts, state).await?;
+
+        if !state.store.is_org_admin(who.user_id, who.org_id).await? {
+            // A 403 rather than a 404: the caller is authenticated and the endpoint is
+            // not a secret. Saying what is required is what lets them ask for it.
+            return Err(ApiError::Forbidden(
+                "this action requires the admin role on every tenant in the organization",
+            ));
+        }
+
+        Ok(Self {
+            user_id: who.user_id,
+            session_id: who.session_id,
+            org_id: who.org_id,
+        })
+    }
+}
+
 fn tenant_header(parts: &Parts) -> Result<TenantId, ApiError> {
     let raw = parts
         .headers

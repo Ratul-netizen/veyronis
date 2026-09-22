@@ -120,6 +120,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         None => state,
     };
 
+    let state = state
+        .with_sso(open_sso(&config))
+        .with_public_url(&config.public_url);
+
     // The alert engine, in this process. It reads the same two stores the API does and
     // writes alert state through the same repository, so there is nothing to keep in
     // step — and an installation that runs `docker compose up` gets alerting without
@@ -209,6 +213,52 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("stopped cleanly");
     Ok(())
+}
+
+/// The single sign-on runtime — M12 §2.2.
+///
+/// Always built, because a *public* client needs no key material and a deployment with
+/// no identity provider configured never reaches it. The envelope is added when there is
+/// a KEK, which is what a confidential client's secret is sealed under; without one the
+/// configuration route says so in a sentence naming the variable, rather than storing a
+/// secret in the clear.
+fn open_sso(config: &Config) -> uops_api::sso::Sso {
+    let base = uops_api::sso::Sso::new();
+    match open_envelope(config) {
+        Ok(envelope) => base.with_envelope(envelope),
+        Err(why) => {
+            if config.kek.is_some() {
+                // A KEK was configured and could not be opened. Loud, because the symptom
+                // otherwise is an SSO configuration screen that refuses a client secret on
+                // a server that appears to have a key.
+                eprintln!("sso: the key ring could not be opened: {why}");
+            }
+            base
+        }
+    }
+}
+
+/// One envelope, for org-level secrets — today, an `OpenID` Connect client secret.
+///
+/// A separate ring from the vault's, and for the reason `open_vault` already gives:
+/// [`KekRing`] is deliberately not `Clone`, because cloning it would put a second copy
+/// of the key material somewhere nothing zeroizes. Reading the file again at boot is the
+/// cheaper half of that trade.
+///
+/// # Errors
+///
+/// When no KEK is configured, or it cannot be read. Both are ordinary: a deployment
+/// without one simply cannot hold a confidential client's secret.
+fn open_envelope(config: &Config) -> Result<uops_secrets::Envelope<RustCryptoAead>, String> {
+    let id = uops_secrets::record::KeyId(config.kek_id.clone());
+    let ring = match config.kek.as_ref() {
+        Some(config::KekSource::File(path)) => KekRing::from_file(path, id),
+        Some(config::KekSource::Env(name)) => KekRing::from_env(name, id),
+        None => return Err("no KEK is configured".to_owned()),
+    }
+    .map_err(|e| format!("the key ring could not be opened: {e}"))?;
+
+    Ok(uops_secrets::Envelope::new(RustCryptoAead, ring))
 }
 
 /// One vault, built from the configured key ring.
