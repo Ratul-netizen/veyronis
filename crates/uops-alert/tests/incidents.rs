@@ -12,7 +12,7 @@ use uops_alert::Engine;
 use uops_core::alert::{AlertSeverity, Comparison, Condition};
 use uops_core::{OrgId, ResourceId, ResourceKind, TenantId, TenantScope};
 use uops_query::{AggFunc, Aggregation, Field, Query, ResourceSelector, SignalType, TimeRange};
-use uops_store_ch::{ChClient, ChConfig, ChStore, MetricRow, MetricStore};
+use uops_store_ch::{ChClient, ChConfig, ChStore, EventRow, MetricRow, MetricStore};
 use uops_store_pg::{AlertRule, Config, NewResource, NewRule, PgStore};
 
 async fn stores() -> (PgStore, ChStore) {
@@ -445,4 +445,169 @@ async fn an_incident_goes_quiet_when_its_alerts_resolve() {
     let rows = pg.incidents(&scope, 10).await.expect("rows");
     assert_eq!(rows[0].state, "quiet");
     assert!(rows[0].closed_at.is_none(), "a machine does not close");
+}
+
+// ---- detections — M11 §2.3, §3 --------------------------------------------------
+
+/// One security event on a device.
+fn security_event(tenant: TenantId, resource: ResourceId, at: DateTime<Utc>) -> EventRow {
+    EventRow {
+        tenant_id: tenant,
+        resource_id: resource,
+        site_id: uops_core::SiteId::nil(),
+        observed_at: at,
+        ingested_at: at,
+        source_kind: "syslog".to_owned(),
+        source_vendor: "fortinet".to_owned(),
+        severity: "warn".to_owned(),
+        event_category: "network".to_owned(),
+        event_type: "denied".to_owned(),
+        summary: "Denied 198.51.100.7 → 10.0.0.5:22".to_owned(),
+        attributes: std::collections::BTreeMap::new(),
+    }
+}
+
+/// `count() > 5` over denied network events on one device.
+///
+/// `cpu_rule` with the signal and the aggregate changed. Nothing about it says
+/// "detection", which is M11 §2.3 in one function.
+fn denial_detection(name: &str, resource: ResourceId) -> NewRule {
+    let end = Utc::now();
+    NewRule {
+        name: name.to_owned(),
+        description: String::new(),
+        query: Query {
+            aggregations: vec![Aggregation {
+                func: AggFunc::Count,
+                field: None,
+                alias: "v".to_owned(),
+            }],
+            resources: ResourceSelector::Ids {
+                ids: vec![resource],
+            },
+            ..Query::new(
+                SignalType::Event,
+                TimeRange::new(end - Duration::minutes(1), end),
+            )
+        },
+        condition: Condition::Threshold {
+            op: Comparison::Gt,
+            value: 5.0,
+            hold_seconds: 0,
+        },
+        severity: AlertSeverity::Critical,
+        enabled: true,
+        eval_interval: Duration::seconds(60),
+        notify: serde_json::json!([]),
+    }
+}
+
+/// M11 §3: a detection firing produces an incident through M9's existing grouping.
+///
+/// The claim is that M11 adds no incident machinery. So this is
+/// `a_firing_alert_becomes_an_incident` with the rule pointed at `events` instead of
+/// `metrics` — and if the assertions below had to change, that claim would be false.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_firing_detection_becomes_an_incident() {
+    let (pg, ch) = stores().await;
+    let scope = tenant(&pg, "detect").await;
+    let host = device(&pg, &scope, "fw-01").await;
+    let rule = pg
+        .create_rule(&scope, None, &denial_detection("denials", host))
+        .await
+        .expect("create rule");
+
+    let now = Utc::now();
+    let rows: Vec<_> = (0..9)
+        .map(|n| security_event(scope.tenant_id(), host, now - Duration::seconds(10 + n)))
+        .collect();
+    uops_store_ch::EventStore::insert_events(&ch, &rows)
+        .await
+        .expect("events");
+
+    let engine = Engine::new(pg.clone(), ch.clone());
+    let outcome = engine.evaluate(&scope, &rule, now).await.expect("evaluate");
+    assert_eq!(outcome.notifications(), 1, "{:?}", outcome.decisions);
+
+    let incidents = pg.incidents(&scope, 10).await.expect("incidents");
+    assert_eq!(incidents.len(), 1, "one detection, one incident");
+    assert_eq!(incidents[0].alerts, 1);
+    assert_eq!(incidents[0].state, "open");
+    assert_eq!(incidents[0].severity, "critical");
+    assert_eq!(
+        incidents[0].candidate_resource_id,
+        Some(host),
+        "the device the events were about"
+    );
+}
+
+/// M11 §3, second half: topology suppression applies to a detection exactly as it does to
+/// any other alert.
+///
+/// This is `suppression_takes_the_notification_and_never_the_alert` with one of the two
+/// rules pointed at `events`. The mixture is the point — a detection downstream of a
+/// metric alert has to be suppressed by it, or "security" would be a category the topology
+/// rules quietly do not apply to.
+#[tokio::test(flavor = "multi_thread")]
+async fn topology_suppression_applies_to_a_detection_like_any_other_alert() {
+    let (pg, ch) = stores().await;
+    let scope = tenant(&pg, "detect-suppress").await;
+    let switch = device(&pg, &scope, "sw-01").await;
+    let host = device(&pg, &scope, "srv-01").await;
+    depends_on(&pg, &scope, host, switch).await;
+
+    sqlx::query("UPDATE tenant SET suppress_downstream_alerts = true WHERE id = $1")
+        .bind(scope.tenant_id().into_uuid())
+        .execute(pg.pool())
+        .await
+        .expect("suppression on");
+
+    // The cause is an ordinary metric alert on the switch; the symptom is a *detection* on
+    // the host behind it.
+    let cause = rule(&pg, &scope, "switch cpu", switch).await;
+    let symptom = pg
+        .create_rule(&scope, None, &denial_detection("host denials", host))
+        .await
+        .expect("create rule");
+
+    let now = Utc::now();
+    ch.insert_metrics(&[sample(
+        scope.tenant_id(),
+        switch,
+        99.0,
+        now - Duration::seconds(10),
+    )])
+    .await
+    .expect("sample");
+    let rows: Vec<_> = (0..9)
+        .map(|n| security_event(scope.tenant_id(), host, now - Duration::seconds(10 + n)))
+        .collect();
+    uops_store_ch::EventStore::insert_events(&ch, &rows)
+        .await
+        .expect("events");
+
+    let engine = Engine::new(pg.clone(), ch.clone());
+    let upstream = engine.evaluate(&scope, &cause, now).await.expect("evaluate");
+    let downstream = engine
+        .evaluate(&scope, &symptom, now)
+        .await
+        .expect("evaluate");
+
+    // One incident for both, and only the cause notified. The detection's alert is still
+    // on it — suppression takes the *notification*, never the alert.
+    let incidents = pg.incidents(&scope, 10).await.expect("incidents");
+    assert_eq!(incidents.len(), 1, "a cascade is one incident: {incidents:?}");
+    assert_eq!(incidents[0].alerts, 2, "both alerts are on it");
+    assert_eq!(
+        incidents[0].candidate_resource_id,
+        Some(switch),
+        "the switch is upstream, so it is the likely origin"
+    );
+    assert_eq!(upstream.notifications(), 1, "the cause notifies");
+    assert_eq!(
+        downstream.notifications(),
+        0,
+        "the detection behind it does not: {:?}",
+        downstream.decisions
+    );
 }

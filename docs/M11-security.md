@@ -262,8 +262,13 @@ a person's judgement rather than a product's guess — and an event does not.
       > `SHAPES.len() == 4`, with the failure message saying that changing it is allowed and
       > is a decision. The same mechanism that holds the built-in monitoring profiles at
       > five.
-- [ ] A security event appears on the Investigation Workspace timeline beside the metrics
+- [x] A security event appears on the Investigation Workspace timeline beside the metrics
       and logs for the same resource, on the same axis, with no new timeline code
+      > This is the criterion that justifies §2.1. `uops_query::timeline`'s `SIGNALS` has
+      > had `Event` in it since M9, drawing an empty track; the test writes a log and an
+      > event about one device in one minute and finds both on one request. A second table
+      > would have needed a second query, a second retention rule and a merge — and the
+      > Workspace would have had to learn that two of its tracks are the same kind of thing.
 - [x] Failed authentications group by `(user.name, source.ip)` and the three shapes in
       §2.4 are distinguishable in the output
       > `uops-store-ch/tests/telemetry.rs`, against real `ClickHouse`, and **with no new
@@ -289,8 +294,16 @@ a person's judgement rather than a product's guess — and an event does not.
       > stay quiet, because without it the first would pass against a rule with no filter at
       > all: seventy-five events a minute is over the threshold whether or not any of them
       > were denials, and a detection that counts everything is not a detection.
-- [ ] A detection firing produces an incident through M9's existing grouping, and topology
+- [x] A detection firing produces an incident through M9's existing grouping, and topology
       suppression applies to it exactly as it does to any other alert
+      > `uops-alert/tests/incidents.rs`, as two copies of existing tests with the rule
+      > pointed at `events` — and **the assertions did not change**, which is the result.
+      >
+      > The suppression test deliberately mixes the two: the cause is an ordinary metric
+      > alert on a switch, the symptom is a *detection* on a host behind it. One incident,
+      > both alerts on it, only the cause notified. A detection that the topology rules
+      > quietly did not apply to would make "security" a category that escapes M9, and
+      > mixing them is the only way to catch that.
 - [~] Sign-ins against this product itself are a source of authentication events
       > **Recorded, not detectable.** They are `auth.sign_in.success` /
       > `auth.sign_in.failure` in the organization audit log, with the reason, the address
@@ -303,8 +316,18 @@ a person's judgement rather than a product's guess — and an event does not.
       > the filter is doing the work rather than the volume.
 - [ ] A firewall `denied` event and the flow record for the same conversation are shown
       together, joined on the resource rather than on a re-parsed address
-- [ ] Reading a security event writes an `access_log` entry, by the middleware that has
+- [x] Reading a security event writes an `access_log` entry, by the middleware that has
       been there since M1 — verified, not assumed
+      > Nothing was built for it, which is the point. SPEC §M0.8 called read auditing
+      > *"trivial now, invasive to retrofit"* and M11 §2.7 claims the cost was already
+      > paid — and a claim that something is already covered is the easiest kind to be
+      > wrong about, with a silent failure: the screen ships, the reads are not recorded,
+      > and nobody finds out until an auditor asks.
+      >
+      > The fingerprint is `event:events+filter` — the shape. The test also asserts that
+      > the username and the address it filtered on are **absent** from the audit table,
+      > which matters more here than for a log search: the values in a security query are
+      > exactly the thing being protected.
 - [ ] Cross-tenant isolation holds for every new surface, by the same adversarial test
       every milestone since M7 has used
 

@@ -564,3 +564,107 @@ async fn an_operator_can_read_the_setting_and_cannot_change_it() {
             .unwrap()
     );
 }
+
+/// M11 §3: a security event appears on the Investigation Workspace timeline beside the
+/// metrics and logs for the same resource, on the same axis, **with no new timeline code**.
+///
+/// # Why this is the criterion that justifies §2.1
+///
+/// §2.1 decided a security event is an `events` row rather than a table of its own, and
+/// the argument was that the timeline already reads that table — `uops_query::timeline`'s
+/// `SIGNALS` has had `Event` in it since M9, drawing an empty track. This is the test that
+/// the argument was true rather than plausible: an event written for the incident's
+/// resource comes back on the `event` track, next to the log, from the same request.
+///
+/// If a second table had been added instead, this would have needed a second query, a
+/// second retention rule and a merge — and the Investigation Workspace would have had to
+/// learn that two of its tracks are the same kind of thing.
+#[tokio::test]
+async fn a_security_event_lands_on_the_timeline_beside_the_log() {
+    let f = fixture("sec-timeline", Role::Viewer).await;
+    let (id, device) = f.incident().await;
+
+    let at = Utc::now() - Duration::minutes(1);
+    let marker = format!("denied-{}", uuid::Uuid::now_v7().simple());
+
+    // A log and an event about the same device, in the same minute. The pair is the point:
+    // "on the same axis" is only meaningful if something else is on it.
+    f.telemetry
+        .insert_logs(&[LogRow {
+            tenant_id: f.tenant,
+            resource_id: device,
+            site_id: uops_core::SiteId::nil(),
+            observed_at: at,
+            ingested_at: at,
+            source_kind: "syslog".to_owned(),
+            source_vendor: String::new(),
+            severity: "error".to_owned(),
+            facility: 1,
+            body: "the raw line the event came from".to_owned(),
+            attributes: std::collections::BTreeMap::new(),
+            trace_id: String::new(),
+            span_id: String::new(),
+        }])
+        .await
+        .expect("log");
+
+    uops_store_ch::EventStore::insert_events(
+        &f.telemetry,
+        &[uops_store_ch::EventRow {
+            tenant_id: f.tenant,
+            resource_id: device,
+            site_id: uops_core::SiteId::nil(),
+            observed_at: at,
+            ingested_at: at,
+            source_kind: "syslog".to_owned(),
+            source_vendor: "fortinet".to_owned(),
+            severity: "warn".to_owned(),
+            event_category: "network".to_owned(),
+            event_type: "denied".to_owned(),
+            summary: marker.clone(),
+            attributes: [
+                ("source.ip".to_owned(), "198.51.100.7".to_owned()),
+                ("destination.port".to_owned(), "22".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+        }],
+    )
+    .await
+    .expect("event");
+
+    let (status, body) = f
+        .call(f.get(&format!("/api/v1/incidents/{id}/timeline")))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let tracks = body["tracks"].as_array().expect("tracks");
+    let events = tracks
+        .iter()
+        .find(|t| t["signal"] == "event")
+        .expect("the event track exists");
+
+    assert_eq!(events["coverage"], "whole");
+    assert_eq!(
+        events["retention_days"], 365,
+        "events keep as long as logs — 0006_events_states.sql"
+    );
+
+    let rows = events["rows"].as_array().expect("rows");
+    assert!(
+        rows.iter().any(|row| row
+            .as_array()
+            .is_some_and(|cells| cells.iter().any(|v| v == &marker))),
+        "the security event comes back on its own track: {rows:?}"
+    );
+
+    // And the log is still there, from the same request. One axis, two signals.
+    let logs = tracks
+        .iter()
+        .find(|t| t["signal"] == "log")
+        .expect("the log track exists");
+    assert!(
+        !logs["rows"].as_array().expect("rows").is_empty(),
+        "the line the event was derived from is on the timeline too"
+    );
+}

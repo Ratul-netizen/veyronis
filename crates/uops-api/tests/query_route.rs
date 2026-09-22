@@ -968,3 +968,89 @@ async fn a_service_map_needs_no_csrf_token_because_it_is_a_get() {
     // And with no window named it reads the default one rather than everything.
     assert!(body["start"].is_string(), "{body}");
 }
+
+/// M11 §3: reading a security event writes an `access_log` entry, by the middleware that
+/// has been there since M1 — **verified, not assumed**.
+///
+/// # Why this criterion exists at all, given that nothing was built for it
+///
+/// That is the point of it. SPEC §M0.8 required read auditing in M1 — *"defence and
+/// law-enforcement buyers audit who **saw** what, not only who changed it"* — and called it
+/// *"trivial now, invasive to retrofit"*. A security-events screen is precisely the surface
+/// that sentence was written about, and M11 §2.7 claims the cost was already paid.
+///
+/// A claim that something is already covered is the easiest kind to be wrong about, and the
+/// failure is silent: the screen ships, the reads are not recorded, and nobody finds out
+/// until an auditor asks. So it is checked rather than asserted in prose.
+///
+/// The fingerprint records the *shape* — `event:events+filter` — and not the filter's
+/// values, for the reason the log-query test gives: putting the terms in the audit table
+/// would make a second copy of the thing being protected. Here that matters more than
+/// usual, because the values in a security query are addresses and usernames.
+#[tokio::test]
+async fn reading_a_security_event_is_recorded_as_a_read() {
+    let f = fixture("sec-audit", Role::Viewer).await;
+    let device = ResourceId::new();
+    let (start, _) = window();
+
+    uops_store_ch::EventStore::insert_events(
+        &f.telemetry,
+        &[uops_store_ch::EventRow {
+            tenant_id: f.tenant,
+            resource_id: device,
+            site_id: uops_core::SiteId::nil(),
+            observed_at: start + chrono::Duration::seconds(50),
+            ingested_at: start + chrono::Duration::seconds(50),
+            source_kind: "syslog".to_owned(),
+            source_vendor: "fortinet".to_owned(),
+            severity: "warn".to_owned(),
+            event_category: "authentication".to_owned(),
+            event_type: "failure".to_owned(),
+            summary: "Failed for admin from 198.51.100.7".to_owned(),
+            attributes: [
+                ("user.name".to_owned(), "admin".to_owned()),
+                ("source.ip".to_owned(), "198.51.100.7".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+        }],
+    )
+    .await
+    .unwrap();
+
+    let (status, body) = f
+        .call(f.post_query(
+            &ast(&serde_json::json!({
+                "signal": "event",
+                "filter": {
+                    "op": "compare",
+                    "field": { "field": "event_category" },
+                    "cmp": "eq",
+                    "value": "authentication"
+                }
+            })),
+            true,
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["rows"].as_array().unwrap().len(), 1, "{body}");
+
+    let log = f.access_log().await;
+    let entry = log
+        .iter()
+        .find(|(target, _, _)| target == "query")
+        .expect("reading a security event must be recorded as a read");
+
+    assert_eq!(
+        entry.1.as_deref(),
+        Some("event:events+filter"),
+        "the shape, so a pattern of access is recognisable"
+    );
+    assert_eq!(entry.2, Some(1), "how much came back is part of the record");
+
+    // The username and the address are what a security query filters on, and neither may
+    // reach the audit table. A second copy of the thing being protected is not auditing.
+    let written = format!("{log:?}");
+    assert!(!written.contains("admin"), "{written}");
+    assert!(!written.contains("198.51.100.7"), "{written}");
+}
