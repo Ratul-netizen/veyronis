@@ -2463,6 +2463,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-incident"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "uops-core",
+ "uuid",
+]
+
+[[package]]
 name = "uops-notify"
 version = "0.0.1"
 dependencies = [

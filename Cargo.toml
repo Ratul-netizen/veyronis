@@ -162,6 +162,7 @@ uops-discover = { path = "crates/uops-discover" }
 uops-collector-flow = { path = "crates/uops-collector-flow" }
 uops-flow = { path = "crates/uops-flow" }
 uops-sweeper = { path = "crates/uops-sweeper" }
+uops-incident = { path = "crates/uops-incident" }
 uops-api = { path = "crates/uops-api" }
 uops-server = { path = "crates/uops-server" }
 uops-store-ch = { path = "crates/uops-store-ch" }

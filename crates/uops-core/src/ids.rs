@@ -150,6 +150,15 @@ id_type!(
     /// One login session. Distinct from the token, which is never stored.
     SessionId
 );
+id_type!(
+    /// One unit of work for a human — M9, `docs/M9-incident.md` §2.1.
+    ///
+    /// Distinct from an alert's id and deliberately so. An alert is a rule's opinion
+    /// about one resource; it fires and resolves on its own and needs nobody. An incident
+    /// is what somebody is *working on*, it outlives its alerts, and only a human closes
+    /// one.
+    IncidentId
+);
 
 #[cfg(test)]
 mod tests {

@@ -43,8 +43,8 @@ pub use identity::{
     combine_confidence,
 };
 pub use ids::{
-    ActorId, CredentialRef, DecisionId, OrgId, ResourceGroupId, ResourceId, SavedSearchId,
-    SessionId, SiteId, TenantId,
+    ActorId, CredentialRef, DecisionId, IncidentId, OrgId, ResourceGroupId, ResourceId,
+    SavedSearchId, SessionId, SiteId, TenantId,
 };
 pub use maintenance::{Recurrence, Schedule, Suppression, Target, WindowError};
 pub use resource::{

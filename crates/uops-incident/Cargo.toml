@@ -1,0 +1,20 @@
+[package]
+name = "uops-incident"
+description = "Grouping alerts into incidents — M9. The rules are pure; the I/O lives in the engine that calls them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+uops-core.workspace = true
+
+chrono.workspace = true
+# An alert rule's id. The alert tables predate the newtypes and carry a bare uuid.
+uuid.workspace = true
+
+[lints]
+workspace = true
