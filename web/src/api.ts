@@ -161,6 +161,14 @@ export const STATUSES = [
 
 export type ResourceStatus = (typeof STATUSES)[number];
 
+/** How a device identified itself. Inventory, not secrets — a viewer may read these. */
+export interface Identifier {
+  kind: string;
+  value: string;
+  confidence: number;
+  source: string;
+}
+
 export interface Resource {
   id: string;
   tenant_id: string;
@@ -275,6 +283,10 @@ export const api = {
    * the server would have to decide the meaning of, and the answer it would pick is not
    * obviously "no filter".
    */
+  /** Everything known about who a device is — used to find its management address. */
+  identifiers: (tenant: string, id: string) =>
+    request<Identifier[]>(`/api/v1/resources/${id}/identifiers`, { tenant }),
+
   resources: (tenant: string, filter: Record<string, string | undefined> = {}) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(filter)) {

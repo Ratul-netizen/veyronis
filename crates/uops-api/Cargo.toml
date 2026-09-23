@@ -34,6 +34,7 @@ uops-store-pg.workspace = true
 # /8 is told to split it rather than shown the name of a CHECK constraint.
 uops-discover.workspace = true
 uops-guess.workspace = true
+uops-path.workspace = true
 
 axum.workspace = true
 chrono.workspace = true

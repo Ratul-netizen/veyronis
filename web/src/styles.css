@@ -2884,3 +2884,58 @@ button.following {
 .resource-signals {
   margin-bottom: calc(var(--space) * 6);
 }
+
+/* The path to a device — `pathpanel.tsx`. Same `.track` shape as the waterfall, the
+   address screen and the error budget: one visual language for "how much of this span". */
+.hops .track {
+  position: relative;
+  height: 8px;
+  min-width: 120px;
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.12));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hops .track .bar {
+  height: 100%;
+  background: var(--accent, #4c8dff);
+  border-radius: 2px;
+}
+
+/* A hop that lost probes. Not the same as a slow one, and worth telling apart at a glance. */
+.hops .track .bar.warn {
+  background: var(--sev-warn);
+}
+
+/* The hop where the path leaves private address space.
+ *
+ * A rule above the row rather than a badge on it: it marks a boundary *between* two hops,
+ * which is what a line means and what a badge does not. Deliberately not labelled "your
+ * network ends here" — the product cannot tell whose a private address is. */
+.hops tr.leaves-private td {
+  border-top: 2px solid var(--line);
+}
+
+.hops tr.leaves-private td:first-child::before {
+  content: "leaves private space";
+  position: absolute;
+  margin-top: -1.4em;
+  font-size: var(--t-small, 0.8em);
+  color: var(--text-dim);
+}
+
+.hops tr.leaves-private {
+  position: relative;
+}
+
+/* What the command actually printed. Monospace and scrollable; it is evidence, not prose
+   to be read end to end. */
+.raw-trace {
+  max-height: 16em;
+  overflow: auto;
+  padding: calc(var(--space) * 2);
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.08));
+  border-radius: 3px;
+  font-size: var(--t-small, 0.85em);
+  white-space: pre;
+}

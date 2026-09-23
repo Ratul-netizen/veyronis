@@ -432,6 +432,16 @@ const CASES: &[RouteCase] = &[
     },
     // Objectives — `docs/slo.md`. A target is a statement about what an organisation
     // considers acceptable, and one tenant's targets are not another's business.
+    // Tracing sends packets from the product at an address a caller names. It is
+    // tenant-scoped like everything else, and an operator of one tenant must not be able
+    // to use another's session to do it.
+    RouteCase {
+        path: "/api/v1/path",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: Some(r#"{"target":"127.0.0.1","max_hops":1}"#),
+    },
     RouteCase {
         path: "/api/v1/slos",
         probe: None,

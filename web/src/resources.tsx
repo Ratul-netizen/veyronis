@@ -18,6 +18,7 @@ import {
   type Role,
 } from "./api";
 import { contextParams } from "./context";
+import { PathPanel } from "./pathpanel";
 import { AllSignals } from "./signals";
 import type { ShellSearch } from "./shell";
 import { resolveRange, useShell } from "./shell";
@@ -188,6 +189,15 @@ export function ResourcePage() {
     await queryClient.invalidateQueries({ queryKey: ["resources", tenant.tenant_id] });
   };
 
+  // Read for the path panel: the resource itself does not carry its management address,
+  // because a device may have several and identity resolution owns that decision.
+  const identifiers = useQuery({
+    queryKey: ["identifiers", tenant.tenant_id, id],
+    queryFn: () => api.identifiers(tenant.tenant_id, id),
+    retry: false,
+    staleTime: 60_000,
+  });
+
   const setStatus = useMutation({
     mutationFn: (status: ResourceStatus) =>
       api.setResourceStatus(tenant.tenant_id, id, status),
@@ -225,6 +235,9 @@ export function ResourcePage() {
   }
 
   const r = resource.data;
+  // The address the product would poll, which is the one worth tracing to.
+  const managementAddress =
+    identifiers.data?.find((i) => i.kind === "mgmt_ip")?.value ?? null;
   const canEdit = atLeast(tenant.role, "operator");
   const attributes = Object.entries(r.attributes);
 
@@ -266,6 +279,12 @@ export function ResourcePage() {
        *
        * `at` comes from the shell's range rather than from now, so arriving here from an
        * incident lands on the moment the incident is about. */}
+      {/* Where the traffic goes between here and this device. On the resource page
+       *  because that is where somebody stands when they ask why they cannot reach it —
+       *  Topology answers what is next to what, and never answered what is in between. */}
+      <h2>Path</h2>
+      <PathPanel address={managementAddress} name={r.display_name || r.name} />
+
       <h2>Signals</h2>
       <AllSignals tenant={tenant.tenant_id} resourceId={r.id} at={momentOf(range)} />
 

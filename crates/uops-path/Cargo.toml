@@ -1,0 +1,21 @@
+[package]
+name = "uops-path"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+uops-core.workspace = true
+# "process" to run the operating system's own traceroute — `docs/traceroute.md` §2, which
+# is M10 §2.10's decision about ssh(1) applied to the same problem. "time" for the bound on
+# how long one may take.
+tokio = { workspace = true, features = ["process", "time", "io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

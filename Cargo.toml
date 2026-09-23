@@ -163,6 +163,7 @@ uops-profile = { path = "crates/uops-profile" }
 uops-notify = { path = "crates/uops-notify" }
 uops-guess = { path = "crates/uops-guess" }
 uops-oui = { path = "crates/uops-oui" }
+uops-path = { path = "crates/uops-path" }
 uops-poll = { path = "crates/uops-poll" }
 uops-snmp = { path = "crates/uops-snmp" }
 uops-syslog = { path = "crates/uops-syslog" }

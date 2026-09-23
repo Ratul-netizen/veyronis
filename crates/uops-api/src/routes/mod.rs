@@ -28,6 +28,7 @@ pub mod subnets;
 pub mod sso;
 pub mod runbooks;
 pub mod topology;
+pub mod path;
 
 use axum::routing::{any, delete, get, patch, post, put};
 use axum::{Router, middleware};
@@ -291,6 +292,9 @@ pub fn router(state: AppState) -> Router {
         // Services, because an objective is a statement about a service.
         .route("/api/v1/slos", get(slos::list).post(slos::set))
         .route("/api/v1/slos/{id}", delete(slos::remove))
+        // The path to a target — `docs/traceroute.md`. A POST because it sends packets:
+        // every other read here asks the database what it already knows.
+        .route("/api/v1/path", post(path::run))
         .route("/api/v1/sites/{id}/location", put(sites::place))
         .route("/api/v1/query", post(query::run))
         // The tail is its own route rather than a flag on the one above, because it is

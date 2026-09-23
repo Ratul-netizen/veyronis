@@ -2628,6 +2628,7 @@ dependencies = [
  "uops-identity",
  "uops-notify",
  "uops-oidc",
+ "uops-path",
  "uops-query",
  "uops-runbook",
  "uops-secrets",
@@ -2839,6 +2840,15 @@ dependencies = [
 [[package]]
 name = "uops-oui"
 version = "0.0.1"
+
+[[package]]
+name = "uops-path"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "tokio",
+ "uops-core",
+]
 
 [[package]]
 name = "uops-pipeline"
