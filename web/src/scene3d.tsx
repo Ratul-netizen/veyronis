@@ -56,6 +56,10 @@ import { Materials, readPalette } from "./scene3d-materials";
 import { buildCatalogue, UNIT, type Part } from "./scene3d-models";
 import {
   clampPhi,
+  decay,
+  pitchFor,
+  yawFor,
+  zoomFactor,
   clampRadius,
   framingDistance,
   orbitFor,
@@ -324,15 +328,32 @@ export default function Scene3d({
       dirty = true;
     };
 
+    // Momentum, so a flick keeps turning and settles. Without it every rotation stops
+    // dead on pointer-up and inspecting a graph becomes a series of short strokes — half
+    // of why this was reported as tough to use.
+    let spinTheta = 0;
+    let spinPhi = 0;
+    let panning = false;
+
     const onDown = (event: PointerEvent) => {
+      // Right button, middle button or shift pans. Rotating is what the left button does
+      // because that is what every 3D view does; panning needs to exist at all, because
+      // an orbit with a fixed centre cannot bring an off-centre device into view.
+      panning = event.button === 1 || event.button === 2 || event.shiftKey;
       dragging = true;
+      spinTheta = 0;
+      spinPhi = 0;
       lastX = event.clientX;
       lastY = event.clientY;
       renderer.domElement.setPointerCapture(event.pointerId);
+      renderer.domElement.style.cursor = panning ? "move" : "grabbing";
     };
     const onUp = (event: PointerEvent) => {
       dragging = false;
+      panning = false;
       renderer.domElement.releasePointerCapture(event.pointerId);
+      renderer.domElement.style.cursor = "grab";
+      dirty = true;
     };
     const onMove = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -341,17 +362,43 @@ export default function Scene3d({
         -((event.clientY - rect.top) / rect.height) * 2 + 1,
       );
       if (!dragging) return;
-      orbit.theta -= (event.clientX - lastX) * 0.006;
-      orbit.phi = clampPhi(orbit.phi - (event.clientY - lastY) * 0.006);
+      const dx = event.clientX - lastX;
+      const dy = event.clientY - lastY;
+
+      if (panning) {
+        // Move the centre in the camera's own plane, scaled by distance so the graph
+        // tracks the cursor at any zoom.
+        const scale = (orbit.radius * 2) / Math.max(rect.height, 1);
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+        target.x += (-dx * scale * right.x) + (dy * scale * up.x);
+        target.y += (-dx * scale * right.y) + (dy * scale * up.y);
+        target.z += (-dx * scale * right.z) + (dy * scale * up.z);
+      } else {
+        // Viewport-relative: dragging the width of the canvas turns the estate round,
+        // whatever the screen. `yawFor`/`pitchFor` carry the reasoning and the tests.
+        spinTheta = -yawFor(dx, rect.width);
+        spinPhi = -pitchFor(dy, rect.height);
+        orbit.theta += spinTheta;
+        orbit.phi = clampPhi(orbit.phi + spinPhi);
+      }
       lastX = event.clientX;
       lastY = event.clientY;
       place();
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      orbit.radius = clampRadius(orbit.radius * (1 + event.deltaY * 0.001), fit, spread);
+      // Normalised across deltaMode and exponential, so the same notch means the same
+      // thing on every machine and zooming out then in returns to where it started.
+      orbit.radius = clampRadius(
+        orbit.radius * zoomFactor(event.deltaY, event.deltaMode),
+        fit,
+        spread,
+      );
       place();
     };
+    // Without this the browser's own menu interrupts a right-drag pan on the first frame.
+    const onContextMenu = (event: MouseEvent) => event.preventDefault();
 
     // --- picking -----------------------------------------------------------
     const raycaster = new THREE.Raycaster();
@@ -376,7 +423,21 @@ export default function Scene3d({
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
     renderer.domElement.addEventListener("click", onClick);
+    renderer.domElement.addEventListener("contextmenu", onContextMenu);
+    renderer.domElement.style.cursor = "grab";
     renderer.domElement.addEventListener("keydown", onKey);
+
+    // Declared before `resize`, and that is load-bearing rather than tidy.
+    //
+    // `resize` sets it, `ResizeObserver` calls `resize` **synchronously on observe**, and
+    // `let` bindings are in a temporal dead zone until their declaration runs. Declared
+    // below with the render loop — where it reads as belonging — the first observation
+    // threw `ReferenceError: Cannot access 'dirty' before initialization`, the Suspense
+    // boundary had no error boundary above it, and the whole 3D view rendered as
+    // "Something went wrong". Found by pointing a browser at it; no test in the suite
+    // covers a ResizeObserver firing.
+    let dirty = true;
+    let frame = 0;
 
     function resize() {
       const w = mount?.clientWidth ?? 1;
@@ -398,8 +459,6 @@ export default function Scene3d({
     // It draws on demand rather than continuously: nothing in this scene moves unless
     // somebody moves it, and §14.3's argument against a permanent simulation applies
     // just as much to a permanent render loop on a wall display.
-    let frame = 0;
-    let dirty = true;
     const setDirty = () => {
       dirty = true;
     };
@@ -409,6 +468,16 @@ export default function Scene3d({
 
     function tick() {
       frame = requestAnimationFrame(tick);
+
+      // Coast after a flick. Only while the pointer is up, so a spin never fights a drag.
+      if (!dragging && (spinTheta !== 0 || spinPhi !== 0)) {
+        spinTheta = decay(spinTheta);
+        spinPhi = decay(spinPhi);
+        orbit.theta += spinTheta;
+        orbit.phi = clampPhi(orbit.phi + spinPhi);
+        place();
+        dirty = true;
+      }
 
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(pickable)[0];
@@ -472,6 +541,7 @@ export default function Scene3d({
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointermove", setDirty);
       renderer.domElement.removeEventListener("wheel", onWheel);
+      renderer.domElement.removeEventListener("contextmenu", onContextMenu);
       renderer.domElement.removeEventListener("wheel", setDirty);
       renderer.domElement.removeEventListener("click", onClick);
       renderer.domElement.removeEventListener("keydown", onKey);

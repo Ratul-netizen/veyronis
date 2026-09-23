@@ -28,6 +28,7 @@ import { Suspense, lazy, useCallback, useMemo, useState } from "react";
 
 import { listTopology, type TopologyEdge } from "./discovery";
 import { depths, layout, neighboursOf, type Placed } from "./graph";
+import { Boundary } from "./boundary";
 import { message } from "./query";
 import { useShell } from "./shell";
 
@@ -212,16 +213,38 @@ export function TopologyPage() {
       ) : (
         <div className="topo">
           {view === "3d" ? (
-            <Suspense fallback={<p className="dim topo-loading">Loading the 3D view…</p>}>
-              <Scene3d
-                nodes={placed.nodes}
-                edges={placed.edges}
-                depths={layers}
-                selected={selected}
-                onSelect={pick}
-                onOpen={openResource}
-              />
-            </Suspense>
+            /* The 3D view is an alternative way to look at this graph, not the graph.
+               When it fails the screen falls back to the one that always works and says
+               so — losing both to a WebGL error is the wrong trade for an optional view,
+               and is exactly what happened before this boundary existed. */
+            <Boundary
+              what="The 3D topology view"
+              fallback={(error) => (
+                <div className="problem" role="alert">
+                  <p>
+                    The 3D view could not start, so this is the 2D one. Everything on this
+                    screen is the same graph.
+                  </p>
+                  <p className="dim">{error.message}</p>
+                  <p>
+                    <button type="button" onClick={() => setView("2d")}>
+                      Stay in 2D
+                    </button>
+                  </p>
+                </div>
+              )}
+            >
+              <Suspense fallback={<p className="dim topo-loading">Loading the 3D view…</p>}>
+                <Scene3d
+                  nodes={placed.nodes}
+                  edges={placed.edges}
+                  depths={layers}
+                  selected={selected}
+                  onSelect={pick}
+                  onOpen={openResource}
+                />
+              </Suspense>
+            </Boundary>
           ) : (
           <svg
             className="topo-canvas"

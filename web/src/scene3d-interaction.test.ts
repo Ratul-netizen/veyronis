@@ -19,6 +19,10 @@ import {
   orbitFor,
   positionOf,
   type CameraPreset,
+  decay,
+  pitchFor,
+  yawFor,
+  zoomFactor,
 } from "./scene3d-interaction";
 
 describe("the vertical bound", () => {
@@ -128,5 +132,66 @@ describe("positionOf", () => {
       const distance = Math.hypot(at.x - centre.x, at.y - centre.y, at.z - centre.z);
       expect(distance).toBeCloseTo(250, 6);
     }
+  });
+});
+
+describe("how a drag becomes a rotation", () => {
+  it("turns the estate all the way round across the viewport, whatever its width", () => {
+    // The point of making this viewport-relative: the gesture means the same thing on a
+    // 13-inch laptop and a 4K monitor.
+    expect(yawFor(1280, 1280)).toBeCloseTo(Math.PI * 2, 6);
+    expect(yawFor(3840, 3840)).toBeCloseTo(Math.PI * 2, 6);
+    expect(yawFor(640, 1280)).toBeCloseTo(Math.PI, 6);
+  });
+
+  it("is far lighter than the fixed rate it replaced", () => {
+    // The old constant was 0.006 rad/px, so half a turn took ~524px of dragging and was
+    // reported as "rotating is very tough". On a 1280px canvas it is now 320px.
+    const oldPixelsForHalfTurn = Math.PI / 0.006;
+    const nowPixelsForHalfTurn = 1280 / 2 / 2;
+    expect(nowPixelsForHalfTurn).toBeLessThan(oldPixelsForHalfTurn / 1.5);
+  });
+
+  it("gives pitch half a turn, matching phi's range", () => {
+    expect(pitchFor(800, 800)).toBeCloseTo(Math.PI, 6);
+  });
+});
+
+describe("spin decay", () => {
+  it("settles rather than drifting forever", () => {
+    let v = 0.05;
+    let frames = 0;
+    while (v !== 0 && frames < 500) {
+      v = decay(v);
+      frames += 1;
+    }
+    expect(v).toBe(0);
+    // Roughly half a second at 60Hz: momentum without anything still moving afterwards.
+    expect(frames).toBeLessThan(90);
+  });
+
+  it("keeps its direction while it decays", () => {
+    expect(decay(-0.05)).toBeLessThan(0);
+    expect(decay(0.05)).toBeGreaterThan(0);
+  });
+});
+
+describe("wheel zoom", () => {
+  it("treats a notch the same whether the browser reports pixels, lines or pages", () => {
+    const pixels = zoomFactor(100, 0);
+    const lines = zoomFactor(100 / 16, 1);
+    const pages = zoomFactor(100 / 400, 2);
+    expect(lines).toBeCloseTo(pixels, 6);
+    expect(pages).toBeCloseTo(pixels, 6);
+  });
+
+  it("is reversible: out then in returns to the same distance", () => {
+    // Exponential rather than multiplying by (1 + k·delta), which does not round-trip.
+    expect(zoomFactor(120, 0) * zoomFactor(-120, 0)).toBeCloseTo(1, 9);
+  });
+
+  it("zooms out on a positive delta and in on a negative one", () => {
+    expect(zoomFactor(100, 0)).toBeGreaterThan(1);
+    expect(zoomFactor(-100, 0)).toBeLessThan(1);
   });
 });

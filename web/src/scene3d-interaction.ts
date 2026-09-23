@@ -131,3 +131,68 @@ export function orbitFor(preset: CameraPreset, fit: number): Orbit {
       return { theta: Math.PI * 0.25, phi: Math.PI * 0.32, radius: fit };
   }
 }
+
+// ---------------------------------------------------------------------------
+// How a drag turns into a rotation — and why it is not a constant
+// ---------------------------------------------------------------------------
+
+/**
+ * How much of a turn dragging the full width of the viewport performs.
+ *
+ * The first version used a fixed 0.006 radians per pixel, which sounds reasonable and is
+ * not: a 180° turn needed about five hundred pixels of dragging, so on a laptop trackpad
+ * looking at the other side of the estate took three or four strokes. It was reported as
+ * "rotating is very tough", which is exactly what that arithmetic produces.
+ *
+ * Viewport-relative instead, so the gesture means the same thing on a 4K monitor and a
+ * 13-inch laptop: dragging across the canvas turns the estate all the way round. Half of
+ * that vertically, because `phi` has only 180° of travel against `theta`'s 360° and the
+ * two should feel like one gesture rather than two speeds.
+ */
+export const TURN_PER_WIDTH = Math.PI * 2;
+
+/** Radians of rotation for a horizontal drag of `dx` pixels across a viewport `width` px wide. */
+export function yawFor(dx: number, width: number): number {
+  return (dx / Math.max(width, 1)) * TURN_PER_WIDTH;
+}
+
+/** The same vertically. Half a turn over the full height, matching `phi`'s range. */
+export function pitchFor(dy: number, height: number): number {
+  return (dy / Math.max(height, 1)) * Math.PI;
+}
+
+/**
+ * How fast a flick decays, per frame at 60Hz.
+ *
+ * Inertia is not decoration here. Without it every rotation stops dead on pointer-up, so
+ * inspecting a graph is a series of short strokes with a pause between each — which is
+ * the other half of why the first version felt heavy. 0.92 settles in roughly half a
+ * second: long enough to feel like momentum, short enough that nothing is still moving by
+ * the time the eye has followed it.
+ */
+export const SPIN_DECAY = 0.92;
+
+/** Below this, a spin has stopped; keeping it alive would render frames for nothing. */
+export const SPIN_FLOOR = 0.0004;
+
+/** One step of decay. Returns `0` once the motion is beneath the floor. */
+export function decay(velocity: number): number {
+  const next = velocity * SPIN_DECAY;
+  return Math.abs(next) < SPIN_FLOOR ? 0 : next;
+}
+
+/**
+ * A wheel event's zoom factor, normalised across the three `deltaMode` values.
+ *
+ * A browser may report a wheel notch in pixels, lines or pages, and the raw number
+ * differs by two orders of magnitude between them. Multiplying `deltaY` by a constant —
+ * which is what the first version did — makes the same gesture a nudge on one machine and
+ * a jump on another.
+ */
+export function zoomFactor(deltaY: number, deltaMode: number): number {
+  // 0 = pixels, 1 = lines, 2 = pages.
+  const perNotch = deltaMode === 1 ? 16 : deltaMode === 2 ? 400 : 1;
+  const steps = (deltaY * perNotch) / 500;
+  // Exponential, so zooming out then in by the same gesture returns to where it started.
+  return Math.exp(steps);
+}
