@@ -33,16 +33,28 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 
+import { api } from "./api";
+import {
+  conversations,
+  displayAddress,
+  hasPorts,
+  humanBytes,
+  protocolName,
+  topTalkers,
+  traffic,
+} from "./flow";
 import { message, runQuery, type Query } from "./query";
 import {
   CATEGORIES,
   describeCategory,
   events,
+  denialsFor,
   failuresBySource,
   failuresByUser,
   grouped,
   isRefusal,
   recentEvents,
+  reportingDevices,
   unresolvedNames,
   type Category,
 } from "./security";
@@ -208,11 +220,146 @@ export function SecurityPage() {
           </div>
         )}
       </section>
+
+      <BothSignals devices={reportingDevices(rows)} from={from} to={to} />
     </>
   );
 }
 
-/** One of this screen's four queries. */
+/**
+ * One device's refusals beside its traffic — M11 §2.6.
+ *
+ * # The two tables are next to each other and nothing is drawn between them
+ *
+ * §2.6 asks for a firewall denial and the flow record for the same conversation shown
+ * together, *joined on the resource rather than on a re-parsed address*. So they are joined
+ * on the device and the window, and the product makes no claim that a row on the left is
+ * the row on the right.
+ *
+ * It would be easy to draw that line and wrong to. A flow exporter samples one packet in a
+ * thousand; a firewall logs every refusal; and the address a firewall wrote may be the
+ * translated one. Matching them by address and port would produce a correlation that is
+ * right often enough to be trusted and wrong often enough to matter, which is the worst of
+ * both.
+ *
+ * What is true is narrower and is what the caption says: this device refused these and
+ * passed that, in this window.
+ */
+function BothSignals({
+  devices,
+  from,
+  to,
+}: {
+  devices: string[];
+  from: string | undefined;
+  to: string | undefined;
+}) {
+  const { tenant } = useShell();
+  const [chosen, setChosen] = useState<string | null>(null);
+  const device = chosen && devices.includes(chosen) ? chosen : (devices[0] ?? null);
+
+  // Names for the picker. The ids come from the events already on screen; this is the only
+  // thing that turns one into something an operator recognises.
+  const named = useQuery({
+    queryKey: ["resources", tenant.tenant_id],
+    queryFn: () => api.resources(tenant.tenant_id),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const nameOf = (id: string) =>
+    named.data?.items.find((r) => r.id === id)?.name ?? id;
+
+  const denials = useSecurityQuery(
+    `denials-${device ?? "none"}`,
+    device && from && to ? denialsFor(device, from, to) : null,
+  );
+  const flows = useSecurityQuery(
+    `flows-${device ?? "none"}`,
+    device && from && to ? topTalkers(from, to, 25, device) : null,
+  );
+
+  const refused = useMemo(() => events(denials.data), [denials.data]);
+  const passed = useMemo(
+    () => (flows.data ? conversations(flows.data) : []),
+    [flows.data],
+  );
+
+  if (devices.length === 0) return null;
+
+  return (
+    <section className="panel">
+      <h2>One device, both signals</h2>
+      <p className="dim">
+        What this device refused, and what its traffic looked like, in the same window.
+        {" "}
+        <strong>These are two observations, not one.</strong> A flow exporter samples; a
+        firewall logs every refusal; and the address a firewall wrote may be the translated
+        one. Nothing here claims a row on the left is a row on the right — that link is
+        yours to make.
+      </p>
+
+      <div className="topo-controls">
+        <span className="presets" role="group" aria-label="Device">
+          {devices.slice(0, 8).map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={device === id}
+              onClick={() => setChosen(id)}
+            >
+              {nameOf(id)}
+            </button>
+          ))}
+        </span>
+      </div>
+
+      <div className="both-signals">
+        <div>
+          <h3>Refused</h3>
+          {refused.length === 0 ? (
+            <p className="dim">Nothing was refused by this device in this window.</p>
+          ) : (
+            <ul className="scene3d-links">
+              {refused.map((row, n) => (
+                <li key={`${row.observedAt}-${n}`}>
+                  {row.summary} <span className="dim">{row.observedAt}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div>
+          <h3>Passed</h3>
+          {passed.length === 0 ? (
+            <p className="dim">
+              No flow records for this device. A firewall that logs but exports no flow is
+              the ordinary case — the two are separate features on most of them.
+            </p>
+          ) : (
+            <ul className="scene3d-links">
+              {passed.map((c, n) => {
+                const bytes = traffic(c.observedBytes, c.samplingRate);
+                return (
+                  <li key={`${c.src}-${c.dst}-${c.port}-${n}`}>
+                    {displayAddress(c.src)} → {displayAddress(c.dst)}
+                    {hasPorts(c.protocol) && `:${c.port}`}{" "}
+                    <span className="dim">
+                      {protocolName(c.protocol)} · {humanBytes(bytes.value)}
+                      {bytes.estimated && " (sampled)"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** One of this screen's queries. */
 function useSecurityQuery(name: string, query: Query | null) {
   const { tenant } = useShell();
   return useQuery({

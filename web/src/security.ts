@@ -264,3 +264,55 @@ export function events(result: ResultSet | undefined): EventRow[] {
     resourceId: resource >= 0 ? text(row[resource]) : "",
   }));
 }
+
+/**
+ * One device's refused traffic — M11 §2.6.
+ *
+ * # What this is, and the claim it does not make
+ *
+ * §2.6's criterion asks for a firewall `denied` event and the flow record for the same
+ * conversation *shown together, joined on the resource rather than on a re-parsed address*.
+ * This is the event half; `topTalkers(…, resource)` is the flow half, and the screen puts
+ * them side by side.
+ *
+ * **The product does not assert the two describe the same packets**, and will not. Matching
+ * a denial against a flow record by address and port is guesswork the moment NAT, sampling
+ * or direction is involved: a flow exporter samples one in a thousand, a firewall logs every
+ * refusal, and the address the firewall wrote may be the translated one. A product that drew
+ * a line between them would be inventing a correlation to look clever, which is the failure
+ * §2.6 exists to avoid.
+ *
+ * What is true and worth showing is narrower: *this device refused these, and passed that,
+ * in this window*. The operator makes the link, and the screen says that is what it is doing.
+ */
+export function denialsFor(resource: string, from: string, to: string): Query {
+  return {
+    signal: "event",
+    time: window(from, to),
+    resources: { type: "ids", ids: [resource] },
+    filter: {
+      op: "and",
+      of: [
+        { op: "compare", field: { field: "event_category" }, cmp: "eq", value: "network" },
+        { op: "compare", field: { field: "event_type" }, cmp: "eq", value: "denied" },
+      ],
+    },
+    order_by: [{ key: { by: "field", field: { field: "observed_at" } }, desc: true }],
+    limit: LIMIT,
+  };
+}
+
+/**
+ * Which devices reported security events, in the order they should be offered.
+ *
+ * Taken from the events already on screen rather than from a second request: a device with
+ * no security events has nothing to show on either side of §2.6's comparison, and offering
+ * it would be offering an empty answer.
+ */
+export function reportingDevices(rows: EventRow[]): string[] {
+  const seen: string[] = [];
+  for (const row of rows) {
+    if (row.resourceId && !seen.includes(row.resourceId)) seen.push(row.resourceId);
+  }
+  return seen;
+}

@@ -2624,6 +2624,32 @@ button.following {
 }
 
 
+/* M11 §2.6: one device's refusals beside its traffic. Two columns, side by side and
+   visually equal — neither is derived from the other, and a layout that nested one under
+   the other would suggest it was. Stacked on a narrow screen, refusals first, because that
+   is the column somebody opened this section for. */
+.both-signals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--space) * 3);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .both-signals {
+    grid-template-columns: 1fr;
+  }
+}
+
+.both-signals h3 {
+  font-size: var(--t-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 0 0 var(--space);
+}
+
+
 .topo-loading {
   aspect-ratio: 1;
   max-height: 72vh;

@@ -19,7 +19,9 @@ import {
   failuresByUser,
   grouped,
   isRefusal,
+  denialsFor,
   recentEvents,
+  reportingDevices,
   unresolvedNames,
 } from "./security";
 
@@ -205,5 +207,44 @@ describe("reading a result", () => {
     expect(rows[0]?.category).toBe("");
     expect(events(undefined)).toEqual([]);
     expect(grouped(undefined)).toEqual([]);
+  });
+});
+
+describe("one device, both signals — §2.6", () => {
+  const DEVICE = "11111111-2222-3333-4444-555555555555";
+
+  it("scopes the denials to one device", () => {
+    const query = denialsFor(DEVICE, FROM, TO);
+    expect(query.resources).toEqual({ type: "ids", ids: [DEVICE] });
+    expect(query.signal).toBe("event");
+  });
+
+  it("asks for refusals and not for everything the device reported", () => {
+    const said = JSON.stringify(denialsFor(DEVICE, FROM, TO).filter);
+    expect(said).toContain("network");
+    expect(said).toContain("denied");
+    expect(said).not.toContain("allowed");
+  });
+
+  it("does not aggregate, because the rows are the evidence", () => {
+    // A count of denials is the table further up the page. This section is the lines
+    // themselves, beside the traffic, for somebody deciding whether they are related.
+    expect(denialsFor(DEVICE, FROM, TO).aggregations).toBeUndefined();
+  });
+
+  it("offers only devices that reported something", () => {
+    // Taken from the events already on screen. A device with no security events has
+    // nothing on either side of the comparison, and offering it would be offering an
+    // empty answer.
+    const rows = [
+      { observedAt: "t1", category: "network", type: "denied", summary: "", resourceId: "a" },
+      { observedAt: "t2", category: "network", type: "allowed", summary: "", resourceId: "b" },
+      { observedAt: "t3", category: "network", type: "denied", summary: "", resourceId: "a" },
+      { observedAt: "t4", category: "dns", type: "query", summary: "", resourceId: "" },
+    ];
+    // Deduplicated, in the order they were first seen, and a row with no resource is not
+    // a device.
+    expect(reportingDevices(rows)).toEqual(["a", "b"]);
+    expect(reportingDevices([])).toEqual([]);
   });
 });

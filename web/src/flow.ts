@@ -33,12 +33,25 @@ export const TOP_N = 25;
  * measurement. Dropping `sampling_rate` here would silently move this query onto the raw
  * table and make its answer meaningless at the same time.
  */
-export function topTalkers(start: string, end: string, limit = TOP_N): Query {
+/**
+ * The busiest conversations in a window.
+ *
+ * `resource` narrows it to one device's flows — M11 §2.6 shows a firewall's denials beside
+ * its traffic, and the alternative was a second flow query living in the security module.
+ * A second copy of flow analytics with the word "security" on it is exactly what §2.6 says
+ * not to build, so the scoping goes here instead.
+ */
+export function topTalkers(
+  start: string,
+  end: string,
+  limit = TOP_N,
+  resource?: string,
+): Query {
   const rate: Field = { field: "sampling_rate" };
   return {
     signal: "flow",
     time: { start, end },
-    resources: { type: "all" },
+    resources: resource ? { type: "ids", ids: [resource] } : { type: "all" },
     aggregations: [
       { func: "sum", field: { field: "bytes" }, alias: "bytes" },
       { func: "sum", field: { field: "packets" }, alias: "packets" },

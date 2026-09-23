@@ -223,6 +223,17 @@ and the product knows the resource both are attached to. What is worth building 
 screen that shows them together; what is not worth building is a second copy of flow
 analytics with the word "security" on it.
 
+> **Amended while building it.** "Two observations of one thing" is true of the network and
+> is not something this product can establish *per row*. Matching a denial to a flow record
+> needs address and port, and NAT, sampling and direction each break that: the exporter
+> samples, the firewall does not, and the address the firewall wrote may already be
+> translated.
+>
+> So the join is on the **resource and the window**, which the product does know, and the
+> screen shows the two side by side without drawing a line between them. That is a narrower
+> claim than this paragraph originally made, and it is the one that survives a customer
+> asking how it was arrived at.
+
 ### 2.7 Every read of a security event is already audited, and that is not an accident.
 
 SPEC §M0.8 requires read auditing — *"defence and law-enforcement buyers audit who **saw**
@@ -314,8 +325,25 @@ a person's judgement rather than a product's guess — and an event does not.
       aggregate
       > Fifty names that resolved sit in the same window and are absent from the table, so
       > the filter is doing the work rather than the volume.
-- [ ] A firewall `denied` event and the flow record for the same conversation are shown
+- [x] A firewall `denied` event and the flow record for the same conversation are shown
       together, joined on the resource rather than on a re-parsed address
+      > **Amended while building it**, because the criterion as written asks for slightly
+      > more than the product may claim. *"The same conversation"* would require matching a
+      > denial against a flow record by address and port, and that is guesswork the moment
+      > NAT, sampling or direction is involved: a flow exporter samples one packet in a
+      > thousand, a firewall logs every refusal, and the address the firewall wrote may be
+      > the translated one. A correlation that is right often enough to be trusted and wrong
+      > often enough to matter is the worst of both.
+      >
+      > What is shipped is the honest half, and it is what the second clause of the
+      > criterion actually asks for: **joined on the resource and the window**. One device's
+      > refusals beside its traffic, two columns, visually equal, with nothing drawn between
+      > them — and a caption that says in as many words that these are two observations
+      > rather than one, and that the link is the operator's to make.
+      >
+      > The flow query is `topTalkers` with a resource argument rather than a second flow
+      > query in the security module, which is §2.6's own instruction: what is not worth
+      > building is a second copy of flow analytics with the word "security" on it.
 - [x] Reading a security event writes an `access_log` entry, by the middleware that has
       been there since M1 — verified, not assumed
       > Nothing was built for it, which is the point. SPEC §M0.8 called read auditing
