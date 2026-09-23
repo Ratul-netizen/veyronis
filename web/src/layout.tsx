@@ -36,6 +36,10 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       { to: "/resources", label: "Resources" },
       { to: "/topology", label: "Topology" },
       { to: "/discovery", label: "Discovery", exact: true },
+      // Address space. Under Network beside Discovery, and not inside it: sweeping finds
+      // devices, and a declared range is address space an operator watches whether or not
+      // anything is in it — `docs/ipam.md` §2.1.
+      { to: "/subnets", label: "Addresses" },
       { to: "/flow", label: "Flow" },
       { to: "/map", label: "Map" },
     ],

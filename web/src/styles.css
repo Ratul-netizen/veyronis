@@ -2803,3 +2803,30 @@ button.following {
   color: var(--text-dim);
   margin: 0 0 var(--space);
 }
+
+/* Addresses — `subnetspage.tsx`.
+ *
+ * The utilisation bar is the same shape as the waterfall's track, on purpose: both answer
+ * "how much of this span is taken", and two visual languages for one idea is one more than
+ * a reader should have to learn. */
+.subnets .track {
+  position: relative;
+  height: 8px;
+  min-width: 90px;
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.12));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.subnets .track .bar {
+  height: 100%;
+  background: var(--accent, #4c8dff);
+  border-radius: 2px;
+}
+
+/* A row holding something that answered and that nothing claims — the one judgement this
+   screen makes. A left rail rather than a background tint: the row still has to be read,
+   and a tinted row with six numbers in it is harder to read, not easier. */
+.rows tr.attention td:first-child {
+  box-shadow: inset 2px 0 0 var(--sev-warn);
+}

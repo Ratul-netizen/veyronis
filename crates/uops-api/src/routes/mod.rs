@@ -23,6 +23,7 @@ pub mod resources;
 pub mod searches;
 pub mod servicemap;
 pub mod sites;
+pub mod subnets;
 pub mod sso;
 pub mod runbooks;
 pub mod topology;
@@ -277,6 +278,14 @@ pub fn router(state: AppState) -> Router {
         // reason it exists.
         .route("/api/v1/notifications", get(channels::sent))
         .route("/api/v1/sites", get(sites::list))
+        // Address space — `docs/ipam.md`. Under Network in the UI, because a range is
+        // inventory: what the estate is made of rather than what it is doing.
+        .route(
+            "/api/v1/subnets",
+            get(subnets::list).post(subnets::declare),
+        )
+        .route("/api/v1/subnets/{id}", delete(subnets::forget))
+        .route("/api/v1/subnets/{id}/addresses", get(subnets::addresses))
         .route("/api/v1/sites/{id}/location", put(sites::place))
         .route("/api/v1/query", post(query::run))
         // The tail is its own route rather than a flag on the one above, because it is

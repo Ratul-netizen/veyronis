@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO subnet (tenant_id, range, name, description, site_id, assignment)\n            VALUES ($1, $2::text::cidr, $3, $4, $5, $6)\n            RETURNING id, host(range) || '/' || masklen(range) AS \"range!\", name, description,\n                      site_id AS \"site_id: SiteId\", assignment\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "range!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "site_id: SiteId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "assignment",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4081ee4d62864480200bdd2a53dd819facf6cac5c55d644ddd4583724af69923"
+}

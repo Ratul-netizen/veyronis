@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.id,\n                host(s.range) || '/' || masklen(s.range) AS \"range!\",\n                s.name,\n                s.description,\n                s.site_id     AS \"site_id: SiteId\",\n                s.assignment,\n                subnet_usable_addresses(s.range) AS \"capacity!\",\n                (\n                    SELECT count(DISTINCT i.value::inet)\n                      FROM resource_identifier i\n                     WHERE i.tenant_id = s.tenant_id\n                       AND i.kind = 'mgmt_ip'\n                       AND i.value ~ '^[0-9.]+$'\n                       AND i.value::inet <<= s.range\n                ) AS \"assigned!\",\n                (\n                    SELECT count(DISTINCT c.address)\n                      FROM discovery_candidate c\n                     WHERE c.tenant_id = s.tenant_id\n                       AND c.address IS NOT NULL\n                       AND c.address <<= s.range\n                ) AS \"responding!\",\n                (\n                    SELECT count(DISTINCT c.address)\n                      FROM discovery_candidate c\n                     WHERE c.tenant_id = s.tenant_id\n                       AND c.address IS NOT NULL\n                       AND c.address <<= s.range\n                       AND NOT EXISTS (\n                           SELECT 1\n                             FROM resource_identifier i\n                            WHERE i.tenant_id = s.tenant_id\n                              AND i.kind = 'mgmt_ip'\n                              AND i.value ~ '^[0-9.]+$'\n                              AND i.value::inet = c.address\n                       )\n                ) AS \"unaccounted!\"\n              FROM subnet s\n             WHERE s.tenant_id = $1\n             ORDER BY s.range\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "range!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "site_id: SiteId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "assignment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "capacity!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "responding!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "unaccounted!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5501c7e460cace11a4722f35e326aea64935e7c1a4808784a3491353984c5dd7"
+}

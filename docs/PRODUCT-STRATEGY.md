@@ -7,8 +7,9 @@
 **Method:** repository ground truth read from code, tests and migrations on 23 September
 2026. Competitor capability read from vendor documentation and review sources, accessed
 23 September 2026; marketing claims labelled separately throughout.
-**No product code or roadmap file was changed.** Findings that imply a change to
-`STATUS.md` or a milestone document are listed in §10 as actions to take, not taken.
+**Amended 23 September 2026, after the first three actions were done.** §11's actions are
+complete and Stage 1b was brought forward — see §14, which records what was built and the
+one place this document's estimate was wrong. The analysis above is left as written.
 
 ---
 
@@ -58,12 +59,11 @@ product". Against them, checked in this repository today:
 | NetFlow Analyzer | **Already core** — `uops-collector-flow`, NetFlow/IPFIX/sFlow |
 | Applications Manager (APM) | **Already core** — OTLP traces, service map, service aggregates |
 | Firewall Analyzer | **Already core** — M11 security analytics, ECS, firewall deny events |
-| **NCM** (config management) | **Absent** |
-| **IPAM** | **Absent** |
+| **NCM** (config management) | **Absent** — the remaining one |
+| IPAM | **Built 23 Sep 2026** — migration 0028, `docs/ipam.md` |
 
-**Three of the five are already in the core product, unbundled and unlicensed separately.**
-Veyronis is two modules away from a feature-complete network operations product — and both
-of those two turn out to be unusually cheap here (§4).
+**Three of the five were already in the core product, unbundled and unlicensed
+separately.** A fourth was built the same day this was written (§14). **One remains: NCM.**
 
 This is a much stronger position than either the earlier note or the outside assessment
 described. It was missed because both read capability lists instead of substrate.
@@ -87,7 +87,7 @@ in §10; per instruction it has not been edited here.
 | Metrics + alerting | **Implemented** | `uops-alert` |
 | Incidents, topology suppression, timeline | **Implemented** | `uops-incident` |
 | Traces, service map | **Implemented (backend)** | `uops-otlp`, `routes/servicemap.rs` |
-| **Trace waterfall screen** | **Absent — UI only** | M8: "needs nothing new from the backend" |
+| Trace waterfall screen | **Implemented** (23 Sep) | `web/src/trace.ts`, `tracepage.tsx` — no backend work, as M8 said |
 | Security analytics (ECS, detections) | **Implemented** | `uops-security`, M11 12/12 |
 | Runbook automation (typed, approved, dry-run) | **Implemented** | `uops-runbook`, `uops-runner`, M10 12/13 |
 | Multi-tenancy | **Implemented, type-enforced** | `TenantScope`, 68 routes in `isolation.rs` |
@@ -95,7 +95,7 @@ in §10; per instruction it has not been edited here.
 | Leases/HA, rehearsed restore, read audit | **Implemented** | M12, `docs/restore-drill.md` |
 | Self-monitoring | **Partial** | sign-ins done; collector/lease/run events open |
 | **NCCM config backup/diff** | **Absent** — "out of scope" in M10 | — |
-| **IPAM** | **Absent** | but see §4: substrate exists |
+| **IPAM** | **Implemented** (23 Sep) | migration 0028, `uops_store_pg::ipam`, `/api/v1/subnets`, Addresses screen |
 | **SLO framework** | **Absent** | no code, no doc |
 | Cloud/hybrid (AWS/Azure/K8s) | **Absent as integrations** | OTLP gives generic visibility |
 | RUM | **Absent** | — |
@@ -610,3 +610,58 @@ third-party opinion. All accessed **23 September 2026**.
 shipped; config out of scope; one criterion open), `docs/M11-security.md` (12/12),
 `docs/M12-enterprise.md`, `crates/uops-api/tests/isolation.rs` (68 routes); full workspace
 run 1 648 passed / 0 failed; ~113k lines Rust vs ~17k lines TypeScript.
+
+
+---
+
+## 14. What was built after this was written
+
+Added 23 September 2026, the same day. Recorded here rather than in a new document because
+a strategy note whose recommendations have been acted on and does not say so is the same
+failure `STATUS.md` had in §2.
+
+**§11's three actions are done.**
+
+1. **`STATUS.md` corrected.** It had described M10 and M11 as unbuilt and called them
+   "direction, not commitments"; an outside reviewer had read exactly that and concluded
+   the runner, the runbook API and the runbook screens did not exist.
+2. **The trace waterfall shipped** — `web/src/trace.ts`, `trace.test.ts`, `tracepage.tsx`,
+   reachable from any log row carrying a trace id. **§8.3's estimate of "no backend work"
+   held**: M8 was right, and the only server-side thing needed was four field names added
+   to the TypeScript mirror of the AST.
+3. **The operator home gained the tile §8.1 called the differentiating one** — *Arriving*,
+   six cheap aggregates that separate "nothing is wrong" from "nothing is arriving", plus
+   the admin-only strip reading the self-monitoring sign-in events.
+
+**Stage 1b (IPAM) was brought forward and built**, ahead of the Gate 1 evidence §9 asks
+for. That is a deliberate departure from this document's own sequencing, made on the
+founder's instruction to cover more of the competitor's surface, and it is written down
+rather than smoothed over. The mitigation is that §4 rated IPAM the cheapest module on the
+list and that rating proved correct: one table, one store module, four routes, one screen,
+and **no new collection of any kind**.
+
+`docs/ipam.md` holds the decisions, closed before building as usual. Twenty tests — eleven
+against real `PostgreSQL`, nine on the client.
+
+**Where this document's estimate was wrong, and it is worth recording:** §4 said the IPAM
+substrate was "very high reuse … mostly schema, aggregation and a screen", and that was
+right about the size and wrong about *where the difficulty was*. The difficulty was not
+the aggregation, it was three places where the obvious query is plausible and incorrect:
+
+* a join instead of correlated subqueries double-counts every address that is both
+  assigned and responding, which is most of them;
+* an inner join drops exactly the addresses the feature exists to surface;
+* `2^(32-masklen) - 2` returns 0 for a /31 and **-1** for a /32, both ordinary in a routed
+  estate.
+
+None of those is a schema problem, and none would have been caught by a test that only
+asserted the happy path. **The lesson for Stage 1a (NCM) is that "high substrate reuse"
+predicts the size of a module and says nothing about where its defects will be.**
+
+The adversarial isolation test also earned its keep immediately: it caught
+`GET /api/v1/subnets/{id}/addresses` answering `200 []` for another tenant's range instead
+of 404. Nothing leaked, but the owner of an empty range and somebody probing another
+tenant's ids got the same answer. Fixed in the store, where the scope lives.
+
+**Still open, and unchanged:** NCM, SLOs, and the Gate 1 interviews — which now matter
+*more* rather than less, because a second module has been built on inference.

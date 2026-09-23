@@ -403,6 +403,40 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Scoped,
         body: None,
     },
+    // Address space — `docs/ipam.md`. The surface M12's standing isolation criterion
+    // reopens for: RFC 1918 space is in use in every building on earth, so two tenants
+    // declaring 10.0.0.0/24 is the ordinary case rather than the contrived one, and a
+    // leak here would show one customer's devices inside another customer's range.
+    RouteCase {
+        path: "/api/v1/subnets",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/subnets",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: Some(r#"{"range":"10.250.0.0/24","name":"isolation probe"}"#),
+    },
+    RouteCase {
+        // Another tenant's subnet id must be a 404, not a 403: confirming the id exists
+        // would tell the caller that range is declared somewhere else.
+        path: "/api/v1/subnets/{id}",
+        probe: Some("/api/v1/subnets/018f0000-0000-7000-8000-0000000000cc"),
+        method: "DELETE",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/subnets/{id}/addresses",
+        probe: Some("/api/v1/subnets/018f0000-0000-7000-8000-0000000000cc/addresses"),
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     RouteCase {
         // Placing a site on the map. Scoped: another tenant's site must be a 404, not a
         // 403 — confirming the id exists would leak that customer's estate.

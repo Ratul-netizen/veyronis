@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH bounds AS (\n                SELECT range FROM subnet WHERE tenant_id = $1 AND id = $2\n            ),\n            claimed AS (\n                SELECT DISTINCT ON (i.value::inet)\n                       i.value::inet AS address,\n                       i.resource_id,\n                       i.last_seen\n                  FROM resource_identifier i, bounds b\n                 WHERE i.tenant_id = $1\n                   AND i.kind = 'mgmt_ip'\n                   AND i.value ~ '^[0-9.]+$'\n                   AND i.value::inet <<= b.range\n                 ORDER BY i.value::inet, i.last_seen DESC\n            ),\n            answered AS (\n                SELECT DISTINCT ON (c.address)\n                       c.address, c.last_seen\n                  FROM discovery_candidate c, bounds b\n                 WHERE c.tenant_id = $1\n                   AND c.address IS NOT NULL\n                   AND c.address <<= b.range\n                 ORDER BY c.address, c.last_seen DESC\n            )\n            SELECT\n                host(coalesce(claimed.address, answered.address)) AS \"address!\",\n                claimed.resource_id AS \"resource_id?: uops_core::ResourceId\",\n                r.name              AS \"resource_name?\",\n                (answered.address IS NOT NULL) AS \"responding!\",\n                greatest(claimed.last_seen, answered.last_seen) AS \"last_seen?\"\n              FROM claimed\n              FULL JOIN answered ON claimed.address = answered.address\n              LEFT JOIN resource r\n                     ON r.id = claimed.resource_id AND r.tenant_id = $1\n             ORDER BY 1\n             LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "address!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "resource_id?: uops_core::ResourceId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "resource_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "responding!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_seen?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "5b7bcccc22ce1902eaf2073ae66d5d6bdb7ac8e092e1d94e881f636847f90dc0"
+}

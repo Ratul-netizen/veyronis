@@ -37,6 +37,7 @@ import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
 import { ServicesPage } from "./servicespage";
+import { SubnetsPage } from "./subnetspage";
 import { TracePage } from "./tracepage";
 import { IncidentsPage } from "./incidentspage";
 import { OverviewPage } from "./overview";
@@ -236,6 +237,12 @@ const traceRoute = createRoute({
   },
 });
 
+const subnetsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/subnets",
+  component: SubnetsPage,
+});
+
 const topologyRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/topology",
@@ -293,6 +300,7 @@ const routeTree = rootRoute.addChildren([
     flowRoute,
     servicesRoute,
     traceRoute,
+    subnetsRoute,
     incidentsRoute,
     exploreRoute,
     alertsRoute,
