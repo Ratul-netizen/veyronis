@@ -98,11 +98,14 @@ fn absent_user_hash() -> &'static PasswordHashString {
 /// sign-in that was not against it. So these go where break-glass sign-ins already go: the
 /// organization audit log, which is organization-scoped by construction.
 ///
-/// **What that costs is named rather than hidden.** A detection cannot fire on these,
-/// because the alert engine evaluates a `Query` against `ClickHouse` under a tenant scope
-/// and this is a `PostgreSQL` row with no tenant. Detecting on them needs an
-/// organization-scoped evaluation path, which does not exist — see the amendment in
-/// §2.4.
+/// **And a second copy goes where a detection can see it**, when the organization has a
+/// platform tenant — `docs/self-monitoring.md`. The audit row is the record an auditor
+/// reads; the event is the signal a rule can fire on. They are both written because they
+/// answer different questions and are read by different people, and deriving one from the
+/// other later would mean re-reading an audit table nobody kept an offset into.
+///
+/// An organization that has nominated no platform tenant gets the audit row alone, which is
+/// exactly the behaviour before this existed.
 ///
 /// # An address that resolves to no user is deliberately not recorded
 ///
@@ -122,6 +125,8 @@ async fn note_sign_in(
         return;
     };
 
+    let ip = crate::audit::ip_from_headers(headers);
+
     // Failure is swallowed, and this is the one place in the auth path where that is
     // right: a sign-in that worked must not be turned into a 500 because an audit insert
     // failed, and a sign-in that failed has already failed. The break-glass record above
@@ -135,9 +140,93 @@ async fn note_sign_in(
             outcome,
             &profile.email,
             Some(serde_json::json!({ "reason": why })),
-            crate::audit::ip_from_headers(headers),
+            ip,
         )
         .await;
+
+    // And as an event on the installation, when there is one to attach it to.
+    //
+    // # Off the request path, and this is a security property rather than a nicety
+    //
+    // The first version of this did the lookup and the insert inline, and
+    // `an_unknown_address_does_not_answer_faster_than_a_wrong_password` failed — correctly.
+    // Only a *known* address reaches this code, so putting a `ClickHouse` round trip here
+    // made a wrong password measurably slower than an address that does not exist, which is
+    // the account-enumeration oracle that test exists to catch. It was reintroduced from a
+    // direction nobody was watching: not by short-circuiting the verification, but by
+    // adding work after it.
+    //
+    // The audit row above stays inline and the event does not, and the split is the right
+    // one on its own merits: the audit row is *the record*, written to the same
+    // `PostgreSQL` the request already used and ordered with it. The event is derived
+    // telemetry over the network to another host, and a sign-in must not wait for it.
+    let telemetry = state.telemetry.clone();
+    let store = state.store.clone();
+    let org = profile.org_id;
+    let email = profile.email.clone();
+    let at = chrono::Utc::now();
+
+    tokio::spawn(async move {
+        let Ok(Some(platform)) = store.platform_target(org).await else {
+            return;
+        };
+        write_sign_in_event(&telemetry, platform, &email, outcome, why, ip, at).await;
+    });
+}
+
+/// The sign-in, as an event on the installation.
+///
+/// Split out of [`note_sign_in`] so the spawned future is short and owns everything it
+/// touches — a `tokio::spawn` with a page of borrowed state in it is how a lifetime error
+/// turns into a clone nobody meant to make.
+#[allow(clippy::too_many_arguments, reason = "one row, written out")]
+async fn write_sign_in_event(
+    telemetry: &uops_store_ch::ChStore,
+    platform: uops_store_pg::PlatformTarget,
+    email: &str,
+    outcome: &'static str,
+    why: &'static str,
+    ip: Option<std::net::IpAddr>,
+    at: chrono::DateTime<chrono::Utc>,
+) {
+    let mut attributes = std::collections::BTreeMap::new();
+    attributes.insert("user.name".to_owned(), email.to_owned());
+    attributes.insert("event.reason".to_owned(), why.to_owned());
+    if let Some(ip) = ip {
+        attributes.insert("source.ip".to_owned(), ip.to_string());
+    }
+
+    let failed = outcome == SIGN_IN_FAILED;
+    let row = uops_store_ch::EventRow {
+        tenant_id: platform.tenant_id,
+        resource_id: platform.resource_id,
+        site_id: uops_core::SiteId::nil(),
+        observed_at: at,
+        ingested_at: at,
+        // Not `syslog`: nothing was received. This installation is the source, and a
+        // reader filtering `source_kind` should be able to separate what the product
+        // observed about itself from what a device sent it.
+        source_kind: "self".to_owned(),
+        source_vendor: String::new(),
+        // The product is entitled to a severity about its *own* events — M11 §2.8 forbids
+        // inventing one for a message a device sent, and this is not that. A failed sign-in
+        // is a `warn` because it is ordinary; there is no level here that means "alarming",
+        // because how alarming depends on how many, which is a rule's business.
+        severity: if failed { "warn" } else { "info" }.to_owned(),
+        event_category: "authentication".to_owned(),
+        event_type: if failed { "failure" } else { "success" }.to_owned(),
+        summary: format!(
+            "{} sign-in for {}",
+            if failed { "Failed" } else { "Successful" },
+            email
+        ),
+        attributes,
+    };
+
+    // Swallowed for the same reason as the audit row, and with one more: the event is the
+    // *second* record of this sign-in. Losing it costs a detection; losing the request
+    // would cost the sign-in.
+    let _ = uops_store_ch::EventStore::insert_events(telemetry, &[row]).await;
 }
 
 /// What a sign-in record is called.

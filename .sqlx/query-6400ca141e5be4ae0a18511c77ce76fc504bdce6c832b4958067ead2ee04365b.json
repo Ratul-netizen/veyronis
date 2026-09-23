@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO resource (id, tenant_id, kind, name, status, attributes)\n            VALUES ($1, $2, 'service', 'This installation', 'up',\n                    '{\"service.name\": \"uops\"}'::jsonb)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6400ca141e5be4ae0a18511c77ce76fc504bdce6c832b4958067ead2ee04365b"
+}

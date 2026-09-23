@@ -59,6 +59,16 @@ async fn fixture(slug: &str) -> Fixture {
         .await
         .expect("role");
 
+    // What a real single-tenant installation has — `docs/self-monitoring.md`. A first run
+    // nominates its own tenant in the bootstrap transaction, and migration 0027 backfilled
+    // every existing organization that had exactly one. This fixture builds its
+    // organization with raw SQL rather than through either, so it does the same thing
+    // explicitly; the test that un-nominates is what covers the other shape.
+    store
+        .nominate_platform_tenant(org, tenant)
+        .await
+        .expect("platform tenant");
+
     Fixture {
         store,
         org,
@@ -512,4 +522,224 @@ async fn the_record_carries_the_address_the_attempt_came_from() {
         .find(|e| e.action == "auth.sign_in.failure")
         .expect("recorded");
     assert_eq!(record.ip.as_deref(), Some("198.51.100.7"));
+}
+
+// ---- the installation as a resource — docs/self-monitoring.md -------------------
+
+/// Every security event on this organization's platform resource.
+async fn platform_events(f: &Fixture) -> Vec<(String, String, String)> {
+    let Some(target) = f
+        .store
+        .platform_target(f.org)
+        .await
+        .expect("platform target")
+    else {
+        return Vec::new();
+    };
+
+    let client = uops_store_ch::ChClient::new(uops_store_ch::ChConfig {
+        user: std::env::var("CLICKHOUSE_USER").unwrap_or_else(|_| "uops".into()),
+        password: std::env::var("CLICKHOUSE_PASSWORD").unwrap_or_else(|_| "uops".into()),
+        ..uops_store_ch::ChConfig::from_env()
+    });
+    let result = client
+        .run(
+            "SELECT event_type, summary, attributes['source.ip'] FROM events \
+             WHERE resource_id = {resource:UUID} ORDER BY observed_at FORMAT TSV",
+            &[("resource", target.resource_id.into_uuid().to_string())],
+        )
+        .await
+        .expect("query ClickHouse");
+
+    result
+        .body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let mut cells = line.split('\t');
+            (
+                cells.next().unwrap_or_default().to_owned(),
+                cells.next().unwrap_or_default().to_owned(),
+                cells.next().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_new_installation_has_a_resource_for_itself() {
+    // `docs/self-monitoring.md` §4: created, not discovered. Identity resolution exists to
+    // work out what a thing is from what it says about itself, and the installation does
+    // not need to be guessed at.
+    let f = fixture("selfres").await;
+
+    let target = f
+        .store
+        .platform_target(f.org)
+        .await
+        .expect("read")
+        .expect("a first run nominates its own tenant");
+    assert_eq!(target.tenant_id, f.tenant, "the only tenant there is");
+
+    let resource = f
+        .store
+        .resource(&uops_core::TenantScope::system(f.tenant), target.resource_id)
+        .await
+        .expect("the resource exists");
+    assert_eq!(resource.kind, uops_core::ResourceKind::Service);
+    assert_eq!(resource.name, "This installation");
+}
+
+#[tokio::test]
+async fn the_installation_is_not_pollable_and_not_a_runbook_target() {
+    // Both fall out of the schema rather than needing a rule: a resource with no `mgmt_ip`
+    // identifier does not join in `pollable_devices` and cannot be reached by a runbook
+    // step. A product that could be told to SSH into itself is a product with a new class
+    // of mistake available to it.
+    let f = fixture("selfreach").await;
+    let target = f.store.platform_target(f.org).await.unwrap().unwrap();
+    let scope = uops_core::TenantScope::system(f.tenant);
+
+    let addresses = f
+        .store
+        .resource_addresses(&scope, &[target.resource_id])
+        .await
+        .expect("addresses");
+    assert!(
+        addresses.is_empty(),
+        "the installation must have no management address: {addresses:?}"
+    );
+
+    let pollable = f.store.pollable_devices(&scope, 100).await.expect("fleet");
+    assert!(
+        !pollable.iter().any(|d| d.resource_id == target.resource_id),
+        "the installation must not be in the polled fleet"
+    );
+}
+
+/// Wait for the installation to have `want` events, or give up and return what there is.
+///
+/// The sign-in event is written **off the request path** on purpose — see `note_sign_in`,
+/// where putting a `ClickHouse` round trip inline reintroduced an account-enumeration
+/// timing oracle. A test for an intentionally asynchronous write has to wait for it, and a
+/// fixed sleep is a flake waiting for a slow day: this polls to a deadline instead, so it
+/// is fast when the write is fast and still correct when it is not.
+async fn platform_events_eventually(
+    f: &Fixture,
+    want: usize,
+) -> Vec<(String, String, String)> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let found = platform_events(f).await;
+        if found.len() >= want || std::time::Instant::now() > deadline {
+            return found;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_failed_sign_in_becomes_an_event_on_the_installation() {
+    // The whole point of `docs/self-monitoring.md`: the audit row is what an auditor reads,
+    // and this is what a rule can fire on.
+    let f = fixture("selfevent").await;
+
+    let response = app(&f.store)
+        .oneshot(login_request(&f.email, "not the password"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let events = platform_events_eventually(&f, 1).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].0, "failure");
+    assert!(events[0].1.contains(&f.email), "{events:?}");
+
+    // And the audit row is still there. Both, because they answer different questions and
+    // are read by different people.
+    let audit = f.store.org_audit_entries(f.org, 50).await.expect("audit");
+    assert!(audit.iter().any(|e| e.action == "auth.sign_in.failure"));
+}
+
+#[tokio::test]
+async fn a_successful_sign_in_is_an_event_too_and_carries_the_source() {
+    // Not only failures. "Who signed in, from where" is the question an investigation asks
+    // after the fact, and a product that recorded only the refusals could not answer it.
+    let f = fixture("selfok").await;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-forwarded-for", "198.51.100.7")
+        .body(Body::from(
+            serde_json::json!({ "email": f.email, "password": "correct horse" }).to_string(),
+        ))
+        .unwrap();
+    let response = app(&f.store).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let events = platform_events_eventually(&f, 1).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].0, "success");
+    assert_eq!(events[0].2, "198.51.100.7", "the address is on the event");
+}
+
+#[tokio::test]
+async fn an_organization_with_no_platform_tenant_gets_the_audit_row_and_no_event() {
+    // The honest degradation `docs/self-monitoring.md` §3 promised. An organization with
+    // more than one tenant has nominated nothing, and gets exactly the behaviour from
+    // before this existed — rather than an event attributed to a tenant it was not about.
+    let f = fixture("selfnone").await;
+
+    sqlx::query(
+        "UPDATE organization SET platform_tenant_id = NULL, platform_resource_id = NULL \
+         WHERE id = $1",
+    )
+    .bind(f.org.into_uuid())
+    .execute(f.store.pool())
+    .await
+    .expect("un-nominate");
+
+    let response = app(&f.store)
+        .oneshot(login_request(&f.email, "wrong"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    assert!(
+        f.store.platform_target(f.org).await.unwrap().is_none(),
+        "nothing is nominated"
+    );
+    let audit = f.store.org_audit_entries(f.org, 50).await.expect("audit");
+    assert!(
+        audit.iter().any(|e| e.action == "auth.sign_in.failure"),
+        "the audit row is still written"
+    );
+}
+
+#[tokio::test]
+async fn nominating_a_tenant_twice_keeps_the_first_installation() {
+    // Idempotent, and the `UPDATE … WHERE platform_tenant_id IS NULL` is what decides
+    // between two replicas racing at first run rather than a check the caller makes first.
+    // A second "This installation" in the inventory would be the visible half of a race
+    // nobody would think to look for.
+    let f = fixture("selftwice").await;
+    let first = f.store.platform_target(f.org).await.unwrap().unwrap();
+
+    let again = f
+        .store
+        .nominate_platform_tenant(f.org, f.tenant)
+        .await
+        .expect("nominating again is not an error");
+    assert_eq!(again, first, "the same installation");
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM resource WHERE tenant_id = $1 AND name = 'This installation'",
+    )
+    .bind(f.tenant.into_uuid())
+    .fetch_one(f.store.pool())
+    .await
+    .expect("count");
+    assert_eq!(count, 1, "exactly one installation in the inventory");
 }

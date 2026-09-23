@@ -61,6 +61,7 @@ pub mod maintenance;
 pub mod neighbour_ingest;
 pub mod notify;
 pub mod page;
+pub mod platform;
 pub mod pollable;
 pub mod profile;
 pub mod resource;
@@ -95,6 +96,7 @@ pub use lease::{Claim, Job, LeaseRow, PERIOD, RENEW_EVERY, identity};
 pub use maintenance::{MaintenanceWindow, NewWindow};
 pub use notify::{Attempt, Channel, NewChannel, Outcome, Reservation, SentRecord};
 pub use page::{Cursor, DEFAULT_PAGE, MAX_PAGE, Page};
+pub use platform::PlatformTarget;
 pub use pollable::{PollableDevice, SYSOBJECTID_KEY};
 pub use resource::{NewResource, ResourceFilter};
 pub use runbooks::{

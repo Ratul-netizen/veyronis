@@ -611,3 +611,147 @@ async fn topology_suppression_applies_to_a_detection_like_any_other_alert() {
         downstream.decisions
     );
 }
+
+/// M11 §2.4's open criterion, closed — `docs/self-monitoring.md`.
+///
+/// # What this test is for
+///
+/// M11 shipped with *"sign-ins against this product itself are a source of authentication
+/// events"* marked `[~]`: they were recorded in the organization audit log and **nothing
+/// could fire on them**, because the alert engine evaluates a `Query` against `ClickHouse`
+/// under a tenant scope and an audit row has no tenant.
+///
+/// The decision document's answer is that the installation is a resource. If that answer is
+/// right, this test needs no new machinery — the rule is an ordinary rule, the engine is
+/// the ordinary engine, and the only thing that changed is that there is now a resource for
+/// the events to be about. So the assertions below are the same ones
+/// `a_firing_detection_becomes_an_incident` makes about a firewall.
+///
+/// A security-analytics milestone whose first detection cannot see attacks on the
+/// monitoring platform itself is one that missed the target closest to it. This is that
+/// detection.
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines, reason = "one rule written out in full")]
+async fn a_burst_of_failed_sign_ins_against_the_product_fires_a_detection() {
+    let (pg, ch) = stores().await;
+    let scope = tenant(&pg, "selfauth").await;
+
+    // The installation, as a first run or migration 0027 would have created it.
+    let org = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT org_id FROM tenant WHERE id = $1",
+    )
+    .bind(scope.tenant_id().into_uuid())
+    .fetch_one(pg.pool())
+    .await
+    .expect("org");
+    let platform = pg
+        .nominate_platform_tenant(uops_core::OrgId::from_uuid(org), scope.tenant_id())
+        .await
+        .expect("nominate");
+
+    // `count() > 5` over failed authentications on the installation. Nothing about this
+    // rule knows it is about the product rather than about a switch.
+    let end = Utc::now();
+    let rule = pg
+        .create_rule(
+            &scope,
+            None,
+            &NewRule {
+                name: "failed sign-ins".to_owned(),
+                description: String::new(),
+                query: Query {
+                    aggregations: vec![Aggregation {
+                        func: AggFunc::Count,
+                        field: None,
+                        alias: "v".to_owned(),
+                    }],
+                    resources: ResourceSelector::Ids {
+                        ids: vec![platform.resource_id],
+                    },
+                    filter: Some(uops_query::ast::Expr::And {
+                        of: vec![
+                            uops_query::ast::Expr::Compare {
+                                field: Field::EventCategory,
+                                cmp: uops_query::ast::CompareOp::Eq,
+                                value: uops_query::ast::Value::Str("authentication".to_owned()),
+                            },
+                            uops_query::ast::Expr::Compare {
+                                field: Field::EventType,
+                                cmp: uops_query::ast::CompareOp::Eq,
+                                value: uops_query::ast::Value::Str("failure".to_owned()),
+                            },
+                        ],
+                    }),
+                    ..Query::new(
+                        SignalType::Event,
+                        TimeRange::new(end - Duration::minutes(1), end),
+                    )
+                },
+                condition: Condition::Threshold {
+                    op: Comparison::Gt,
+                    value: 5.0,
+                    hold_seconds: 0,
+                },
+                severity: AlertSeverity::Critical,
+                enabled: true,
+                eval_interval: Duration::seconds(60),
+                notify: serde_json::json!([]),
+            },
+        )
+        .await
+        .expect("create rule");
+
+    // Nine failures from one address against one account, as the sign-in path writes them.
+    let now = Utc::now();
+    let rows: Vec<_> = (0..9)
+        .map(|n| EventRow {
+            tenant_id: scope.tenant_id(),
+            resource_id: platform.resource_id,
+            site_id: uops_core::SiteId::nil(),
+            observed_at: now - Duration::seconds(10 + n),
+            ingested_at: now - Duration::seconds(10 + n),
+            source_kind: "self".to_owned(),
+            source_vendor: String::new(),
+            severity: "warn".to_owned(),
+            event_category: "authentication".to_owned(),
+            event_type: "failure".to_owned(),
+            summary: "Failed sign-in for admin@example.com".to_owned(),
+            attributes: [
+                ("user.name".to_owned(), "admin@example.com".to_owned()),
+                ("source.ip".to_owned(), "198.51.100.7".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+        })
+        .collect();
+    uops_store_ch::EventStore::insert_events(&ch, &rows)
+        .await
+        .expect("events");
+
+    // A successful sign-in in the same window, which the filter must exclude.
+    uops_store_ch::EventStore::insert_events(
+        &ch,
+        &[EventRow {
+            event_type: "success".to_owned(),
+            observed_at: now - Duration::seconds(5),
+            ..rows[0].clone()
+        }],
+    )
+    .await
+    .expect("event");
+
+    let engine = Engine::new(pg.clone(), ch.clone());
+    let outcome = engine.evaluate(&scope, &rule, now).await.expect("evaluate");
+    assert_eq!(outcome.notifications(), 1, "{:?}", outcome.decisions);
+
+    // And it becomes an incident through M9's grouping, with the installation named as the
+    // resource it is about — exactly as a firewall would.
+    let incidents = pg.incidents(&scope, 10).await.expect("incidents");
+    assert_eq!(incidents.len(), 1, "one detection, one incident");
+    assert_eq!(incidents[0].alerts, 1);
+    assert_eq!(
+        incidents[0].candidate_resource_id,
+        Some(platform.resource_id),
+        "the incident is about the installation"
+    );
+}

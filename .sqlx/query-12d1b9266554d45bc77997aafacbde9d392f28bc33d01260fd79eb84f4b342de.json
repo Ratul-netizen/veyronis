@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT platform_tenant_id   AS \"tenant: TenantId\",\n                   platform_resource_id AS \"resource: ResourceId\"\n              FROM organization\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant: TenantId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "resource: ResourceId",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "12d1b9266554d45bc77997aafacbde9d392f28bc33d01260fd79eb84f4b342de"
+}

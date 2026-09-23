@@ -1,11 +1,14 @@
 # Self-monitoring, and the detection path that does not exist
 
-**Status:** a decision document, not a milestone. Nothing here is built.
+**Status:** a decision document, not a milestone. **§2.3 is built** — migration 0027,
+`uops_store_pg::platform`, and the sign-in path. §2.1, §2.2 and §2.4 were costed and not
+taken; they are kept because the reasoning is what makes the choice reviewable, and because
+§3 names the thing that would overturn it.
 
 M11 §2.4 said the product's own sign-ins should be *"the first source"* of authentication
 events — *"a security-analytics milestone whose first detection cannot see attacks on the
 monitoring platform itself is one that missed the target closest to it."* Building it showed
-the shape was wrong, the criterion is `[~]`, and the amendment named a precondition:
+the shape was wrong, the criterion went `[~]`, and the amendment named a precondition:
 
 > A detection cannot fire on these. The alert engine evaluates a `Query` against
 > `ClickHouse` under a tenant scope, and these are `PostgreSQL` rows with no tenant.
@@ -133,9 +136,9 @@ that makes the product state something false.
 
 ---
 
-## 4. If it is built, the decisions that come with it
+## 4. The decisions that came with it
 
-Written down now because they are the ones that get decided by accident later.
+Written down because they are the ones that otherwise get decided by accident.
 
 **The `self` resource is created, not discovered.** Identity resolution exists to work out
 what a thing is from what it says about itself; the installation does not need to be
@@ -155,9 +158,21 @@ changed hands, a runbook run that failed. Each is a thing an operator currently 
 looking. **That is the argument for doing this at all** — the sign-in detection is one
 instance, and on its own it does not justify the work.
 
+> **Built, and none of those are.** The resource exists and carries sign-ins. The
+> collector, lease and runbook events are the reason it was worth building and are still
+> open — a resource with one event kind on it is a seam, not a feature, and saying so is
+> better than letting the next reader assume self-monitoring is finished.
+
 **The detections are not shipped.** M11 §1's line holds: a detection library is a content
-business. If the product ships a `self` resource, it ships the *events*, and an
-organization writes the rule that says how many failures in how long matters to them.
+business. The product ships a `self` resource and the *events*; an organization writes the
+rule that says how many failures in how long matter to it. The test that proves a detection
+can fire writes its own rule for that reason.
+
+**The product does give its own events a severity**, which M11 §2.8 forbids for a message a
+device sent — and the two are not in tension. §2.8 refuses to invent a severity for
+somebody else's message; this is the product describing a thing it did itself, where it is
+the authority. A failed sign-in is `warn` because it is ordinary. There is no level meaning
+"alarming", because how alarming depends on how many, and that is a rule's business.
 
 ---
 

@@ -315,18 +315,32 @@ a person's judgement rather than a product's guess — and an event does not.
       > both alerts on it, only the cause notified. A detection that the topology rules
       > quietly did not apply to would make "security" a category that escapes M9, and
       > mixing them is the only way to catch that.
-- [~] Sign-ins against this product itself are a source of authentication events
-      > **Recorded, not detectable.** They are `auth.sign_in.success` /
-      > `auth.sign_in.failure` in the organization audit log, with the reason, the address
-      > and the source hop — see the amendment in §2.4 for why they cannot be `events`
-      > rows. A detection over them needs an organization-scoped evaluation path that does
-      > not exist, and that is the named precondition.
+- [x] Sign-ins against this product itself are a source of authentication events
+      > **They were recorded and not detectable, and that is what this criterion said
+      > when it was `[~]`.** They are `auth.sign_in.success` / `auth.sign_in.failure` in the
+      > organization audit log, with the reason, the address and the source hop — see the
+      > amendment in §2.4 for why they cannot be `events` rows *under a tenant the sign-in
+      > was not against*. The precondition that left open was an organization-scoped
+      > evaluation path.
       >
-      > [`docs/self-monitoring.md`](./self-monitoring.md) is what that precondition turns
-      > out to involve: three changes rather than one — a second isolation scope, a second
-      > store behind the Query AST, and a signal that is not telemetry. It recommends the
-      > cheapest true option (the installation as a resource in a nominated tenant) and
-      > says what would change that recommendation.
+      > **Closed by [`docs/self-monitoring.md`](./self-monitoring.md)**, which found the
+      > precondition was three changes rather than one — a second isolation scope, a second
+      > store behind the Query AST, and a signal that is not telemetry — and took the option
+      > that needs none of them: **the installation is a resource.**
+      >
+      > A sign-in is now an ordinary `authentication` event on an ordinary resource in an
+      > ordinary tenant, so a detection over it is an ordinary rule.
+      > `a_burst_of_failed_sign_ins_against_the_product_fires_a_detection` asserts exactly
+      > what the firewall detection asserts, because nothing about the rule or the engine
+      > knows which of the two it is looking at.
+      >
+      > The audit row is still written. The two answer different questions and are read by
+      > different people, and deriving one from the other later would mean re-reading an
+      > audit table nobody kept an offset into.
+      >
+      > **An organization that has nominated no platform tenant still gets the audit row and
+      > no event** — every organization with more than one tenant, until somebody chooses.
+      > That is the degradation the decision document promised, and it is tested.
 - [x] An `NXDOMAIN` frequency table is answerable through the Query AST with no new
       aggregate
       > Fifty names that resolved sit in the same window and are absent from the table, so

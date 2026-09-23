@@ -40,7 +40,7 @@
 //! password and printing it belong to the binary that has a terminal to print it on;
 //! this module's job is to make the four rows appear together or not at all.
 
-use uops_core::{ActorId, OrgId, Result, Role, TenantId};
+use uops_core::{ActorId, OrgId, ResourceId, Result, Role, TenantId};
 use uops_secrets::PasswordHashString;
 
 use crate::error::map;
@@ -190,6 +190,48 @@ impl PgStore {
         .execute(&mut *tx)
         .await
         .map_err(|e| map("role", user.to_string(), e))?;
+
+        // The installation, as a resource — `docs/self-monitoring.md` §2.3 and §4.
+        //
+        // Created here rather than discovered, and in the same transaction as everything
+        // else: identity resolution exists to work out what a thing is from what it says
+        // about itself, and the installation does not need to be guessed at. A first run
+        // that created an organization and then failed to create its platform resource
+        // would leave the one deployment shape this is for — a single tenant — in the
+        // half-configured state migration 0027's CHECK exists to make unrepresentable.
+        //
+        // `service`, not `device`, and no `mgmt_ip`: it is a logical thing, and a resource
+        // with no management address is not pollable and not a runbook target. A product
+        // that could be told to SSH into itself is a product with a new class of mistake
+        // available to it.
+        let platform = ResourceId::new();
+        sqlx::query!(
+            r#"
+            INSERT INTO resource (id, tenant_id, kind, name, status, attributes)
+            VALUES ($1, $2, 'service', 'This installation', 'up',
+                    '{"service.name": "uops"}'::jsonb)
+            "#,
+            platform as ResourceId,
+            tenant as TenantId,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map("resource", "platform".to_owned(), e))?;
+
+        // tenant-exempt: an organization-level column, naming the tenant this run created.
+        sqlx::query!(
+            r#"
+            UPDATE organization
+               SET platform_tenant_id = $2, platform_resource_id = $3
+             WHERE id = $1
+            "#,
+            org as OrgId,
+            tenant as TenantId,
+            platform as ResourceId,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map("organization", org.to_string(), e))?;
 
         tx.commit()
             .await

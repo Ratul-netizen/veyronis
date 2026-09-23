@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE organization\n               SET platform_tenant_id = $2, platform_resource_id = $3\n             WHERE id = $1 AND platform_tenant_id IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c1c9e8ad0da40b6d7b4121c60c459f7fe46153b437d3a4e015b7ed435dc16941"
+}
