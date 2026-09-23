@@ -9,6 +9,19 @@ competitor capability read from vendor documentation and analyst listings, acces
 throughout. Nothing here was validated with a customer — see §7, which is the part that
 matters most and is the part not yet done.
 
+> **Amended 23 September 2026 — §1.2, §4 and §5 are superseded by
+> [`PRODUCT-STRATEGY.md`](./PRODUCT-STRATEGY.md).** This note framed the choice as *narrow
+> versus broad* and recommended declining whole categories. That framing was wrong. The
+> governing constraint is not breadth, it is **substrate reuse**: a module is cheap when it
+> rides substrate that already exists and ruinous when it needs its own. Read on that axis,
+> a product family is a legitimate ambition and most of the "decline" list becomes a
+> *sequencing* question instead.
+>
+> The competitor mapping in §2, the ground-truth table in §3 and the risk list in §6 stand.
+> The `STATUS.md` finding in §1.1 stands and is more urgent than this note implied. What
+> changed is the recommendation, not the evidence — and the evidence that changed it was
+> the ManageEngine research, which this note did not do.
+
 > **This note does not propose an architectural change.** PLAN's sequence and the M-series
 > discipline stand. Its recommendations are additions inside the existing architecture, and
 > where a gap would require a second architecture the recommendation is to decline it.
