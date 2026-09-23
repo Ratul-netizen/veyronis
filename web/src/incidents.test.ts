@@ -21,6 +21,7 @@ import {
   summarise,
   type Timeline,
   type Track,
+  pivotWindow,
 } from "./incidents";
 
 function track(signal: string, columns: string[], rows: unknown[][], extra?: Partial<Track>): Track {
@@ -205,5 +206,27 @@ describe("topology suppression", () => {
     // been made yet, so it has no place beside a switch that is already on.
     expect(SUPPRESSION_ADVICE).toMatch(/turn it on after/i);
     expect(SUPPRESSION_RISK).not.toMatch(/turn it on/i);
+  });
+});
+
+describe("pivoting out of an incident", () => {
+  it("opens a window centred on the moment, not starting at it", () => {
+    // M9 §2.6: the record that explains a status change arrives seconds *before* it. A
+    // window that began at the incident's start would exclude the thing worth reading.
+    const { from, to } = pivotWindow("2026-09-24T12:00:00.000Z");
+    expect(from).toBe("2026-09-24T11:55:00.000Z");
+    expect(to).toBe("2026-09-24T12:05:00.000Z");
+  });
+
+  it("takes a wider window when asked", () => {
+    const { from, to } = pivotWindow("2026-09-24T12:00:00.000Z", 30);
+    expect(from).toBe("2026-09-24T11:30:00.000Z");
+    expect(to).toBe("2026-09-24T12:30:00.000Z");
+  });
+
+  it("does not invent a window from a timestamp it cannot read", () => {
+    // The shell validates its own search params and falls back to a default. Returning
+    // NaN dates here would put "Invalid Date" in a URL somebody pastes into a ticket.
+    expect(pivotWindow("not a time")).toEqual({ from: "not a time", to: "not a time" });
   });
 });

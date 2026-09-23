@@ -18,8 +18,9 @@ import {
   type Role,
 } from "./api";
 import { contextParams } from "./context";
+import { AllSignals } from "./signals";
 import type { ShellSearch } from "./shell";
-import { useShell } from "./shell";
+import { resolveRange, useShell } from "./shell";
 
 function statusColour(status: ResourceStatus): string {
   switch (status) {
@@ -157,8 +158,23 @@ export function ResourcesPage() {
   );
 }
 
+/**
+ * The instant a range is "about".
+ *
+ * The midpoint rather than the end, because the links that bring somebody here set a
+ * window *centred* on a moment — an incident's start, a log line's timestamp — and the end
+ * of that window is five minutes after the thing they came to look at.
+ *
+ * Falls back to now for an unreadable range, which is what the picker itself does.
+ */
+function momentOf(range: Parameters<typeof resolveRange>[0]): Date {
+  const window = resolveRange(range);
+  if (!window) return new Date();
+  return new Date((window.from.getTime() + window.to.getTime()) / 2);
+}
+
 export function ResourcePage() {
-  const { tenant } = useShell();
+  const { tenant, range } = useShell();
   const { id } = useParams({ from: "/shell/resources/$id" });
   const queryClient = useQueryClient();
 
@@ -239,6 +255,19 @@ export function ResourcePage() {
           <Row label="Last seen" value={r.last_seen.replace("T", " ")} mono />
         </tbody>
       </table>
+
+      {/* The signature interaction, on the screen it belongs on.
+       *
+       * SPEC §M3 calls this "the seed of the Investigation Workspace, and the one
+       * interaction that demonstrates the product thesis in ten seconds" — and until now
+       * it was reachable only by opening a log row in the Explorer. A resource page that
+       * showed a device's name, its attributes and its status but none of what it had
+       * *said* was the product hiding its own argument.
+       *
+       * `at` comes from the shell's range rather than from now, so arriving here from an
+       * incident lands on the moment the incident is about. */}
+      <h2>Signals</h2>
+      <AllSignals tenant={tenant.tenant_id} resourceId={r.id} at={momentOf(range)} />
 
       <h2>Attributes</h2>
       {attributes.length === 0 ? (

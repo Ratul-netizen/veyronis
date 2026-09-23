@@ -293,3 +293,40 @@ export function merge(timeline: Timeline): Moment[] {
   // said about it, what the traffic did.
   return moments.sort((a, b) => a.at.localeCompare(b.at));
 }
+
+/**
+ * How wide a window a pivot out of an incident should open.
+ *
+ * Five minutes either side of the moment. Wide enough that the log line which explains a
+ * status change is in it — M9 §2.6's whole argument is that the interesting record arrives
+ * seconds *before* the thing it explains — and narrow enough that the destination screen
+ * is not a six-hour haystack.
+ */
+export const PIVOT_MINUTES = 5;
+
+/**
+ * The shell search params a link out of an incident should carry.
+ *
+ * # Why a pivot sets the time and not the context
+ *
+ * `context.ts` lists `/explore` as deliberately unscoped — *"the Explorer's own filter is
+ * the one that runs"* — so a pivot that set `ctx` would either be ignored or would
+ * override a documented decision. What every destination *does* honour is the shell's
+ * range, because that is one control on every screen.
+ *
+ * So a pivot carries **when**, and the destination in the URL carries **what**. The
+ * resource page then centres its signal panel on the middle of that window, which is the
+ * moment the incident started.
+ */
+export function pivotWindow(at: string, minutes = PIVOT_MINUTES): { from: string; to: string } {
+  const centre = Date.parse(at);
+  // An unparseable timestamp gives a window nothing can read, and the shell falls back to
+  // its default rather than rendering an error — the behaviour `validateShellSearch`
+  // already chose for a pasted URL. Returning the raw value keeps that path.
+  if (!Number.isFinite(centre)) return { from: at, to: at };
+  const span = minutes * 60_000;
+  return {
+    from: new Date(centre - span).toISOString(),
+    to: new Date(centre + span).toISOString(),
+  };
+}

@@ -36,6 +36,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { ago } from "./alerting";
@@ -54,10 +55,11 @@ import {
   fetchTimeline,
   listIncidents,
   merge,
+  pivotWindow,
   setSuppression,
   type Incident,
 } from "./incidents";
-import { useShell } from "./shell";
+import { type ShellSearch, useShell } from "./shell";
 
 export function IncidentsPage() {
   const { tenant } = useShell();
@@ -302,7 +304,23 @@ function Investigation({ incident }: { incident: Incident }) {
       <h3>Likely origin</h3>
       {incident.candidate_name ? (
         <p>
-          <strong>{incident.candidate_name}</strong>{" "}
+          {/* Linked, because this is where an investigation goes next. Until this existed
+              the screen named the device it suspected and gave no way to look at it — the
+              one product this arrangement exists to be, with its best interaction
+              unreachable from the screen that most needs it.
+              The window is carried so the resource page lands on the moment rather than on
+              now; see `pivotWindow`. */}
+          {incident.candidate_resource_id ? (
+            <Link
+              to="/resources/$id"
+              params={{ id: incident.candidate_resource_id }}
+              search={(old: ShellSearch) => ({ ...old, ...pivotWindow(incident.started_at) })}
+            >
+              <strong>{incident.candidate_name}</strong>
+            </Link>
+          ) : (
+            <strong>{incident.candidate_name}</strong>
+          )}{" "}
           <span className="dim">
             — nothing else in this incident is upstream of it, and it alerted first. That is
             the evidence, not a diagnosis.
@@ -330,6 +348,31 @@ function Investigation({ incident }: { incident: Incident }) {
             {timeline.data.resources.length} resource
             {timeline.data.resources.length === 1 ? "" : "s"}, every signal, on one axis.
           </p>
+
+          {/* The blast radius, as the module header promises — and reachable.
+           *
+           * The ids were already here and were rendered as a count. A count answers "how
+           * big is this" and not "what is in it", and the second question is the one an
+           * operator asks next. Ids rather than names because the timeline carries ids and
+           * the inventory is a separate read: `resources.tsx` makes the same choice, and an
+           * id is a fact where a resolved name might be stale. */}
+          <ul className="blast-radius">
+            {timeline.data.resources.map((id) => (
+              <li key={id}>
+                <Link
+                  to="/resources/$id"
+                  params={{ id }}
+                  search={(old: ShellSearch) => ({
+                    ...old,
+                    ...pivotWindow(incident.started_at),
+                  })}
+                  className="mono"
+                >
+                  {id === incident.candidate_resource_id ? `${id} — likely origin` : id}
+                </Link>
+              </li>
+            ))}
+          </ul>
 
           {/* The coverage notes come first and only for the exceptions. A note on every
               row is a note nobody reads; the point is that expiry stands out. */}
