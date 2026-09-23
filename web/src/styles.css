@@ -2661,3 +2661,145 @@ button.following {
   background: var(--bg-sunken);
   margin: 0;
 }
+
+/* The trace waterfall — `tracepage.tsx`.
+ *
+ * A table rather than a div tree, because it *is* tabular: a span has a name, a service, a
+ * duration and a position in time, and a screen reader should be able to read those four
+ * as a row. The bar is the fourth cell rendered graphically, not a replacement for it. */
+.waterfall {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-body);
+}
+
+.waterfall caption {
+  caption-side: top;
+  text-align: left;
+  margin-bottom: calc(var(--space) * 3);
+}
+
+.waterfall th[scope="col"] {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--line);
+  padding: var(--space) calc(var(--space) * 2);
+}
+
+.waterfall th[scope="row"] {
+  text-align: left;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.waterfall td,
+.waterfall th[scope="row"] {
+  padding: var(--space) calc(var(--space) * 2);
+  border-bottom: 1px solid var(--line-faint, var(--line));
+  vertical-align: middle;
+}
+
+/* The row a failed span sits on. Tinted rather than coloured text: the name is still the
+   thing being read, and red text on every failed row makes a long trace unreadable. */
+.waterfall tr.failed th[scope="row"] {
+  color: var(--sev-error);
+}
+
+/* The lane a bar is positioned inside. Fixed height so rows do not jump as bars change
+   width, and the minimum width keeps a sub-millisecond span visible rather than rounding
+   it to nothing — a span that ran is evidence even when it was fast. */
+.waterfall .track {
+  position: relative;
+  height: 10px;
+  min-width: 160px;
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.12));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.waterfall .bar {
+  height: 100%;
+  min-width: 2px;
+  background: var(--accent, #4c8dff);
+  border-radius: 2px;
+}
+
+/* The slowest chain. Brighter rather than a different hue: it is the same kind of thing as
+   every other bar, emphasised — a second colour would read as a second category. */
+.waterfall .bar.critical {
+  background: var(--accent-strong, #7db0ff);
+}
+
+.waterfall .bar.bad {
+  background: var(--sev-error);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .waterfall .bar {
+    transition: width 120ms ease-out, margin-left 120ms ease-out;
+  }
+}
+
+/* "Arriving" — the Overview's freshness strip, `freshness.ts`.
+ *
+ * Deliberately plain and deliberately always present. Its job is to qualify the sentence
+ * above it, so it must be readable at a glance and must not compete with the alert counts
+ * for attention — a signal that stopped is a quiet fact until somebody reads it. */
+.freshness {
+  margin: calc(var(--space) * 5) 0;
+}
+
+.freshness h2 {
+  font-size: var(--t-body);
+  font-weight: 500;
+  color: var(--text-dim);
+  margin: 0 0 calc(var(--space) * 2);
+}
+
+.freshness ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--space) * 2) calc(var(--space) * 6);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.freshness li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.freshness .label {
+  font-size: var(--t-small, 0.85em);
+  color: var(--text-dim);
+}
+
+/* A signal that sent nothing. Dimmed rather than reddened: on most deployments several of
+   these are legitimately zero forever, and colouring them would train people to ignore the
+   colour on the day it matters. */
+.freshness li.none .num {
+  color: var(--text-dim);
+}
+
+/* A read that failed says so, and is not drawn as a zero. */
+.freshness li.unknown .num {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* The admin-only strip about the product itself. */
+.platform {
+  margin: calc(var(--space) * 5) 0;
+  padding-top: calc(var(--space) * 4);
+  border-top: 1px solid var(--line);
+}
+
+.platform h2 {
+  font-size: var(--t-body);
+  font-weight: 500;
+  color: var(--text-dim);
+  margin: 0 0 var(--space);
+}

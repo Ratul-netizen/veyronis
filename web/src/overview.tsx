@@ -25,7 +25,7 @@
  * colour of danger.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 
@@ -33,6 +33,15 @@ import { ago, listAlerts, order, type Alert } from "./alerting";
 import { api } from "./api";
 import { contextParams } from "./context";
 import { message, runQuery, type Query, type ResultSet } from "./query";
+import {
+  WATCHED,
+  arrivals as arrivalsQuery,
+  countOf,
+  humanArrivals,
+  silent,
+  verdict,
+  type Arrival,
+} from "./freshness";
 import { describeRange, resolveRange, useShell } from "./shell";
 
 /** How often the control-plane panels re-read — UI-SPEC §5. */
@@ -154,6 +163,90 @@ export function OverviewPage() {
       : null,
   );
 
+  // ---- is anything arriving at all -----------------------------------------
+  //
+  // Six cheap aggregates, one per signal. This is the panel that separates "the estate is
+  // healthy" from "the estate stopped talking", and every other panel on this screen looks
+  // *better* as the second one gets worse — a dead collector drives the error count to
+  // zero. See `freshness.ts` for why it counts rather than asking when each signal last
+  // arrived; the short version is that `max(observed_at)` on a rollup silently returns a
+  // metric value rather than a timestamp.
+  // `useQueries` rather than six `usePanel` calls or a loop over one: a hook called inside
+  // a map is a hook whose order depends on an array's length, and the fact that `WATCHED`
+  // happens to be a constant today is not a property worth relying on.
+  const freshness = useQueries({
+    queries: WATCHED.map((watched) => ({
+      queryKey: [
+        "overview-fresh",
+        watched.signal,
+        tenant.tenant_id,
+        from?.toISOString(),
+        to?.toISOString(),
+      ],
+      queryFn: () =>
+        runQuery(
+          tenant.tenant_id,
+          arrivalsQuery(watched.signal, from!.toISOString(), to!.toISOString()),
+        ),
+      enabled: from !== undefined && to !== undefined,
+      retry: false,
+      staleTime: 60_000,
+    })),
+  });
+
+  const arriving: Arrival[] = WATCHED.map((watched, i) => {
+    const panel = freshness[i];
+    return {
+      signal: watched.signal,
+      label: watched.label,
+      count: panel?.isError ? null : countOf(panel?.data),
+      failed: panel?.isError ?? false,
+    };
+  });
+  const flow = verdict(arriving);
+  const quietSignals = silent(arriving);
+
+  // ---- what happened to the product itself ---------------------------------
+  //
+  // Admin only, and role is the whole gate: a viewer has no business reading who tried to
+  // sign in. `docs/self-monitoring.md` made this an ordinary `authentication` event on an
+  // ordinary resource, which is why this is an ordinary query rather than a new endpoint.
+  //
+  // `source_kind = 'self'` is what separates a failed sign-in against *this product* from
+  // a failed SSH against a switch the estate reported. Both are authentication failures
+  // and only one of them is about the monitoring platform.
+  const admin = tenant.role === "admin";
+  const signIns = usePanel(
+    ["overview-signins", tenant.tenant_id],
+    admin && from && to
+      ? {
+          signal: "event",
+          time: { start: from.toISOString(), end: to.toISOString() },
+          resources: { type: "all" },
+          filter: {
+            op: "and",
+            of: [
+              { op: "compare", field: { field: "source_kind" }, cmp: "eq", value: "self" },
+              {
+                op: "compare",
+                field: { field: "event_category" },
+                cmp: "eq",
+                value: "authentication",
+              },
+              {
+                op: "compare",
+                field: { field: "event_type" },
+                cmp: "eq",
+                value: "failure",
+              },
+            ],
+          },
+          aggregations: [{ func: "count", alias: "n" }],
+          limit: 1,
+        }
+      : null,
+  );
+
   const rows = order(alerts.data ?? []);
   const firing = rows.filter((a) => a.state === "firing");
   const pending = rows.filter((a) => a.state === "pending");
@@ -210,6 +303,72 @@ export function OverviewPage() {
             </Link>
           )}
         </div>
+      )}
+
+      {/* Said immediately under the verdict, because it qualifies it. "Nothing is firing"
+          means one thing when everything is arriving and something else entirely when the
+          logs stopped an hour ago, and until this existed the screen could not tell the
+          two apart. */}
+      {flow === "silent" && (
+        <p className="warn" role="alert">
+          <strong>Nothing is arriving.</strong> No telemetry of any kind reached this
+          product in {describeRange(range).toLowerCase()}. Either the estate is silent or
+          this product has stopped receiving — <Link to="/collectors">check the collectors</Link>.
+        </p>
+      )}
+
+      {flow === "partial" && (
+        <p className="notice" role="note">
+          {quietSignals.join(" and ")} {quietSignals.length === 1 ? "has" : "have"} sent
+          nothing in {describeRange(range).toLowerCase()}, while other signals are still
+          arriving. That is normal for an estate that does not produce them and is worth a
+          look if it used to — <Link to="/collectors">collectors</Link>.
+        </p>
+      )}
+
+      <section className="freshness" aria-label="What is arriving">
+        <h2>Arriving</h2>
+        <ul>
+          {arriving.map((a) => (
+            <li key={a.signal} className={a.failed ? "unknown" : a.count === 0 ? "none" : ""}>
+              <span className="label">{a.label}</span>
+              <span className="num mono">
+                {a.failed ? "unreadable" : humanArrivals(a.count)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {admin && (
+        <section className="platform" aria-label="This installation">
+          <h2>This installation</h2>
+          {signIns.isError ? (
+            <p className="dim">{message(signIns.error)}</p>
+          ) : (
+            <p>
+              {(() => {
+                const n = countOf(signIns.data);
+                if (n === null) return <span className="dim">Reading sign-in events…</span>;
+                if (n === 0)
+                  return (
+                    <>
+                      No failed sign-ins against this product in{" "}
+                      {describeRange(range).toLowerCase()}.
+                    </>
+                  );
+                return (
+                  <>
+                    <strong>{humanArrivals(n)}</strong> failed sign-in
+                    {n === 1 ? "" : "s"} against this product in{" "}
+                    {describeRange(range).toLowerCase()}.{" "}
+                    <Link to="/security">Look at them</Link>.
+                  </>
+                );
+              })()}
+            </p>
+          )}
+        </section>
       )}
 
       {worst !== "quiet" && (

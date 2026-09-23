@@ -59,6 +59,13 @@ export type Field =
   | { field: "duration_ns" }
   | { field: "status_code" }
   | { field: "trace_id" }
+  // Added for the waterfall. `span_id` and `parent_span_id` are what make a list of spans
+  // a tree; without them the screen can only draw a list, which is the flat view every
+  // log search already gives.
+  | { field: "span_id" }
+  | { field: "parent_span_id" }
+  | { field: "span_kind" }
+  | { field: "scope_name" }
   | { field: "errors" }
   // Flows only. Mirrors `uops_query::ast::Field`, which grew these in M7.
   | { field: "src_address" }

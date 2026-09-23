@@ -37,6 +37,7 @@ import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
 import { ServicesPage } from "./servicespage";
+import { TracePage } from "./tracepage";
 import { IncidentsPage } from "./incidentspage";
 import { OverviewPage } from "./overview";
 import { LoginPage } from "./pages";
@@ -218,6 +219,23 @@ const runRoute = createRoute({
   },
 });
 
+/**
+ * One trace, by id.
+ *
+ * A detail route with no list above it, and deliberately: there is no "all traces" screen
+ * because a list of sampled traces is not a question anybody asks. A trace is reached from
+ * something that named it — a log line, a service, a search result — which is why
+ * `TraceLink` is exported rather than a menu entry added.
+ */
+const traceRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/traces/$id",
+  component: function OneTrace() {
+    const { id } = traceRoute.useParams();
+    return <TracePage id={id} />;
+  },
+});
+
 const topologyRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/topology",
@@ -274,6 +292,7 @@ const routeTree = rootRoute.addChildren([
     resourceRoute,
     flowRoute,
     servicesRoute,
+    traceRoute,
     incidentsRoute,
     exploreRoute,
     alertsRoute,

@@ -1,6 +1,6 @@
 # Status — pick up from here
 
-Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
+Last updated: 2026-09-23 · repo: `github.com/Ratul-netizen/veyronis`
 
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
@@ -11,6 +11,13 @@ Last updated: 2026-09-22 · repo: `github.com/Ratul-netizen/veyronis`
 > closed with the Investigation Workspace and its own measurement:
 > [`bench/results/m9-timeline-100000000rows.md`](./bench/results/m9-timeline-100000000rows.md),
 > **77× fewer rows** than a time-first sort key would read.
+> **M10 Automation and M11 Security are complete.** M10 shipped `uops-runner`, the
+> runbook API and the runbook screens; twelve of its thirteen criteria are met and the
+> thirteenth — a dry run verified against a real SSH server — is open and says so. M11
+> closed **12 of 12**, including a detection that fires on failed sign-ins against the
+> product itself, which needed `docs/self-monitoring.md` and migration 0027 to make the
+> installation a resource.
+>
 > **M12 Enterprise is complete** — leases (§2.1), single sign-on (§2.2), the collector
 > registry (§2.3), a *rehearsed* restore (§2.4) and the buyer-facing evidence (§2.5). Two
 > of its twelve criteria are partial and say so: a sample count through two real pollers,
@@ -41,12 +48,16 @@ government and defence, which is why on-prem is not a downgrade. The W1 storage
 benchmark is **complete and validated the architecture**, written up at
 [`docs/benchmarks/w1.md`](./docs/benchmarks/w1.md).
 
-**Eleven of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
+**Thirteen of the roadmap's fourteen milestones are built**: M0 architecture, M1 core, M2
 NMS, M3 logs, M4 metrics and alerting, M5 discovery, M6 topology, M7 flow, M8
-observability, M9 incident and M12 enterprise. All five telemetry signals — metrics, logs,
-events and state, flows, traces — land on **one** resource identity and are read through
-**one** query AST, which was the whole bet. What remains on the roadmap (M10 automation,
-M11 security analytics, M13 AI) is what PLAN §10 calls *direction, not commitments*.
+observability, M9 incident, M10 automation, M11 security analytics and M12 enterprise. All
+five telemetry signals — metrics, logs, events and state, flows, traces — land on **one**
+resource identity and are read through **one** query AST, which was the whole bet. **M13 AI
+is the only milestone not started**, and PLAN §10 calls it *direction, not commitments*.
+
+Two criteria across all thirteen are not met, and neither is hidden: M10's dry run against
+a real SSH server, and M12's cross-tenant isolation, which reopens with every surface a
+later milestone adds. A third — M12's two-poller sample count — was measured and closed.
 
 M12 is the one that changed what the product *is* rather than what it does: it now
 survives losing a process, authenticates the way an organisation already does, knows what
@@ -171,7 +182,15 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M10 · the rules** | ✅ `uops-runbook` — 59 tests on what the product refuses: a `reload` marked read-only, a destructive step with no declared rollback, a value that could end the command it is substituted into, a run approved by the person who started it |
 | **M10 · storage** | ✅ migration 0026 — and three things the *schema* makes unrepresentable rather than checking: a version that changed, one person approving twice, and **approving your own run** |
 | **M10 · a transcript is not a credential store** | ✅ `uops_runbook::redact` — redacted in the store on the way in, so no path writes a raw one. A net rather than a boundary, and the module says so at the top |
-| M10 · runner, API, screens | ⬜ next |
+| **M10 · the runner** | ✅ `uops-runner` — its own binary, because a runbook step is a long, blocking, network-bound operation and putting one on the API's runtime is how a web request queues behind a device that is not answering. Two guards, and only one is the lease: `claim_next_run` is the `UPDATE` that makes a queued run execute exactly once |
+| **M10 · the SSH transport** | ✅ `ssh(1)` as a child process — M10 §2.10 records the search that led there: the one maintained async SSH client in Rust offers two crypto backends and both carry the OpenSSL term, which is not on this workspace's allow-list. The key is written to a private file and removed on **every** path, including the timeout |
+| **M10 · the API and the screens** | ✅ runbooks, plan, runs, run detail and cancel — approvals that expire while a run queues send it back to *waiting*, not to *failed*, because what went wrong is that ten minutes passed |
+| **M10 · a dry run means something** | ✅ and it is the defect this milestone actually found: `runs_in_dry_run` was `!destructive && is_inherently_read_only()`, and an `ssh.command` is never inherently read-only — so a dry run executed nothing and reported success |
+| M10 · verified against a real SSH server | ⬜ **the one open criterion** — no sshd was reachable when it was built. What *is* verified against real `ssh(1)` is the client invocation and the refused-connection contract |
+| **M11 · the decisions** | ✅ [`docs/M11-security.md`](./docs/M11-security.md) — **12 of 12 criteria met**. The product ships a vocabulary and the queries, not a detection library: M11 §1 is explicit that detection content is a content business |
+| **M11 · `uops-security`** | ✅ 44 tests — ECS field aliasing, four log grammars including CEF, and classification. The CEF header defect is written up rather than quietly fixed: the parser read `SignatureID` as the event name |
+| **M11 · security is not a separate product** | ✅ a firewall deny and a link going down are the same question, so the screen sits under Operations and M9's suppression rules apply to detections unchanged — asserted by mixing the two in one incident |
+| **M11 · the product watches itself** | ✅ [`docs/self-monitoring.md`](./docs/self-monitoring.md) + migration 0027 — the installation is a resource, so a sign-in is an ordinary `authentication` event and a detection over it is an ordinary rule. The event write is **spawned off the request path**, because doing it inline reintroduced an account-enumeration timing oracle that a test caught |
 
 ## Resume in three commands
 
@@ -709,11 +728,18 @@ crates/uops-query/
    surfaces it. Blocked on the above, because a queue you can only agree with is worse
    than no queue.
 
-5. **M12 Enterprise is done**, and what it leaves behind is two honest partials rather
-   than a tick: two real pollers producing one sample per interval has not been *measured*,
-   and cross-tenant isolation reopens with each new surface. The next milestones on the
-   roadmap are M10 automation, M11 security analytics and M13 AI — which PLAN §10 calls
-   *direction, not commitments*. See [`docs/M12-enterprise.md`](./docs/M12-enterprise.md).
+5. **M10, M11 and M12 are done**, and what they leave behind is two honest partials
+   rather than a tick: **M10's dry run has not been verified against a real SSH server**,
+   and cross-tenant isolation reopens with each new surface. M12's two-poller sample count
+   was measured and is closed. **M13 AI is the only milestone not started.** See
+   [`docs/M10-automation.md`](./docs/M10-automation.md),
+   [`docs/M11-security.md`](./docs/M11-security.md) and
+   [`docs/M12-enterprise.md`](./docs/M12-enterprise.md).
+
+6. **Product direction now has its own documents**, separate from the milestones:
+   [`docs/PRODUCT-STRATEGY.md`](./docs/PRODUCT-STRATEGY.md) is the staged product-family
+   plan, and [`docs/COMPETITIVE-POSITION.md`](./docs/COMPETITIVE-POSITION.md) is the
+   competitor mapping it rests on. Neither changes the architecture.
 
 ### Carried forward, still true
 

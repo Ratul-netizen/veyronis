@@ -52,6 +52,8 @@ import { AllSignals } from "./signals";
 import { SavedSearches } from "./saved";
 import { overWindow, toControls, type SavedSearch } from "./searches";
 import { POLL_MS, merge, pollTail } from "./tail";
+import { usableId } from "./trace";
+import { TraceLink } from "./tracepage";
 
 const TEXT_MODES: { value: TextMode; label: string; hint: string }[] = [
   { value: "any_token", label: "any word", hint: "Uses the text index." },
@@ -203,8 +205,13 @@ function RowDetail({
   const columns = result.columns.map((c) => c.name);
   const resourceAt = columns.indexOf("resource_id");
   const timeAt = columns.indexOf("observed_at");
+  const traceAt = columns.indexOf("trace_id");
 
   const resourceId = resourceAt >= 0 ? String(row[resourceAt]) : null;
+  // The other half of M8 §2.5's correlation, and the only way into the waterfall from
+  // here. Blank on every log line that was never part of a trace — which is every syslog
+  // message in the estate — so the link appears only when there is something to open.
+  const traceId = traceAt >= 0 ? String(row[traceAt] ?? "") : "";
   const observedAt =
     timeAt >= 0 ? new Date(String(row[timeAt]).replace(" ", "T") + "Z") : null;
 
@@ -225,6 +232,12 @@ function RowDetail({
           </div>
         ))}
       </dl>
+
+      {usableId(traceId) && (
+        <p>
+          <TraceLink id={traceId}>See the whole trace →</TraceLink>
+        </p>
+      )}
 
       {resourceId && observedAt && !Number.isNaN(observedAt.getTime()) ? (
         <AllSignals tenant={tenant} resourceId={resourceId} at={observedAt} />
