@@ -55,9 +55,11 @@ five telemetry signals — metrics, logs, events and state, flows, traces — la
 resource identity and are read through **one** query AST, which was the whole bet. **M13 AI
 is the only milestone not started**, and PLAN §10 calls it *direction, not commitments*.
 
-Two criteria across all thirteen are not met, and neither is hidden: M10's dry run against
-a real SSH server, and M12's cross-tenant isolation, which reopens with every surface a
-later milestone adds. A third — M12's two-poller sample count — was measured and closed.
+**One criterion across all thirteen is not met**, and it is not hidden: M12's cross-tenant
+isolation, which reopens with every surface a later milestone adds and is currently
+satisfied — all 73 registered route paths have a case in `isolation.rs`. M10's dry run against a real SSH
+server was the other one and closed on 2026-09-24; M12's two-poller sample count was
+measured and closed earlier.
 
 M12 is the one that changed what the product *is* rather than what it does: it now
 survives losing a process, authenticates the way an organisation already does, knows what
@@ -186,7 +188,7 @@ Counts are tests that actually run, per crate, from `cargo test --all-targets`.
 | **M10 · the SSH transport** | ✅ `ssh(1)` as a child process — M10 §2.10 records the search that led there: the one maintained async SSH client in Rust offers two crypto backends and both carry the OpenSSL term, which is not on this workspace's allow-list. The key is written to a private file and removed on **every** path, including the timeout |
 | **M10 · the API and the screens** | ✅ runbooks, plan, runs, run detail and cancel — approvals that expire while a run queues send it back to *waiting*, not to *failed*, because what went wrong is that ten minutes passed |
 | **M10 · a dry run means something** | ✅ and it is the defect this milestone actually found: `runs_in_dry_run` was `!destructive && is_inherently_read_only()`, and an `ssh.command` is never inherently read-only — so a dry run executed nothing and reported success |
-| M10 · verified against a real SSH server | ⬜ **the one open criterion** — no sshd was reachable when it was built. What *is* verified against real `ssh(1)` is the client invocation and the refused-connection contract |
+| **M10 · verified against a real SSH server** | ✅ **closed 2026-09-24** — `uops-runner/tests/live_ssh.rs` against a real `sshd`, nothing stubbed between the run queue and the remote shell. The read-only step's proof is a per-run marker concatenated with `$(uname -s)`, which only a real shell expands; the destructive step's proof is that the test asks the device **directly**, over a separate `ssh`, whether the file it would create exists. Skipped loudly without `UOPS_SSH_HOST` |
 | **M11 · the decisions** | ✅ [`docs/M11-security.md`](./docs/M11-security.md) — **12 of 12 criteria met**. The product ships a vocabulary and the queries, not a detection library: M11 §1 is explicit that detection content is a content business |
 | **M11 · `uops-security`** | ✅ 44 tests — ECS field aliasing, four log grammars including CEF, and classification. The CEF header defect is written up rather than quietly fixed: the parser read `SignatureID` as the event name |
 | **M11 · security is not a separate product** | ✅ a firewall deny and a link going down are the same question, so the screen sits under Operations and M9's suppression rules apply to detections unchanged — asserted by mixing the two in one incident |

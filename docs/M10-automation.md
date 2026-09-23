@@ -323,16 +323,36 @@ somebody should make deliberately rather than inherit.
       fails validation at save time with a message naming the step
 - [x] A step marked read-only whose command matches the deny-list fails validation, naming
       the word it matched
-- [ ] A dry run resolves the targets, names every resource, renders every command, and
+- [x] A dry run resolves the targets, names every resource, renders every command, and
       executes only the read-only steps — verified against a real SSH server, not a mock
-      > **Partly.** Everything but the last clause holds and is tested — the resolving,
-      > naming and rendering by `uops-api/tests/runbooks.rs`, the executing by
-      > `uops-runner/tests/runner.rs`. The real-SSH half is not: no SSH server was
-      > reachable from the machine this was built on, so what has been verified against a
-      > real `ssh(1)` is the client invocation and the refused-connection contract
-      > (`ssh::tests::a_refused_connection_is_reported_as_never_having_asked`), not a
-      > completed session. **This is the one criterion in M10 that has not been met and it
-      > stays open.**
+      > **It was partly met, and this is what the rest took.** The resolving, naming and
+      > rendering were tested by `uops-api/tests/runbooks.rs` and the executing by
+      > `uops-runner/tests/runner.rs`; what was missing was a *completed session*, because
+      > no SSH server was reachable from the machine this was built on. What had been
+      > verified against a real `ssh(1)` was the client invocation and the refused-
+      > connection contract (`ssh::tests::a_refused_connection_is_reported_as_never_having_asked`),
+      > which is the failure path rather than the working one.
+      >
+      > **Closed 2026-09-24 by `uops-runner/tests/live_ssh.rs`**, against a real `sshd`.
+      > Nothing is stubbed between the run queue and the remote shell: the key is sealed in
+      > the vault, opened through `PgSealedStore`, written to a private file for the
+      > duration of the step and removed after it.
+      >
+      > The read-only step's proof is output no mock could produce — a per-run marker
+      > concatenated with `$(uname -s)`, which only a real remote shell expands. The
+      > destructive step's proof is **not** its transcript: the test asks the device
+      > directly, over a separate `ssh`, whether the file that step would create exists. A
+      > scripted transport cannot make that assertion, because it is about the far end's
+      > disk rather than about what the runner recorded.
+      >
+      > `a_real_run_does_send_the_destructive_step_to_the_device` is the paired positive
+      > case, without which the first test proves only that *nothing* was sent —
+      > `uops-store-pg/tests/restore.rs` makes the same argument about its own negative
+      > assertion.
+      >
+      > **Skipped, loudly, when `UOPS_SSH_HOST` and friends are unset**, so a developer
+      > without the fixture does not get a red suite for a server they did not ask for —
+      > the pattern `uops-poller/tests/live.rs` established.
       >
       > Building it found a defect worth recording: `runs_in_dry_run` was
       > `!destructive && is_inherently_read_only()`, which meant a dry run of this

@@ -208,3 +208,43 @@ regression. Keeping the development server on a non-UTC timezone is the other ha
 that: it is the only thing that would catch the same mistake made somewhere the golden
 files do not reach. Setting it to UTC would make the environment quieter and strictly
 worse at its job.
+
+## The live SSH fixture, for M10's last criterion
+
+`uops-runner/tests/live_ssh.rs` is the only test in the workspace that drives a runbook
+step through `ssh(1)` into a real `sshd`. It closes the criterion that stayed open through
+all of M10 — *"verified against a real SSH server, not a mock"* — and it needs a server
+that will accept a key.
+
+The same Kali guest that runs ClickHouse already has `openssh-server` installed. Bring it
+up and authorise a key:
+
+```bash
+# in the guest
+echo kali | sudo -S systemctl start ssh
+ssh-keygen -t ed25519 -N '' -C uops-runner-live -f ~/uopskey
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cat ~/uopskey.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+```
+
+Copy the **private** key to the host — `vmrun CopyFileFromGuestToHost` does it — and point
+the test at it:
+
+```bash
+UOPS_SSH_HOST=<guest ip> UOPS_SSH_USER=kali UOPS_SSH_KEY=<path on host> \
+  cargo test -p uops-runner --test live_ssh
+```
+
+**Without those variables the test skips and says so**, so a full workspace run on a
+machine with no fixture stays green. The skip line is deliberately loud: a silently-passing
+live test is worse than an absent one.
+
+Two notes worth keeping:
+
+* **The key must have no passphrase.** The transport refuses one by design — `ssh(1)`
+  cannot be handed a passphrase without a helper program whose job is to print a secret,
+  and M10 §2.10 records why that is not a trade this product makes.
+* **The test writes to `/tmp` on the guest** and removes what it wrote. It also checks the
+  *absence* of that file after a dry run by asking the device directly over a separate
+  `ssh`, rather than trusting the run's own transcript — which is the assertion a scripted
+  transport cannot make.
