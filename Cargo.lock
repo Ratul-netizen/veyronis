@@ -2873,6 +2873,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "uops-core",
+ "uops-discover",
  "uops-poll",
  "uops-profile",
  "uops-secrets",

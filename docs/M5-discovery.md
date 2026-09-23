@@ -253,7 +253,7 @@ cannot trust.
       produces a provisional resource
 - [x] A CIDR larger than /16 is refused when the job is written, with a sentence saying
       what to do instead
-- [~] An LLDP walk between two known devices produces exactly one `connected_to` edge,
+- [x] An LLDP walk between two known devices produces exactly one `connected_to` edge,
       and re-walking produces no duplicate — including when *both ends* are walked, which
       the schema's UNIQUE does not catch and a sorted pair does
       > **The ingest is right and nothing performs the walk.** `uops_discover::neighbours`
@@ -268,9 +268,21 @@ cannot trust.
       > AgentX, verified answering by `snmpwalk`, discovered and polled correctly, and
       > `GET /api/v1/topology` returned `nodes: 0, edges: 0`.
       >
-      > Reopened to `[~]` rather than left ticked: the criterion as written is about what
-      > a walk produces, and that is true. What it does not say, and a reader would assume,
-      > is that anything walks.
+      > It was reopened to `[~]` rather than left ticked, because the criterion as written
+      > is about what a walk produces — which was true — and never said that anything
+      > walks, which a reader would assume.
+      >
+      > **Closed again the same day.** `docs/topology-walk.md` records where the caller
+      > belongs and why: the poller, on its discovery task, beside the `record_discovery`
+      > call that already writes `member_of` edges from the same transport. Verified
+      > against the lab — the same four devices that returned `nodes: 0, edges: 0` now
+      > return the cabled tree, `core-sw-01` adjacent to all three others and each leaf
+      > only to it, every edge `discovered_by: lldp`.
+      >
+      > The dedup this criterion is actually about is visible in that run: the walk
+      > reported **6 adjacencies** and the graph holds **3 edges**. Both ends were walked
+      > and the sorted pair collapsed them, which is the property the schema's `UNIQUE`
+      > alone does not give.
 - [x] An LLDP neighbour with no matching resource produces a candidate, not a resource
 - [x] A sweep stays within its concurrency and rate caps, measured against a paused
       clock — and the three caps are asserted to be consistent with each other, which

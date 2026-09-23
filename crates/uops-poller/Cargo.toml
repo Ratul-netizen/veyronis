@@ -18,6 +18,9 @@ uuid.workspace = true
 uops-snmp.workspace = true
 uops-store-ch.workspace = true
 uops-store-pg.workspace = true
+# The neighbour walk — `docs/topology-walk.md`. The tables it reads are already modelled
+# here; the poller is what was missing a caller.
+uops-discover.workspace = true
 
 chrono.workspace = true
 # The poller reports what it is doing as JSON — see `describe` in main.

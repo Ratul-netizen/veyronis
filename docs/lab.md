@@ -85,9 +85,23 @@ Everything around it works, which is what makes the finding precise rather than 
   counters;
 * and `GET /api/v1/topology` returned `nodes: 0, edges: 0`.
 
-M5's criterion is reopened to `[~]` with this written against it. The criterion was not
+M5's criterion was reopened to `[~]` with this written against it. The criterion was not
 wrong — an LLDP walk really does produce one edge — it simply never said that anything
 walks, and a reader would assume it.
+
+**Fixed the same day**, and verified here rather than in a fixture: `docs/topology-walk.md`
+puts the walk on the poller's discovery task, and the same four devices now return
+
+```text
+nodes: 4  edges: 3
+  core-sw-01 <-> edge-fw   via lldp
+  core-sw-01 <-> lb-01     via lldp
+  core-sw-01 <-> app-01    via lldp
+```
+
+which is the cabling in §1. The walk reported **6 adjacencies** and the graph holds
+**3 edges** — both ends were walked and the sorted pair collapsed them, which is exactly
+the property the ingest's tests assert and which a real estate exercises for free.
 
 ## 5. What it cannot test here
 

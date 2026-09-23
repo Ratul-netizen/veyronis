@@ -194,6 +194,12 @@ impl Runner {
             if let Some(kind) = kind {
                 self.record_discovery(&task, kind, &polled.discovered).await;
             }
+            // And who is next to it. `docs/topology-walk.md`: the same mechanism as the
+            // line above, pointed at a second table — interfaces give `member_of` edges
+            // and neighbours give `connected_to` ones, from the same transport on the
+            // same cadence. On the discovery task rather than every poll, because
+            // cabling does not change between two five-minute metric polls.
+            self.record_neighbours(&task, transport.as_ref()).await;
         }
 
         if let Some((outcome, reason)) = polled.reachability {
@@ -404,6 +410,72 @@ impl Runner {
             current.as_str(),
             row.reason
         );
+    }
+
+    /// Walk the device's neighbour tables and record the adjacency.
+    ///
+    /// # Why this is here and not in the sweep
+    ///
+    /// `docs/topology-walk.md`. A sweep probes *addresses* and is deliberately rare — the
+    /// schema puts an hour under its schedule — so topology that refreshed only when
+    /// somebody swept would be stale between sweeps, and an incident at 3am would be
+    /// suppressed against yesterday's cabling.
+    ///
+    /// # Best effort, like everything else on this path
+    ///
+    /// A device that speaks no LLDP is the normal case rather than an error —
+    /// [`uops_discover::neighbours`] already treats an unreadable protocol as one it did
+    /// not read and walks the others — and most of an estate's hosts have none. A line
+    /// per host per cycle would be noise that teaches people to ignore the log.
+    ///
+    /// The poll that produced this device's metrics has already succeeded. Failing it
+    /// because an adjacency could not be written would throw those away.
+    async fn record_neighbours<T: uops_snmp::Transport + ?Sized>(
+        &self,
+        task: &Task,
+        transport: &T,
+    ) {
+        let target = Target {
+            address: task.device.address,
+        };
+        // Owned by the walk rather than by the device: `Tuning` backs off when an agent
+        // answers `tooBig`, and a switch with a large neighbour table is exactly where
+        // that happens. Carrying it across polls would be better and needs somewhere to
+        // live; starting from the default costs one round trip on a device that needs it.
+        let mut tuning = uops_snmp::Tuning::default();
+        let found = uops_discover::neighbours(transport, &target, &mut tuning).await;
+
+        let seen = found.merged();
+        if seen.is_empty() {
+            return;
+        }
+
+        let scope = TenantScope::collector(task.device.tenant);
+        match self
+            .store
+            .record_neighbours(
+                &scope,
+                task.device.resource,
+                &seen,
+                uops_store_pg::sweep_ingest::SweepContext::default(),
+            )
+            .await
+        {
+            // Only when something is new. After the first pass a switch re-reports the
+            // same neighbours every discovery cycle forever.
+            Ok(outcome) if outcome.edges > 0 || outcome.candidates > 0 => println!(
+                "uops-poller: {} — {} adjacencies, {} neighbours that are not resources yet",
+                task.device.resource, outcome.edges, outcome.candidates
+            ),
+            Ok(_) => {}
+            Err(e) => {
+                self.report(
+                    task.device.resource,
+                    &format!("its neighbours could not be recorded: {e}"),
+                )
+                .await;
+            }
+        }
     }
 
     /// Fetch and persist the device's `sysObjectID`, if it has changed.
