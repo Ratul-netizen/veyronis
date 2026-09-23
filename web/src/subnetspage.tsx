@@ -29,6 +29,7 @@ import { useShell } from "./shell";
 import {
   ASSIGNMENTS,
   type Assignment,
+  describeGuess,
   type Subnet,
   declareSubnet,
   forgetSubnet,
@@ -257,7 +258,21 @@ function Addresses({ tenant, id }: { tenant: string; id: string }) {
                   {a.resource_name || a.resource_id}
                 </Link>
               ) : (
-                <span className="warn">nothing claims this address</span>
+                <>
+                  <span className="warn">nothing claims this address</span>
+                  {/* What it probably is, with the evidence in the tooltip. A guess a
+                      reader cannot argue with is one they cannot safely act on — so the
+                      hedge is in the sentence and the reasons are one hover away. */}
+                  {a.guess && (
+                    <span
+                      className="dim"
+                      title={a.guess.because.map((r) => `${r.from}: ${r.saying}`).join(" · ")}
+                    >
+                      {" "}
+                      — {describeGuess(a.guess)}
+                    </span>
+                  )}
+                </>
               )}
             </td>
             <td>{a.responding ? "yes" : <span className="dim">no</span>}</td>

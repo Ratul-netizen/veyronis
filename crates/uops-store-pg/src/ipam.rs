@@ -93,6 +93,15 @@ pub struct Utilisation {
 #[derive(Clone, Debug)]
 pub struct Address {
     pub address: Ipv4Addr,
+    /// What this probably is, when nothing claims it — `docs/what-is-this-thing.md`.
+    ///
+    /// Computed on read rather than stored: the inputs are three columns and a lookup
+    /// table, so recomputing costs nothing, and a stored guess going stale would be
+    /// indistinguishable from a fresh fact.
+    ///
+    /// `None` for an address a resource already claims. The question "what is this" is
+    /// only interesting when the inventory has no answer.
+    pub guess: Option<uops_guess::Guess>,
     /// The resource claiming it, when one does.
     pub resource_id: Option<uops_core::ResourceId>,
     pub resource_name: Option<String>,
@@ -354,7 +363,10 @@ impl PgStore {
             ),
             answered AS (
                 SELECT DISTINCT ON (c.address)
-                       c.address, c.last_seen
+                       c.address, c.last_seen,
+                       -- The evidence a guess is made from. All three were already here;
+                       -- nothing new is collected for this.
+                       c.mac::text AS mac, c.sys_name, c.sys_descr
                   FROM discovery_candidate c, bounds b
                  WHERE c.tenant_id = $1
                    AND c.address IS NOT NULL
@@ -366,6 +378,9 @@ impl PgStore {
                 claimed.resource_id AS "resource_id?: uops_core::ResourceId",
                 r.name              AS "resource_name?",
                 (answered.address IS NOT NULL) AS "responding!",
+                answered.mac        AS "mac?",
+                answered.sys_name   AS "sys_name?",
+                answered.sys_descr  AS "sys_descr?",
                 greatest(claimed.last_seen, answered.last_seen) AS "last_seen?"
               FROM claimed
               FULL JOIN answered ON claimed.address = answered.address
@@ -384,12 +399,26 @@ impl PgStore {
 
         rows.into_iter()
             .map(|r| {
+                // Only for an address nothing claims. A device already in the inventory
+                // has an identity; offering an opinion beside it would be noise at best
+                // and a contradiction at worst.
+                let guess = if r.resource_id.is_none() {
+                    Some(uops_guess::guess(&uops_guess::Evidence {
+                        mac: r.mac.as_deref(),
+                        hostname: r.sys_name.as_deref(),
+                        sys_descr: r.sys_descr.as_deref(),
+                        ttl: None,
+                    }))
+                } else {
+                    None
+                };
                 Ok(Address {
                     address: address_from(&r.address)?,
                     resource_id: r.resource_id,
                     resource_name: r.resource_name,
                     responding: r.responding,
                     last_seen: r.last_seen,
+                    guess,
                 })
             })
             .collect::<Result<Vec<_>>>()

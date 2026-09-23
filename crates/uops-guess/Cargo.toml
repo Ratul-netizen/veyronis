@@ -1,0 +1,16 @@
+[package]
+name = "uops-guess"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# The MAC vendor, including the MA-M and MA-S blocks a three-byte lookup misses. The whole
+# reason this crate can say anything about a device that speaks no SNMP.
+uops-oui.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

@@ -23,6 +23,9 @@ uops-profile.workspace = true
 # so the operator gets the sentence that says what to do instead rather than the name of
 # a CHECK constraint -- see the module docs in src/discovery_jobs.rs.
 uops-discover.workspace = true
+# What an unclaimed address probably is — `docs/what-is-this-thing.md`. Pure; the evidence
+# it reads is already on `discovery_candidate`.
+uops-guess.workspace = true
 # Filling a device's vendor from an interface MAC when the device does not say — see
 # src/discovery.rs. No dependencies of its own; the table is embedded.
 uops-oui.workspace = true

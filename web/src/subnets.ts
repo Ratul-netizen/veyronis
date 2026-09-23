@@ -53,6 +53,15 @@ export interface Subnet {
   unaccounted: number;
 }
 
+/** What the product thinks an unclaimed address is — `docs/what-is-this-thing.md`. */
+export interface Guess {
+  role: string;
+  confidence: "unknown" | "possible" | "likely";
+  /** Why. Shown, because a guess a reader cannot argue with is one they cannot act on. */
+  because: { from: string; saying: string }[];
+  vendor?: string;
+}
+
 /** One address inside a range. */
 export interface SubnetAddress {
   address: string;
@@ -61,6 +70,23 @@ export interface SubnetAddress {
   responding: boolean;
   last_seen?: string;
   unaccounted: boolean;
+  /** Only ever present for an address nothing claims. */
+  guess?: Guess;
+}
+
+/**
+ * How a guess reads on one line.
+ *
+ * The confidence word is part of the sentence rather than a badge beside it: "possibly a
+ * printer" is a claim somebody can weigh, and a "printer" chip with a muted border is one
+ * they will read as fact by the second time they see it.
+ */
+export function describeGuess(guess: Guess): string {
+  if (guess.role === "unknown") {
+    return guess.vendor ? `made by ${guess.vendor}` : "unidentified";
+  }
+  const hedge = guess.confidence === "likely" ? "probably" : "possibly";
+  return `${hedge} a ${guess.role.replace(/_/g, " ")}`;
 }
 
 export function listSubnets(tenant: string): Promise<Subnet[]> {

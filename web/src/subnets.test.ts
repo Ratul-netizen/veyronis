@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   type Subnet,
+  describeGuess,
   inAddressOrder,
   needsAttention,
   occupancy,
@@ -105,5 +106,30 @@ describe("ordering", () => {
 
   it("does not throw on a range it cannot parse", () => {
     expect(() => inAddressOrder([subnet({ range: "nonsense" })])).not.toThrow();
+  });
+});
+
+describe("describing a guess", () => {
+  const base = { role: "printer", confidence: "likely" as const, because: [] };
+
+  it("hedges in the sentence rather than in a badge", () => {
+    // A badge is read as fact by the second time somebody sees it; a sentence is not.
+    expect(describeGuess(base)).toBe("probably a printer");
+    expect(describeGuess({ ...base, confidence: "possible" })).toBe("possibly a printer");
+  });
+
+  it("falls back to the manufacturer when the role is unknown", () => {
+    // "Cisco" beats nothing, which is the whole argument for keeping the vendor.
+    expect(describeGuess({ role: "unknown", confidence: "unknown", because: [], vendor: "Cisco Systems, Inc" }))
+      .toBe("made by Cisco Systems, Inc");
+  });
+
+  it("says unidentified rather than inventing something", () => {
+    expect(describeGuess({ role: "unknown", confidence: "unknown", because: [] }))
+      .toBe("unidentified");
+  });
+
+  it("reads a multi-word role as words", () => {
+    expect(describeGuess({ ...base, role: "access_point" })).toBe("probably a access point");
   });
 });

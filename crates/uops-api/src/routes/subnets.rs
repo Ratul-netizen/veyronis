@@ -77,6 +77,13 @@ pub struct AddressView {
     /// Responding, and unclaimed. Sent rather than left to the client to derive, so two
     /// clients cannot disagree about what the word means.
     pub unaccounted: bool,
+    /// What it probably is — `docs/what-is-this-thing.md`. Present only for an address no
+    /// resource claims, because that is the only time the question is interesting.
+    ///
+    /// Carries its own reasons. The screen shows them, because a guess a reader cannot
+    /// argue with is one they cannot safely act on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guess: Option<uops_guess::Guess>,
 }
 
 /// `GET /api/v1/subnets`
@@ -286,6 +293,9 @@ pub async fn addresses(
             .map(|a| AddressView {
                 address: a.address.to_string(),
                 unaccounted: a.is_unaccounted(),
+                // Dropped when it says nothing, so the client never renders an empty
+                // "unknown" chip on every row.
+                guess: a.guess.filter(uops_guess::Guess::worth_showing),
                 resource_id: a.resource_id,
                 resource_name: a.resource_name,
                 responding: a.responding,

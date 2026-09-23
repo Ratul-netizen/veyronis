@@ -2624,6 +2624,7 @@ dependencies = [
  "tower-http",
  "uops-core",
  "uops-discover",
+ "uops-guess",
  "uops-identity",
  "uops-notify",
  "uops-oidc",
@@ -2756,6 +2757,14 @@ version = "0.0.1"
 dependencies = [
  "chrono",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "uops-guess"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "uops-oui",
 ]
 
 [[package]]
@@ -3025,6 +3034,7 @@ dependencies = [
  "tokio",
  "uops-core",
  "uops-discover",
+ "uops-guess",
  "uops-identity",
  "uops-incident",
  "uops-oidc",
