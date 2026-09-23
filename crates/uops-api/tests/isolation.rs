@@ -430,6 +430,31 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Scoped,
         body: None,
     },
+    // Objectives — `docs/slo.md`. A target is a statement about what an organisation
+    // considers acceptable, and one tenant's targets are not another's business.
+    RouteCase {
+        path: "/api/v1/slos",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/slos",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: Some(
+            r#"{"name":"isolation probe","service_id":"018f0000-0000-7000-8000-0000000000ab","target":0.99,"window_days":30}"#,
+        ),
+    },
+    RouteCase {
+        path: "/api/v1/slos/{id}",
+        probe: Some("/api/v1/slos/018f0000-0000-7000-8000-0000000000cb"),
+        method: "DELETE",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/subnets/{id}/addresses",
         probe: Some("/api/v1/subnets/018f0000-0000-7000-8000-0000000000cc/addresses"),

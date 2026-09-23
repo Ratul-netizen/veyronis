@@ -2830,3 +2830,30 @@ button.following {
 .rows tr.attention td:first-child {
   box-shadow: inset 2px 0 0 var(--sev-warn);
 }
+
+/* Objectives — `slopage.tsx`. The error-budget bar reuses the `.track` shape the waterfall
+   and the address screen use, for the same reason: one visual language for "how much of
+   this span is taken". */
+.slos .track {
+  position: relative;
+  height: 8px;
+  min-width: 110px;
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.12));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.slos .track .bar {
+  height: 100%;
+  background: var(--accent, #4c8dff);
+  border-radius: 2px;
+}
+
+/* Three quarters spent. A display threshold, not an alert — nothing here pages anybody. */
+.slos .track .bar.warn {
+  background: var(--sev-warn);
+}
+
+.slos .track .bar.bad {
+  background: var(--sev-error);
+}

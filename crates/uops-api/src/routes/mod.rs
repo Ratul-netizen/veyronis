@@ -23,6 +23,7 @@ pub mod resources;
 pub mod searches;
 pub mod servicemap;
 pub mod sites;
+pub mod slos;
 pub mod subnets;
 pub mod sso;
 pub mod runbooks;
@@ -286,6 +287,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/subnets/{id}", delete(subnets::forget))
         .route("/api/v1/subnets/{id}/addresses", get(subnets::addresses))
+        // Service level objectives — `docs/slo.md`. Under Observability in the UI, beside
+        // Services, because an objective is a statement about a service.
+        .route("/api/v1/slos", get(slos::list).post(slos::set))
+        .route("/api/v1/slos/{id}", delete(slos::remove))
         .route("/api/v1/sites/{id}/location", put(sites::place))
         .route("/api/v1/query", post(query::run))
         // The tail is its own route rather than a flag on the one above, because it is

@@ -49,6 +49,9 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
     items: [
       { to: "/explore", label: "Explore" },
       { to: "/services", label: "Services" },
+      // An objective is a statement about a service, so it sits beside them rather than
+      // under Operations — `docs/slo.md` §2.5.
+      { to: "/slos", label: "Objectives" },
     ],
   },
   {

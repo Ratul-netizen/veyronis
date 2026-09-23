@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, name, description, service_id, target, window_days\n              FROM slo\n             WHERE tenant_id = $1\n             ORDER BY name, window_days\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "service_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "target",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 5,
+        "name": "window_days",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d94a5d8d484854617bd84dd96fd85bfde21a75fa30d20bf494b9db0015b2fea1"
+}

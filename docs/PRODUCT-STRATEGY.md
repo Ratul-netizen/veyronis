@@ -59,7 +59,7 @@ product". Against them, checked in this repository today:
 | NetFlow Analyzer | **Already core** — `uops-collector-flow`, NetFlow/IPFIX/sFlow |
 | Applications Manager (APM) | **Already core** — OTLP traces, service map, service aggregates |
 | Firewall Analyzer | **Already core** — M11 security analytics, ECS, firewall deny events |
-| **NCM** (config management) | **Absent** — the remaining one |
+| **NCM** (config management) | **Absent** — the last one |
 | IPAM | **Built 23 Sep 2026** — migration 0028, `docs/ipam.md` |
 
 **Three of the five were already in the core product, unbundled and unlicensed
@@ -96,7 +96,7 @@ in §10; per instruction it has not been edited here.
 | Self-monitoring | **Partial** | sign-ins done; collector/lease/run events open |
 | **NCCM config backup/diff** | **Absent** — "out of scope" in M10 | — |
 | **IPAM** | **Implemented** (23 Sep) | migration 0028, `uops_store_pg::ipam`, `/api/v1/subnets`, Addresses screen |
-| **SLO framework** | **Absent** | no code, no doc |
+| SLO framework | **Implemented** (23 Sep) | migration 0029, `uops_store_pg::slo`, `/api/v1/slos`, Objectives screen, `docs/slo.md` |
 | Cloud/hybrid (AWS/Azure/K8s) | **Absent as integrations** | OTLP gives generic visibility |
 | RUM | **Absent** | — |
 | ITSM / service desk | **Absent** | — |
@@ -663,5 +663,22 @@ The adversarial isolation test also earned its keep immediately: it caught
 of 404. Nothing leaked, but the owner of an empty range and somebody probing another
 tenant's ids got the same answer. Fixed in the store, where the scope lives.
 
-**Still open, and unchanged:** NCM, SLOs, and the Gate 1 interviews — which now matter
-*more* rather than less, because a second module has been built on inference.
+**SLOs were built too**, the same day and for the same reason — `docs/slo.md`, migration
+0029, 28 tests. It is Stage 2's cheapest item and it rode `service_5m`, which has carried
+`requests` and `errors` per five-minute bucket since M8. No new collection again.
+
+Its sharp decision is one this document did not anticipate and is worth pulling up here:
+**the product refuses to print a remaining error count.** Traces are sampled, so a *ratio*
+over them estimates the true ratio and is sound, while "4 213 errors remaining" needs the
+sampling denominator, which this product does not know. Every competitor prints that
+number. This one prints the budget as a proportion instead and says why on the screen.
+
+Availability SLOs were **not** built, and the reason was already written down in
+`web/src/overview.tsx`: the product refuses to draw a health percentage because
+availability with maintenance windows excluded has no defensible formula yet. An
+availability SLO is that same number with a target attached, and shipping it would put the
+unexplainable number on a contract instead of a dashboard.
+
+**Still open:** NCM — the last of OpManager's five add-ons and the expensive one — plus
+burn-rate alerting, availability SLOs, and the Gate 1 interviews, which now matter *more*
+rather than less, because three modules have been built on inference.
