@@ -321,6 +321,12 @@ a person's judgement rather than a product's guess — and an event does not.
       > and the source hop — see the amendment in §2.4 for why they cannot be `events`
       > rows. A detection over them needs an organization-scoped evaluation path that does
       > not exist, and that is the named precondition.
+      >
+      > [`docs/self-monitoring.md`](./self-monitoring.md) is what that precondition turns
+      > out to involve: three changes rather than one — a second isolation scope, a second
+      > store behind the Query AST, and a signal that is not telemetry. It recommends the
+      > cheapest true option (the installation as a resource in a nominated tenant) and
+      > says what would change that recommendation.
 - [x] An `NXDOMAIN` frequency table is answerable through the Query AST with no new
       aggregate
       > Fifty names that resolved sit in the same window and are absent from the table, so
