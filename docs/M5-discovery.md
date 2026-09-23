@@ -253,9 +253,24 @@ cannot trust.
       produces a provisional resource
 - [x] A CIDR larger than /16 is refused when the job is written, with a sentence saying
       what to do instead
-- [x] An LLDP walk between two known devices produces exactly one `connected_to` edge,
+- [~] An LLDP walk between two known devices produces exactly one `connected_to` edge,
       and re-walking produces no duplicate — including when *both ends* are walked, which
       the schema's UNIQUE does not catch and a sorted pair does
+      > **The ingest is right and nothing performs the walk.** `uops_discover::neighbours`
+      > reads `lldpRemTable`, `PgStore::record_neighbours` turns what it read into exactly
+      > one `connected_to` edge per adjacency, and both are tested — the sorted-pair
+      > property included. What does not exist is a caller: `record_neighbours` is invoked
+      > **only from tests**, and `uops_discover::run` performs sweep probes and never a
+      > neighbour walk.
+      >
+      > So on a real estate the topology is empty. Found on 2026-09-24 by pointing the
+      > product at the EVE-NG lab — four devices with `lldpd` exporting LLDP-MIB over
+      > AgentX, verified answering by `snmpwalk`, discovered and polled correctly, and
+      > `GET /api/v1/topology` returned `nodes: 0, edges: 0`.
+      >
+      > Reopened to `[~]` rather than left ticked: the criterion as written is about what
+      > a walk produces, and that is true. What it does not say, and a reader would assume,
+      > is that anything walks.
 - [x] An LLDP neighbour with no matching resource produces a candidate, not a resource
 - [x] A sweep stays within its concurrency and rate caps, measured against a paused
       clock — and the three caps are asserted to be consistent with each other, which

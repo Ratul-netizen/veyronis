@@ -55,6 +55,14 @@ five telemetry signals — metrics, logs, events and state, flows, traces — la
 resource identity and are read through **one** query AST, which was the whole bet. **M13 AI
 is the only milestone not started**, and PLAN §10 calls it *direction, not commitments*.
 
+> **Found 2026-09-24 by the EVE-NG lab: nothing walks LLDP.** `uops_discover::neighbours`
+> and `PgStore::record_neighbours` are both implemented and tested, and **no running
+> process calls them** — `record_neighbours` is invoked only from tests. On a real estate
+> `GET /api/v1/topology` returns `nodes: 0, edges: 0`. M5's criterion is reopened to `[~]`
+> with the evidence. The lab is four Debian nodes with `lldpd` exporting LLDP-MIB over
+> AgentX, confirmed answering by `snmpwalk`; discovery and polling of those same nodes
+> work correctly, which is what makes the gap specific rather than vague.
+
 **One criterion across all thirteen is not met**, and it is not hidden: M12's cross-tenant
 isolation, which reopens with every surface a later milestone adds and is currently
 satisfied — all 73 registered route paths have a case in `isolation.rs`. M10's dry run against a real SSH
