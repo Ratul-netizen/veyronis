@@ -85,9 +85,15 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > reachable. `TenantScope` is enforced by the type system and asserted across every route in
 > `isolation.rs`; production can currently only ever have one side of that boundary.
 >
-> **Decided, not yet built** — both halves now have a document.
+> **User administration is built; tenant creation is decided and not built.**
 > `docs/user-administration.md` covers users, roles and the account lifecycle, including why
-> an admin never sets another person's password and why the last admin cannot be removed.
+> an admin never sets another person's password and why the last admin cannot be removed —
+> and as of 2026-09-24 the store and the eleven routes exist, with a test that invites
+> somebody, has them choose their own password, signs them in and grants them a role over
+> HTTP with no `psql`. **The screens do not exist yet**, so the two criteria about what
+> somebody is shown are still open, and one criterion was amended as wrong rather than met
+> (see §7 of that document: `unreached.py` asks whether a *name* has a production caller,
+> and the honest question is whether a *capability* does).
 > `docs/tenant-lifecycle.md` covers creating and retiring a tenant, and found the thing that
 > would have made the first successful use of the feature a lockout: creating a tenant raises
 > the denominator in `is_org_admin`, so the admin who creates one loses organization-wide
@@ -109,10 +115,15 @@ absent being the `/api/{*rest}` fallback, which it exercises as
 `/api/v1/no-such-endpoint`. M10's dry run against a real SSH server was the other one and
 closed on 2026-09-24; M12's two-poller sample count was measured and closed earlier.
 
-**Two gaps are open that no criterion ever asked about**, both found on 2026-09-24 and both
-recorded above: there is no user administration, and no way to create a second tenant. They
-are not failed criteria — they are things every criterion about them would have passed,
-which is the point.
+**Two gaps were open that no criterion ever asked about**, both found on 2026-09-24 and both
+recorded above. They were not failed criteria — they are things every criterion about them
+would have passed, which is the point.
+
+One is closed below the interface: **user administration** has a store layer, eleven routes
+and 35 tests, and an installation can now add a second person. Its screens are the work in
+flight. The other is open: **there is still no way to create a second tenant**, so the MSP
+shape `docs/security-overview.md` describes remains unreachable, and `docs/tenant-lifecycle.md`
+is the plan for it.
 
 M12 is the one that changed what the product *is* rather than what it does: it now
 survives losing a process, authenticates the way an organisation already does, knows what
