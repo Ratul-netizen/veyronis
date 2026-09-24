@@ -170,6 +170,44 @@ where
                 Err(e) => eprintln!("alerts: the rule list could not be read: {e}"),
             }
 
+            // M9 §2.1: an incident whose alerts have all resolved becomes *quiet*.
+            //
+            // **This was missing entirely and nothing noticed for a milestone.**
+            // `Engine::quiet_settled_incidents` exists, is tested, and was called from
+            // `Engine::evaluate_tenant` — which `Engine::cycle` reaches and which nothing
+            // in production does. Production is this loop: a wheel dispatching one rule at
+            // a time through `evaluate_and_deliver`. So every incident stayed `open`
+            // forever, and on a real estate the list would grow without bound until "open"
+            // stopped meaning anything. Found by restarting a device in the lab and
+            // watching the incident not recover.
+            //
+            // Here rather than in `evaluate_and_deliver`, because it is one statement over
+            // a tenant's open incidents and not a property of any one rule — running it
+            // per rule would repeat it a thousand times for an answer that only changes
+            // when an alert resolves. The reload cadence is the right one: it is already
+            // the per-tenant beat of this loop.
+            match store.all_tenant_ids().await {
+                Ok(tenants) => {
+                    let now = chrono::Utc::now();
+                    for tenant in tenants {
+                        let scope = uops_core::TenantScope::collector(tenant);
+                        match store.quiet_settled_incidents(&scope, now).await {
+                            // Only when something changed. An estate with no incidents
+                            // must not print a line every reload forever.
+                            Ok(n) if n > 0 => println!(
+                                "alerts: {n} incident{} went quiet — every alert resolved",
+                                if n == 1 { "" } else { "s" }
+                            ),
+                            Ok(_) => {}
+                            Err(e) => eprintln!(
+                                "alerts: incidents could not be settled for {tenant}: {e}"
+                            ),
+                        }
+                    }
+                }
+                Err(e) => eprintln!("alerts: the tenant list could not be read: {e}"),
+            }
+
             let mut w = window.lock().await;
             if w.rules > 0 || w.failures > 0 {
                 println!(

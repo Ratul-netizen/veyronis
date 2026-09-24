@@ -259,6 +259,28 @@ incident", in the schema rather than in code.
 - [x] Resolving every alert moves an incident to `quiet` and not to `closed`; only a
       human closes it — §2.1, and closing twice is refused rather than treated as
       idempotent
+      > **True of the function and false of the product, for the whole milestone.**
+      > `PgStore::quiet_settled_incidents` did exactly this and
+      > `resolving_every_alert_makes_an_incident_quiet_and_never_closed` has always
+      > passed. Nothing in production called it: the call sat in
+      > `Engine::evaluate_tenant`, which only `Engine::cycle` reaches, and the run loop
+      > does not use `cycle` — it dispatches one rule at a time through
+      > `evaluate_and_deliver`. So **every incident stayed `open` for ever**, and on a real
+      > estate the list would have grown without bound until "open" meant nothing.
+      >
+      > `crates/uops-alert/tests/cycle.rs` had already written the sentence that gives it
+      > away — *"Not `Engine::cycle`, which evaluates sequentially — that would measure a
+      > design nothing runs"* — while the settle call sat in that design.
+      >
+      > **Found 2026-09-24 in the lab**, by restarting a device and watching the incident
+      > fail to recover. Fixed in `uops-alert/src/run.rs` on the reload cadence, which is
+      > already the loop's per-tenant beat. `tests/settling.rs` drives the real loop and
+      > asserts the transition with nobody calling the settle function by hand; removing
+      > the fix makes it fail and leaves the paired negative case passing.
+      >
+      > The store test could not have caught this, because it supplied the call it was
+      > testing. That is the fifth defect of this shape in two days — see
+      > `docs/lab.md` §4.
 - [x] The timeline shows metrics, logs, events, states, flows and spans for the incident's
       resources on one axis, and says which signals expired rather than showing a gap —
       `uops_query::timeline`'s `Coverage`, through the API, onto the screen

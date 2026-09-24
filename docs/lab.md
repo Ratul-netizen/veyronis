@@ -89,6 +89,14 @@ M5's criterion was reopened to `[~]` with this written against it. The criterion
 wrong — an LLDP walk really does produce one edge — it simply never said that anything
 walks, and a reader would assume it.
 
+**A second find, 24 September: no incident ever went quiet.** M9 §2.1 says an incident
+whose alerts have all resolved becomes *quiet*, `PgStore::quiet_settled_incidents` does
+exactly that, and its test has always passed. Nothing in production called it — the call
+was in `Engine::evaluate_tenant`, reachable only from `Engine::cycle`, which the run loop
+does not use. Found by restarting `core-sw-01` here and watching the incident stay `open`
+with every alert resolved. Fixed in the run loop, with a test that drives the real loop
+rather than the function.
+
 **Fixed the same day**, and verified here rather than in a fixture: `docs/topology-walk.md`
 puts the walk on the poller's discovery task, and the same four devices now return
 
