@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE app_user SET break_glass = false WHERE org_id = $1 AND break_glass",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2ffff3a9c7c988627494107c1a11bea0dde8fe9b29913bce028db06e4cb95821"
+}

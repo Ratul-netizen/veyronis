@@ -75,6 +75,7 @@ pub mod sso;
 pub mod store;
 pub mod sweep_ingest;
 pub mod topology;
+pub mod users;
 
 pub use alerts::{ActiveAlert, AlertRule, AlertStateRow, Evaluated, NewRule};
 pub use audit::{AccessEntry, AuditEntry};
@@ -108,6 +109,9 @@ pub use runbooks::{
     RunbookRow,
 };
 pub use sealed::PgSealedStore;
+pub use users::{
+    AdminUser, Change, INVITATION_VALID_FOR, Invited, Member, PendingInvitation,
+};
 pub use searches::{NewSearch, SavedSearch};
 pub use sites::{Location, SiteOverview, StatusCounts};
 pub use sso::{OrgAuditEntry, PasswordPolicy, Provider, Provisioned, SignInOption};

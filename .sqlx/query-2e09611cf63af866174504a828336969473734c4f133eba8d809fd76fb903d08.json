@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE app_user SET disabled_at = now(), updated_at = now()\n             WHERE id = $1 AND org_id = $2 AND disabled_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e09611cf63af866174504a828336969473734c4f133eba8d809fd76fb903d08"
+}

@@ -117,15 +117,45 @@ nothing if it confidently names the wrong person. Argon2 being irreversible is n
 point; the window between *set* and *first changed* is the point, and the product has no way
 to force the change.
 
-**So a new account is created without a password and carries a single-use invitation.** The
-schema already allows it: `app_user.password_hash` is nullable, because an SSO-provisioned
-user has never had one.
+**So nobody sets a password but its owner, and the account does not exist until they do.**
+
+> **Amended 2026-09-24, while building it.** This section said the new account is created
+> immediately without a password, and that *"the schema already allows it:
+> `app_user.password_hash` is nullable, because an SSO-provisioned user has never had one."*
+> Nullable, but not unconstrained — migration 0024 added
+> `app_user_can_authenticate_somehow`, and it refused the insert:
+>
+> > An account with neither a password nor a provider identity cannot authenticate at all.
+> > It is not a locked account — `disabled_at` is how one of those is written — it is a row
+> > that nothing can ever match, and it would be created by a partial write rather than by
+> > intent.
+>
+> An invited account is the *intentional* version of precisely that state, so the choice was
+> to name it in the constraint or to not create the row yet. **Not creating it wins**, and
+> the deciding argument is not tidiness: §4.4 offers no way to delete a user, because the
+> audit and access logs name their actor. An account created at invitation time would make
+> every mistyped address a permanent, undeletable row in the user list. An unredeemed
+> invitation is not a person yet, so it can simply expire.
+>
+> The cost, recorded because it is real: **a role cannot be granted before somebody
+> accepts.** That is arguably the better shape — a role is granted to a person who exists —
+> but it is a consequence, not a feature. It also means the administration screen reads two
+> lists, `users_in_org` and `pending_invitations`, rather than one.
 
 **The token is stored hashed and never re-readable,** following the collector enrolment
 tokens that already exist (`/api/v1/collectors/tokens`) rather than inventing a second
-convention. It is single-use and expires; the account before first use has no password hash
-and cannot authenticate, so an unclaimed invitation is not an account waiting to be guessed
-at. This needs migration 0030.
+convention. It is single-use and expires, and there is no account behind it until it is
+redeemed — so an unclaimed invitation is not an account waiting to be guessed at. Migration
+0030 adds `user_invitation`, which carries the organization, the address and the display
+name until somebody accepts.
+
+**Single use is enforced twice, and that is deliberate.** The redemption locks its row with
+`SELECT … FOR UPDATE` on a predicate including `accepted_at IS NULL`, so a second
+simultaneous redemption matches nothing; and the account insert is `ON CONFLICT DO NOTHING`
+against `app_user_email_ci_idx`, so even a token that somehow passed the first check cannot
+produce a second account for one address. Mutation testing showed the second alone made the
+first look untested, which is why `tests/users.rs` has a case that isolates the predicate by
+moving the account off the invited address.
 
 **Delivery, and the decision that keeps an air-gapped install usable.** `uops-notify` has a
 working `Smtp` transport, but it is reached through a *notification channel*, which is
@@ -160,11 +190,25 @@ is a hand-written `UPDATE` against a production database. So:
 * an admin cannot disable their own account;
 * the last remaining enabled admin on a tenant cannot have their role revoked or lowered.
 
-**Enforced inside the statement that performs the change, not as a check before it.** A
-read-then-write would let two concurrent requests each observe a second admin and both
-succeed, leaving zero — the same race the `lease` module exists to reason about, and the
-`UPDATE … WHERE` in `nominate_platform_tenant` is the local precedent for deciding it in the
-database rather than in the caller.
+**Enforced under a lock, not as a check before the write and not inside one statement.**
+
+> **Amended 2026-09-24, while building it.** This said the rule would be enforced *"inside
+> the statement that performs the change"*. That is not sufficient and the reasoning was
+> shallow. A single statement can check "is there another enabled admin" against its own
+> snapshot, but two concurrent statements removing *different* administrators each see the
+> other and both commit: no row is contended, so nothing conflicts and nothing blocks. The
+> check has to exclude the other *change*, not the other row.
+>
+> So every operation that can change the set of enabled administrators — disable, grant,
+> revoke — takes a transaction-scoped advisory lock on the organization first, then checks,
+> then writes. These are rare administrative acts; serialising them per organization costs
+> nothing anybody will measure, and it removes the whole class of race rather than the
+> instance somebody thought of. It is the same instrument `bootstrap` uses, for the same
+> reason.
+>
+> The self-disable refusal stays in the route, because comparing the caller's id to the
+> target's is not a question about database state and asking the store would be asking the
+> wrong layer.
 
 Note that `is_org_admin` requires admin on **every** tenant in the organization, so
 organization-wide settings have a stricter requirement than any single tenant's admin list.
@@ -199,8 +243,14 @@ would be security theatre and is refused:** an admin who wants a password bypass
 designate any account they control, so the rule stops nothing and would read to a reviewer
 as though it stopped something. What actually constrains this is already built: requiring SSO
 is an organization-wide setting behind `OrgAdmin`, every *use* of the break-glass path is
-already audited as `auth.break_glass`, and designating it will be audited too. At most one
-account per organization may hold it.
+already audited as `auth.break_glass`, and designating it will be audited too.
+
+At most one account per organization may hold it, and **that was already enforced** —
+migration 0024 created `app_user_one_break_glass_per_org`, a partial unique index on
+`(org_id) WHERE break_glass`. A first draft of migration 0030 created it a second time and
+failed on the duplicate, which is the cheapest possible way to find out the invariant was
+already somebody else's decision. Designating therefore clears the previous holder in the
+same transaction, because otherwise it trips that index.
 
 ### 4.6 Changing your own password is a different thing and sits on `/me`
 
@@ -219,7 +269,8 @@ a bug.
 |---|---|---|
 | `GET /api/v1/users` | `OrgAdmin` | `user.list` |
 | `POST /api/v1/users` | `OrgAdmin` | `user.invite` |
-| `POST /api/v1/users/{id}/invitation` | `OrgAdmin` | `user.invite.resend` |
+| `DELETE /api/v1/users/invitations/{id}` | `OrgAdmin` | `user.invite.withdraw` |
+| `GET /api/v1/users/invitations` | `OrgAdmin` | `user.invitations.list` |
 | `POST /api/v1/users/{id}/disable` | `OrgAdmin` | `user.disable` |
 | `POST /api/v1/users/{id}/enable` | `OrgAdmin` | `user.enable` |
 | `POST /api/v1/users/{id}/break-glass` | `OrgAdmin` | `user.break_glass.designate` |
@@ -237,6 +288,11 @@ specifically so that it reopens for each new surface.
 `POST /api/v1/invitations/{token}` is the one unauthenticated mutating route this adds. It
 gets the same treatment as `auth/login`: the response must not distinguish an expired token
 from a wrong one, and the attempt is audited either way.
+
+**There is no resend route.** Inviting the same address again *is* the resend: it supersedes
+any live invitation in the same transaction, because the partial unique index requires that
+either way. One verb with one meaning beats two that differ only in whether something was
+there before.
 
 ## 6. What this does not do
 

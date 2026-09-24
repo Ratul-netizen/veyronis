@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                  FROM user_tenant_role mine\n                  JOIN tenant t ON t.id = mine.tenant_id AND t.org_id = $2\n                 WHERE mine.user_id = $1 AND mine.role = 'admin'\n                   AND NOT EXISTS (\n                       SELECT 1 FROM user_tenant_role other\n                         JOIN app_user u ON u.id = other.user_id AND u.disabled_at IS NULL\n                        WHERE other.tenant_id = mine.tenant_id\n                          AND other.role = 'admin'\n                          AND other.user_id <> $1\n                   )\n            ) AS \"sole!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sole!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "60f3fc380d43069853c51bd16fde8f8de5342da2c1ea6a47769a0bb571a16998"
+}
