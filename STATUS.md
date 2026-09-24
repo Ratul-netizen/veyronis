@@ -55,6 +55,27 @@ five telemetry signals — metrics, logs, events and state, flows, traces — la
 resource identity and are read through **one** query AST, which was the whole bet. **M13 AI
 is the only milestone not started**, and PLAN §10 calls it *direction, not commitments*.
 
+> **Found 2026-09-24 while writing `docs/packaging.md`: two binaries did not ship.** The
+> workspace builds eight; `deploy/Dockerfile` copied six. Missing were
+> `uops-collector-flow` — the whole of M7 — and `uops-runner`, the whole of M10. A deployment
+> built from the only artefact this repository has would have accepted a runbook run, queued
+> it, and never executed one: a queue with no consumer, reporting nothing anywhere.
+>
+> The Dockerfile's own comment predicted it, directly above the line that caused it — *"Naming
+> them individually is a list that goes stale silently"* — and then named them individually in
+> the copy. The guard that existed checks that every compose entrypoint is in the image, which
+> is one-directional: a binary in neither the image nor the compose file is invisible to it,
+> because nothing names it and so nothing asks why.
+>
+> **Fixed the same day**, with the other direction added to CI: every binary the crate
+> manifests declare must be in the image or listed as deliberately absent. **Not verified
+> locally** — there is no Docker on this machine — so CI's `stack` job is what confirms it.
+>
+> **There is still no way to install this product**, and `docs/packaging.md` is the decision
+> document for that: no published image, no packages, no per-host agent, and a version that has
+> been `0.0.1` since M0. The blocker for handing out an agent is named there — the OTLP listener
+> authenticates nobody, so per-tenant ingest tokens come first.
+
 > **Found and fixed 2026-09-24 by the EVE-NG lab: nothing walked LLDP.** `uops_discover::neighbours`
 > and `PgStore::record_neighbours` are both implemented and tested, and **no running
 > process calls them** — `record_neighbours` is invoked only from tests. On a real estate
