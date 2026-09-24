@@ -10,6 +10,42 @@ deployment topology.
 
 ---
 
+## Before you push
+
+Added 2026-09-24, after the `web` job sat red on `main` across two commits. The check that
+caught it — `scripts/css-classes.mjs` — already existed and had simply never been run
+against those commits, so the failure was discovered a push too late and by accident. Four
+of the five commands below take seconds; only the Rust suite is slow.
+
+```bash
+# Rust. The long one. Both stores have to be reachable, or tests skip or fail for reasons
+# that have nothing to do with the change -- see the two sections below for the URLs.
+export DATABASE_URL=... CLICKHOUSE_URL=... SQLX_OFFLINE=true
+cargo clippy --workspace --all-targets     # CI denies warnings
+cargo test --workspace
+
+# The web app. Seconds, and the guards are the part that gets forgotten.
+cd web
+npx tsc -b --noEmit && npx eslint src && npx vitest run && npm run build
+node scripts/no-remote-assets.mjs          # no third-party host in the built bundle
+node scripts/css-classes.mjs               # every class in the markup is defined
+cd ..
+
+# The artefact guards. Fast, no build needed.
+python scripts/no-phone-home.py --self-test && python scripts/no-phone-home.py
+```
+
+`scripts/csp-browser-check.py` is not in that list because it needs a browser and takes
+longer. Run it after changing the Content-Security-Policy in
+`crates/uops-server/src/headers.rs`, or after adding a web dependency that touches fonts,
+images, workers or wasm.
+
+**`cargo fmt --check` is not in the list either**, deliberately: it reports around 170
+pre-existing differences on this machine, which is toolchain skew rather than dirty code.
+Running it produces noise that hides anything real.
+
+---
+
 ## PostgreSQL — a portable install
 
 No container needed: PostgreSQL has a Windows build that runs from a directory.

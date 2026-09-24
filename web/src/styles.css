@@ -833,6 +833,30 @@ td {
   font-size: var(--t-label);
 }
 
+/* A standalone page with no shell around it — invitation acceptance, and anything else
+   somebody reaches before they have a session. `.login` is the same shape with a narrower
+   measure, and stays its own rule: it is a form and nothing else, where this holds prose
+   that needs a readable line length.
+
+   Named in `acceptinvite.tsx` since that screen was written and defined nowhere until
+   2026-09-24, which meant the invitation page — the first thing a new colleague ever sees
+   of this product — rendered edge to edge. `scripts/css-classes.mjs` is the check that
+   found it; it had simply never been run against that commit. */
+.centred {
+  max-width: 34rem;
+  margin: 12vh auto;
+  padding: 0 24px;
+}
+
+.centred h1 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+.centred form {
+  margin-top: 20px;
+}
+
 /* --- login -------------------------------------------------------------- */
 
 .login {
@@ -2822,6 +2846,15 @@ button.following {
   height: 100%;
   background: var(--accent, #4c8dff);
   border-radius: 2px;
+}
+
+/* The read log's table — `auditpage.tsx`. Its cells already carry `.mono`, `.dim` and
+   `.num`, so this modifier has exactly one job: a query fingerprint is long and unbroken,
+   and without somewhere to wrap it widens the table until the row counts leave the screen.
+   The numbers are what the page is read for, so the fingerprint is what yields. */
+.rows.audit td:nth-child(3) {
+  max-width: 28rem;
+  overflow-wrap: anywhere;
 }
 
 /* A row holding something that answered and that nothing claims — the one judgement this
