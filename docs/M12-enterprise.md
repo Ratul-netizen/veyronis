@@ -303,6 +303,18 @@ in every milestone since M7.
       isolation, tested separately in `crates/uops-api/tests/sso.rs` and
       `crates/uops-store-pg/tests/collectors.rs`. Reopens with each surface this milestone
       adds
+      > **Reopened and satisfied again on 2026-09-24**, which is what this criterion is for.
+      > `docs/user-administration.md` added eleven routes and `docs/tenant-lifecycle.md` five
+      > more; all seventeen have a case (twelve plus five), and
+      > `every_route_in_the_router_has_an_isolation_case` is what makes that a fact rather
+      > than a claim. Both sets are mostly `Unscoped` for the SSO reason above — they take
+      > `OrgAdmin`, so a caller who reaches them can already see every tenant they could name
+      > — and their organization-level property is asserted in
+      > `crates/uops-store-pg/tests/users.rs` and `tests/tenants.rs`, which drive two
+      > organizations directly rather than through one session. The three role routes are
+      > `Scoped`, because a tenant's membership list is that tenant's data.
+      >
+      > It stays `[~]`. The next surface reopens it again, and that is the point.
 
 ---
 

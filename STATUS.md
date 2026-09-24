@@ -78,12 +78,12 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > password. `docs/security-overview.md` and `Role::Admin`'s own doc comment both say an
 > admin manages users and roles.
 >
-> The heavier half is tenancy. The only `INSERT INTO tenant` outside tests is
-> `bootstrap.rs:152`, and `bootstrap` runs once — there is no `create_tenant` at all. So a
-> running installation has exactly **one** tenant, permanently, and the MSP story
-> `security-overview.md` sells (*"admin on one customer and viewer on another"*) is not
+> The heavier half was tenancy. The only `INSERT INTO tenant` outside tests was
+> `bootstrap.rs:152`, and `bootstrap` runs once — there was no `create_tenant` at all. So a
+> running installation had exactly **one** tenant, permanently, and the MSP story
+> `security-overview.md` sells (*"admin on one customer and viewer on another"*) was not
 > reachable. `TenantScope` is enforced by the type system and asserted across every route in
-> `isolation.rs`; production can currently only ever have one side of that boundary.
+> `isolation.rs`; production could only ever have one side of that boundary.
 >
 > **Both are built, as of 2026-09-24.**
 > `docs/user-administration.md` covers users, roles and the account lifecycle, including why

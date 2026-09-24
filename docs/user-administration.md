@@ -77,13 +77,14 @@ and no way to add another.
 That is a heavier finding than the one this document was opened for, and it is *coupled* to
 it: a screen for granting a role per tenant is close to meaningless against a single tenant,
 and the isolation guarantee that `TenantScope` enforces in the type system — asserted across
-ninety route entries in `crates/uops-api/tests/isolation.rs`, sold in
-`security-overview.md`, and a pillar of M12 — is currently a guarantee about a boundary that
-production can only ever have one side of.
+every route entry in `crates/uops-api/tests/isolation.rs`, sold in `security-overview.md`, and
+a pillar of M12 — was, when this was written, a guarantee about a boundary that production
+could only ever have one side of. `docs/tenant-lifecycle.md` closed that the same day.
 
 **Decision: tenant creation is a sibling document, not a section of this one, and this one
-does not wait for it.** That document is now written — `docs/tenant-lifecycle.md` — and it
-found a lockout this one would have walked into: creating a tenant raises the denominator in
+does not wait for it.** That document is now written **and built** —
+`docs/tenant-lifecycle.md`, 2026-09-24 — and it found a lockout this one would have walked
+into: creating a tenant raises the denominator in
 `is_org_admin`, so an admin who creates one without being granted a role on it loses
 `OrgAdmin` the moment it commits, and cannot get it back. The three reasons for separating
 them:
