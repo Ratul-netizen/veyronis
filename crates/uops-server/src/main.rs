@@ -105,6 +105,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let store_for_alerts = store.clone();
     let telemetry_for_alerts = telemetry.clone();
     let store_for_discovery = store.clone();
+    let store_for_self_monitor = store.clone();
+    let telemetry_for_self_monitor = telemetry.clone();
+
+    // First-party operational events are observed in one elected process and written to
+    // the nominated platform resource. The advisory lock keeps replicas from duplicating
+    // collector, lease, and runbook events.
+    let self_monitor = tokio::spawn(uops_platform_events::run(
+        store_for_self_monitor,
+        telemetry_for_self_monitor,
+        shutdown::signal(),
+    ));
 
     let state = if config.secure_cookies {
         AppState::new(store, telemetry)
@@ -190,29 +201,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("server stopped: {e}"))?;
 
-    // The engine is watching the same signal and is already unwinding. Waiting for it
-    // rather than dropping the handle means a rule that was mid-evaluation finishes
-    // writing its state — a phase recorded without the notification that belongs to it is
-    // the one inconsistency this process can produce on the way out.
-    if let Some(discovery) = discovery
-        && let Err(e) = discovery.await
-    {
-        // Same reasoning as below: the symptom of a panicked scheduler is an installation
-        // whose nightly sweeps stopped on a date nobody can identify.
-        eprintln!("discovery: the scheduler stopped unexpectedly: {e}");
-    }
-
-    if let Some(alerts) = alerts
-        && let Err(e) = alerts.await
-    {
-        // Reached when the engine's task panicked rather than returned. Said out loud
-        // because the symptom otherwise is an installation that stopped alerting at some
-        // point nobody can identify.
-        eprintln!("alerts: the engine stopped unexpectedly: {e}");
-    }
+    // Each of these is watching the same signal and is already unwinding. Waiting rather
+    // than dropping the handle means a rule that was mid-evaluation finishes writing its
+    // state — a phase recorded without the notification that belongs to it is the one
+    // inconsistency this process can produce on the way out.
+    wait_for("discovery: the scheduler", discovery).await;
+    wait_for("alerts: the engine", alerts).await;
+    wait_for("self-monitoring: the observer", Some(self_monitor)).await;
 
     println!("stopped cleanly");
     Ok(())
+}
+
+/// Wait for a background task to unwind, and say so if it panicked rather than returned.
+///
+/// Said out loud because the symptom otherwise is an installation that stopped doing one of
+/// its jobs — alerting, sweeping, or watching itself — at a point nobody can identify.
+async fn wait_for(what: &str, task: Option<tokio::task::JoinHandle<()>>) {
+    if let Some(task) = task
+        && let Err(e) = task.await
+    {
+        eprintln!("{what} stopped unexpectedly: {e}");
+    }
 }
 
 /// The single sign-on runtime — M12 §2.2.

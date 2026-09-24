@@ -159,6 +159,7 @@ uops-query = { path = "crates/uops-query" }
 uops-secrets = { path = "crates/uops-secrets" }
 uops-identity = { path = "crates/uops-identity" }
 uops-store-pg = { path = "crates/uops-store-pg" }
+uops-platform-events = { path = "crates/uops-platform-events" }
 uops-profile = { path = "crates/uops-profile" }
 uops-notify = { path = "crates/uops-notify" }
 uops-guess = { path = "crates/uops-guess" }

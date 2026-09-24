@@ -1,0 +1,25 @@
+[package]
+name = "uops-platform-events"
+description = "Writes first-party platform events to the nominated installation resource."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+chrono.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+uuid.workspace = true
+uops-core.workspace = true
+uops-store-ch.workspace = true
+uops-store-pg.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

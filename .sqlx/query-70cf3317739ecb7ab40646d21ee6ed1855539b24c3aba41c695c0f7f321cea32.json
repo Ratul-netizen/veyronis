@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, platform_tenant_id, platform_resource_id\n              FROM organization\n             WHERE platform_tenant_id IS NOT NULL\n               AND platform_resource_id IS NOT NULL\n             ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "platform_resource_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "70cf3317739ecb7ab40646d21ee6ed1855539b24c3aba41c695c0f7f321cea32"
+}

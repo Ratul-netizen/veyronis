@@ -61,7 +61,7 @@ pub const RENEW_EVERY: Duration = Duration::seconds(10);
 /// A fixed set rather than a free string, matched by the `CHECK` on the table: a typo in
 /// a job name would silently create a lease nobody else contends for, which looks like
 /// working code and is the failure this whole module exists to prevent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Job {
     /// The poll scheduler — `uops-poller`.
     Poll,

@@ -78,6 +78,20 @@ impl RunState {
     }
 }
 
+/// A run that failed, with only what an event about it needs.
+///
+/// Deliberately not a [`RunRow`]: that carries the targets, the approvals and the
+/// transcript's shape, and a self-monitoring event has no business holding a copy of a
+/// customer's target list.
+#[derive(Clone, Debug)]
+pub struct FailedRun {
+    pub id: uuid::Uuid,
+    pub tenant_id: TenantId,
+    pub runbook_id: uuid::Uuid,
+    pub failure: Option<String>,
+    pub finished_at: DateTime<Utc>,
+}
+
 /// A run, as it is listed.
 #[derive(Clone, Debug)]
 pub struct RunRow {
@@ -720,6 +734,52 @@ impl PgStore {
         .map_err(|e| map("run", "abandoned".to_owned(), e))?
         .rows_affected();
         Ok(affected)
+    }
+
+    /// Runs that failed recently, across every tenant, for self-monitoring.
+    ///
+    /// `docs/self-monitoring.md` §4 names a failed run as one of the three things an
+    /// operator currently finds only by looking. The observer that turns these into events
+    /// needs them without a tenant, because it does not know which tenants exist until it
+    /// has read the row.
+    ///
+    /// The window is the caller's, and it is what bounds the result: a run that failed
+    /// before it is not returned again, which is also what lets the observer forget it.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn recently_failed_runs(&self, within: chrono::Duration) -> Result<Vec<FailedRun>> {
+        #[expect(clippy::cast_precision_loss, reason = "a window in seconds")]
+        let secs = within.num_seconds() as f64;
+
+        // tenant-exempt: a failure is reported to the organization that owns the tenant,
+        // which is resolved from the row rather than known in advance.
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, tenant_id, runbook_id, failure,
+                   finished_at AS "finished_at!"
+              FROM runbook_run
+             WHERE state = 'failed'
+               AND finished_at > now() - make_interval(secs => $1)
+             ORDER BY finished_at
+            "#,
+            secs,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("run", "recently failed".to_owned(), e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| FailedRun {
+                id: r.id,
+                tenant_id: r.tenant_id.into(),
+                runbook_id: r.runbook_id,
+                failure: r.failure,
+                finished_at: r.finished_at,
+            })
+            .collect())
     }
 
     /// Where to reach each of a run's targets, right now.

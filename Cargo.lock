@@ -2867,6 +2867,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "uops-platform-events"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "sqlx",
+ "tokio",
+ "uops-core",
+ "uops-store-ch",
+ "uops-store-pg",
+ "uuid",
+]
+
+[[package]]
 name = "uops-poll"
 version = "0.0.1"
 dependencies = [
@@ -2994,6 +3007,7 @@ dependencies = [
  "uops-alert",
  "uops-api",
  "uops-core",
+ "uops-platform-events",
  "uops-secrets",
  "uops-store-ch",
  "uops-store-pg",

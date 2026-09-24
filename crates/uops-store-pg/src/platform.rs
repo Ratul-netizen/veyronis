@@ -45,6 +45,96 @@ impl PlatformTarget {
 }
 
 impl PgStore {
+    /// Every organization that has nominated a platform resource.
+    ///
+    /// Used by deployment-wide self-events such as a lease handover. Organizations that
+    /// have not nominated a tenant are deliberately absent.
+    /// Every organization that has nominated a platform resource.
+    ///
+    /// Used by deployment-wide self-events such as a lease handover. Organizations that
+    /// have not nominated a tenant are deliberately absent, so a caller can iterate the
+    /// result without a branch for "nowhere to put it".
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn platform_targets(&self) -> Result<Vec<(OrgId, PlatformTarget)>> {
+        // tenant-exempt: the question is which organizations exist, which no tenant scope
+        // can answer. Nothing tenant-owned is read — only the nomination itself.
+        let rows = sqlx::query!(
+            r#"
+            SELECT id, platform_tenant_id, platform_resource_id
+              FROM organization
+             WHERE platform_tenant_id IS NOT NULL
+               AND platform_resource_id IS NOT NULL
+             ORDER BY id
+            "#,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("organization", "platform targets".to_owned(), e))?;
+
+        // Both columns are `NOT NULL`-filtered above; the `zip` is what makes that a
+        // compile-time consequence rather than two `expect`s.
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let target = r.platform_tenant_id.zip(r.platform_resource_id)?;
+                Some((
+                    r.id.into(),
+                    PlatformTarget {
+                        tenant_id: target.0.into(),
+                        resource_id: target.1.into(),
+                    },
+                ))
+            })
+            .collect())
+    }
+
+    /// The nominated platform resource for the organization owning `tenant`.
+    ///
+    /// The only reader in the product that walks *upward* out of a tenant to its
+    /// organization without a [`TenantScope`], and it has to: a runbook run that failed is
+    /// a row with a tenant, and the event about it belongs to whoever owns that tenant.
+    /// Nothing in the type system stops this returning the wrong organization, which is why
+    /// `tests/platform.rs` asserts it with two of them.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said. A tenant that does not exist, or one whose organization
+    /// has nominated nothing, is `None` rather than an error — the caller is asking where
+    /// to put an event, and "nowhere" is a complete answer.
+    pub async fn platform_target_for_tenant(
+        &self,
+        tenant: TenantId,
+    ) -> Result<Option<(OrgId, PlatformTarget)>> {
+        // tenant-exempt: the tenant is the bound parameter, and the join is what restricts
+        // the answer to its own organization.
+        let row = sqlx::query!(
+            r#"
+            SELECT o.id, o.platform_tenant_id, o.platform_resource_id
+              FROM tenant t
+              JOIN organization o ON o.id = t.org_id
+             WHERE t.id = $1
+            "#,
+            tenant.into_uuid(),
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| map("organization", tenant.to_string(), e))?;
+
+        Ok(row.and_then(|r| {
+            let target = r.platform_tenant_id.zip(r.platform_resource_id)?;
+            Some((
+                r.id.into(),
+                PlatformTarget {
+                    tenant_id: target.0.into(),
+                    resource_id: target.1.into(),
+                },
+            ))
+        }))
+    }
+
     /// The resource that *is* this installation, for one organization.
     ///
     /// Read on every sign-in, so it is one primary-key lookup and nothing else. The
@@ -90,6 +180,15 @@ impl PgStore {
     /// again is not an error. Two replicas racing at first run must not create two
     /// installations, and the `UPDATE … WHERE platform_tenant_id IS NULL` is what decides
     /// between them rather than a check the caller makes first.
+    ///
+    /// **Nothing in production calls this yet, and that is a gap rather than a decision.**
+    /// First run nominates inline in `bootstrap`, which has to: it must be atomic with
+    /// creating the organization, and this opens its own transaction. Migration 0027
+    /// backfilled the installations that already existed. What is left uncovered is an
+    /// organization *created after* first run — it has no nominated resource, no way to
+    /// acquire one, and therefore receives none of the events in
+    /// `docs/self-monitoring.md` §4 while appearing to be monitored like any other. The
+    /// route that would call this is not written.
     ///
     /// # Errors
     ///

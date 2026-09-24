@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, tenant_id, runbook_id, failure,\n                   finished_at AS \"finished_at!\"\n              FROM runbook_run\n             WHERE state = 'failed'\n               AND finished_at > now() - make_interval(secs => $1)\n             ORDER BY finished_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "runbook_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "failure",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "finished_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "f380e32a73b9ceff1c9bd5f339a18739d2cc5b958def4c51bbcddc0a61c88c23"
+}

@@ -1,8 +1,8 @@
 # Self-monitoring, and the detection path that does not exist
 
-**Status:** a decision document, not a milestone. **§2.3 is built** — migration 0027,
-`uops_store_pg::platform`, and the sign-in path. §2.1, §2.2 and §2.4 were costed and not
-taken; they are kept because the reasoning is what makes the choice reviewable, and because
+**Status:** a decision document, not a milestone. **§2.3 and §4 are built** — migration
+0027, `uops_store_pg::platform`, the sign-in path, and `uops-platform-events` for the
+collector, lease and runbook events. §2.1, §2.2 and §2.4 were costed and not taken; they are kept because the reasoning is what makes the choice reviewable, and because
 §3 names the thing that would overturn it.
 
 M11 §2.4 said the product's own sign-ins should be *"the first source"* of authentication
@@ -158,10 +158,53 @@ changed hands, a runbook run that failed. Each is a thing an operator currently 
 looking. **That is the argument for doing this at all** — the sign-in detection is one
 instance, and on its own it does not justify the work.
 
-> **Built, and none of those are.** The resource exists and carries sign-ins. The
-> collector, lease and runbook events are the reason it was worth building and are still
-> open — a resource with one event kind on it is a seam, not a feature, and saying so is
-> better than letting the next reader assume self-monitoring is finished.
+> **Built, and so are all three.** The resource carries sign-ins, and
+> `uops-platform-events` observes the other three: a collector that stopped heartbeating, a
+> lease that changed hands, a runbook run that failed. One elected observer per deployment,
+> held by a PostgreSQL session advisory lock, on a thirty-second tick.
+>
+> The observer reads current state every tick and asks what of it is *news* —
+> `crates/uops-platform-events/src/seen.rs` is where that question lives, and is the only
+> part of this that can be tested without a database. The three facts remember differently on
+> purpose: a collector that is quiet now is a true statement about the present, so a fresh
+> observer reports it; a lease holder read at startup is not a handover, so the first
+> observation of each job is recorded silently. The cost is that a restart re-announces
+> currently-quiet collectors and failures from the last ten minutes, because the memory is
+> in the process and not in ClickHouse.
+
+**Three of these were worth writing down.** The first draft pruned its "already reported"
+memory once per organization rather than once per tick, so on any installation with two
+organizations each one's prune deleted the other's memory and both collectors were
+re-reported every thirty seconds, forever. It is invisible on the single-organization case
+anyone checks by hand. `seen.rs` keeps that as a test — the wrong order, asserted to
+misbehave — because the right order and the wrong one are indistinguishable by reading.
+
+The second was worse and is the more useful lesson. Both new readers aliased their columns
+`AS "org: OrgId"`, which is an instruction to the `query!` *macro* and means nothing in an
+unchecked `sqlx::query`: the column comes back named `org: OrgId` literally, and every
+`try_get("org")` raised `ColumnNotFound`. So the observer logged *"could not read platform
+targets"* once per tick and emitted nothing at all. The failure was handled, reported and
+total, and no amount of reading the code would have shown it. It was found by writing the
+first test that asked for a row back. Both readers are now `sqlx::query!`, which is what the
+workspace uses everywhere else and what would have rejected the alias at compile time.
+
+The third was found by the same test, from its clock rather than its assertion.
+`emit_to_all` looped and inserted one row per organization, so the deployment-wide test took
+**492 seconds** against a development database holding several thousand of them — which is
+what a lease handover would have cost a real multi-tenant installation, in thousands of
+single-row inserts into a column store whose worst case is exactly that. A deployment-wide
+event is by definition the same statement about every organization, so it is now one insert:
+0.60 seconds. Worth naming because nothing about the loop looked wrong, and no assertion
+would ever have failed — the only symptom was a number in the test output.
+
+**An organization created after first run gets none of this, and that is still open.**
+`bootstrap` nominates the installation resource inline because it must be atomic with
+creating the organization; migration 0027 backfilled the ones that already existed. Neither
+covers an organization added later: it has no nominated resource, no route to acquire one,
+and so receives no self-events while looking no different from any other.
+`PgStore::nominate_platform_tenant` is the function that would serve it and has no caller
+outside tests — found by `scripts/unreached.py`, which is the seventh instance of that shape.
+It is recorded here rather than fixed with a route nobody asked for.
 
 **The detections are not shipped.** M11 §1's line holds: a detection library is a content
 business. The product ships a `self` resource and the *events*; an organization writes the

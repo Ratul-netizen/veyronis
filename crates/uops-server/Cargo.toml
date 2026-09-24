@@ -16,6 +16,7 @@ uops-core.workspace = true
 uops-secrets.workspace = true
 uops-store-ch.workspace = true
 uops-store-pg.workspace = true
+uops-platform-events.workspace = true
 uops-sweeper.workspace = true
 
 axum.workspace = true

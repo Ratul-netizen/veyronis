@@ -104,7 +104,8 @@ pub use platform::PlatformTarget;
 pub use pollable::{PollableDevice, SYSOBJECTID_KEY};
 pub use resource::{NewResource, ResourceFilter};
 pub use runbooks::{
-    ApprovalRow, Claimed, QueuedTarget, RunContext, RunRow, RunState, RunStepRow, RunbookRow,
+    ApprovalRow, Claimed, FailedRun, QueuedTarget, RunContext, RunRow, RunState, RunStepRow,
+    RunbookRow,
 };
 pub use sealed::PgSealedStore;
 pub use searches::{NewSearch, SavedSearch};
