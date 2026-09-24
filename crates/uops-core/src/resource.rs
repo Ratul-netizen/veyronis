@@ -89,6 +89,28 @@ impl ResourceStatus {
     pub const fn alertable(self) -> bool {
         matches!(self, Self::Up | Self::Down | Self::Degraded | Self::Unknown)
     }
+
+    /// Every variant.
+    ///
+    /// Exists so that a caller can *partition* the statuses by [`Self::alertable`] rather
+    /// than restating which ones they are. The alert engine needs "the statuses that are not
+    /// alertable" to build a query, and writing `('maintenance', 'decommissioned')` into
+    /// that SQL would be a second copy of the rule this enum already owns — one that a new
+    /// variant would not update. `docs/unreached-triage.md` §5 is about that class of bug.
+    pub const ALL: [Self; 6] = [
+        Self::Up,
+        Self::Down,
+        Self::Degraded,
+        Self::Unknown,
+        Self::Maintenance,
+        Self::Decommissioned,
+    ];
+
+    /// The statuses for which alerts should not be raised, derived rather than listed.
+    #[must_use]
+    pub fn not_alertable() -> Vec<Self> {
+        Self::ALL.into_iter().filter(|s| !s.alertable()).collect()
+    }
 }
 
 /// A monitored thing.
@@ -231,6 +253,59 @@ pub struct Relationship {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ALL` lists every variant, and a new one cannot be added without noticing.
+    ///
+    /// The `match` has no wildcard arm, so adding a variant to the enum stops this file
+    /// compiling; the arm that has to be written then asserts membership, which fails until
+    /// `ALL` is updated too. That pair is the whole guard — `ALL` is what
+    /// [`ResourceStatus::not_alertable`] derives from, and a variant missing from it would
+    /// silently become alertable.
+    #[test]
+    fn all_lists_every_variant() {
+        for status in ResourceStatus::ALL {
+            let listed = ResourceStatus::ALL.contains(&status);
+            match status {
+                ResourceStatus::Up
+                | ResourceStatus::Down
+                | ResourceStatus::Degraded
+                | ResourceStatus::Unknown
+                | ResourceStatus::Maintenance
+                | ResourceStatus::Decommissioned => assert!(listed),
+            }
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        for status in ResourceStatus::ALL {
+            assert!(seen.insert(status), "{status:?} appears twice in ALL");
+        }
+    }
+
+    /// The two statuses that mean "do not alert", derived from `alertable` rather than named.
+    ///
+    /// `Maintenance`'s own doc comment says it *"suppresses alerting without losing
+    /// history"*, and until 2026-09-25 nothing implemented that: `alertable` was written,
+    /// tested, and called by no production code, so a decommissioned resource kept being
+    /// expected by absence rules after the poller had deliberately stopped polling it.
+    /// `docs/unreached-triage.md` §5.
+    #[test]
+    fn not_alertable_is_maintenance_and_decommissioned() {
+        let quiet = ResourceStatus::not_alertable();
+        assert_eq!(quiet.len(), 2, "{quiet:?}");
+        assert!(quiet.contains(&ResourceStatus::Maintenance));
+        assert!(quiet.contains(&ResourceStatus::Decommissioned));
+
+        // And the live states are not in it, which is the direction that would silence the
+        // product rather than make it noisy.
+        for live in [
+            ResourceStatus::Up,
+            ResourceStatus::Down,
+            ResourceStatus::Degraded,
+            ResourceStatus::Unknown,
+        ] {
+            assert!(!quiet.contains(&live), "{live:?} would never alert");
+        }
+    }
 
     #[test]
     fn label_prefers_the_human_name() {

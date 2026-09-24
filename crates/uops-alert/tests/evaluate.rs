@@ -232,6 +232,101 @@ async fn a_flapping_signal_produces_no_notifications() {
     );
 }
 
+/// Retiring a device does not make it alert for having been retired.
+///
+/// The defect this covers, found 2026-09-25 by triaging `scripts/unreached.py`:
+/// `ResourceStatus::alertable` says alerts are not raised for `Maintenance` or
+/// `Decommissioned`, `Maintenance`'s own doc comment says it *"suppresses alerting without
+/// losing history"*, and **no production code consulted either**. Meanwhile decommissioning
+/// is a soft delete — `DELETE /resources/{id}` is `set_resource_status(Decommissioned)` —
+/// and `pollable` deliberately stops polling a decommissioned resource.
+///
+/// So the operator retired a switch, the samples stopped *because* they retired it, and an
+/// absence rule scoped to a kind, a site or a group fired to tell them it had gone quiet.
+/// Nothing short of deleting the rule or the resource would stop it. `alerts.rs` already
+/// refused an absence rule over `ResourceSelector::All` for exactly this reason, naming "a
+/// decommissioned switch" in the comment; the narrower selectors were missed.
+///
+/// Asserted in both directions. Suppressing an alert is the dangerous kind of fix — a
+/// mistake here is silence, which nobody notices — so the same resource, samples and rule
+/// have to fire once the status goes back to something alertable.
+#[tokio::test]
+async fn a_retired_device_does_not_alert_and_a_live_one_still_does() {
+    let (pg, ch) = stores().await;
+    let (scope, device) = tenant(&pg, "retired").await;
+
+    let mut new = cpu_rule("Device silent", 0);
+    new.condition = Condition::Absence { after_seconds: 300 };
+    new.query.resources = uops_query::ResourceSelector::Kind {
+        kind: ResourceKind::Device,
+    };
+    let rule = rule(&pg, &scope, &new).await;
+
+    // Reporting for ten minutes, then nothing — the same shape as
+    // `an_absence_rule_notices_a_device_that_goes_quiet`, which is the control for this one.
+    let start = Utc::now() - Duration::minutes(20);
+    let rows: Vec<MetricRow> = (0..10)
+        .map(|minute| {
+            sample(
+                scope.tenant_id(),
+                device,
+                10.0,
+                start + Duration::minutes(minute),
+            )
+        })
+        .collect();
+    ch.insert_metrics(&rows).await.expect("insert");
+
+    // The operator retires it. This is what the route does.
+    pg.set_resource_status(&scope, device, uops_core::ResourceStatus::Decommissioned)
+        .await
+        .expect("decommission");
+
+    // Six minutes past a five-minute absence window, and silent.
+    let quiet = Engine::new(pg.clone(), ch.clone())
+        .evaluate(&scope, &rule, start + Duration::minutes(16))
+        .await
+        .expect("evaluate");
+    assert_eq!(
+        quiet.notifications(),
+        0,
+        "a device the operator retired alerted for going quiet: {:?}",
+        quiet.decisions
+    );
+
+    // Maintenance is the other half of `alertable`, and the one whose whole purpose is this.
+    pg.set_resource_status(&scope, device, uops_core::ResourceStatus::Maintenance)
+        .await
+        .expect("maintenance");
+    let during = Engine::new(pg.clone(), ch.clone())
+        .evaluate(&scope, &rule, start + Duration::minutes(17))
+        .await
+        .expect("evaluate");
+    assert_eq!(
+        during.notifications(),
+        0,
+        "a device in maintenance alerted: {:?}",
+        during.decisions
+    );
+
+    // And back to a live status: the rule, the resource and the samples are unchanged, so
+    // anything other than one notification here means this test proves nothing.
+    pg.set_resource_status(&scope, device, uops_core::ResourceStatus::Up)
+        .await
+        .expect("revive");
+    let live = Engine::new(pg, ch)
+        .evaluate(&scope, &rule, start + Duration::minutes(18))
+        .await
+        .expect("evaluate");
+    assert_eq!(
+        live.notifications(),
+        1,
+        "the same silence stopped being reported at all: {:?}",
+        live.decisions
+    );
+    assert_eq!(live.decisions[0].phase, Phase::Firing);
+}
+
 /// An absence rule detects a device that stops reporting, and says so once.
 #[tokio::test]
 async fn an_absence_rule_notices_a_device_that_goes_quiet() {

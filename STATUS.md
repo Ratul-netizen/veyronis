@@ -80,6 +80,39 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > exactly that reason, and two are open: a custom OTel Collector distribution, and a collector
 > one minor version behind still working.
 
+> **Found 2026-09-25 by triaging the ~50 candidates `scripts/unreached.py` had accumulated:
+> the detector was wrong, and its false negative hid KEK rotation.** Production use was a
+> search over the whole text of every file but the definition's own, with `#[cfg(test)]`
+> stripped from that one and nowhere else — so a function whose only callers were unit tests
+> *in another file* counted as reached. `LocalVault::rotate_kek` never appeared. The rewrite
+> also stops flagging `take_one` (called by `run()` in its own file, past a generic
+> declaration the old regex could not match, so the "minus the definition" adjustment removed
+> a real caller) and every axum handler (`post(metrics)` is a value, never a call).
+> `--self-test` holds all three. The corrected list is 60, and
+> `docs/unreached-triage.md` is the triage.
+>
+> **The findings, in severity order:** credential and KEK rotation have no operator path at
+> all — `rotate_kek`, `add_retired`, `promote_kek`, `rewrap` and `get_latest`, five functions
+> and one subsystem, every caller a test, and a configuration surface that cannot express a
+> retired key, so rotating by changing `UOPS_KEK_ID` makes every sealed credential stop
+> opening with `UnknownKek`; four unguarded twins of guarded admin mutations sitting in the
+> public store API with no organization check; the >99% cache hit-rate criterion measured by
+> a counter nothing reads; five health counters whose doc comments say "for a health
+> endpoint" and a health endpoint that reports two stores; and rules written twice where only
+> one copy runs.
+>
+> **One triaged all the way to a fix, and it was live.** `ResourceStatus::alertable` says no
+> alerts for `Maintenance` or `Decommissioned`, and `Maintenance`'s own doc comment says it
+> *"suppresses alerting without losing history"* — and nothing consulted either. Suppression
+> was built from maintenance *windows* only. But decommissioning is a soft delete, `pollable`
+> deliberately stops polling a decommissioned resource, and selector resolution does not
+> filter on status — so **retiring a device caused the alert that said it had gone quiet**,
+> and nothing but deleting the rule or the resource would stop it. `alerts.rs` had already
+> refused an absence rule over `All` for this exact reason, naming "a decommissioned switch";
+> the narrower selectors were missed. Fixed via `PgStore::not_alertable`, with the status list
+> derived from `alertable` rather than written into the SQL, and asserted in both directions
+> because a mistake in an alert-suppressing fix is silence.
+
 > **Found 2026-09-24, and it had already been pushed: the `web` job was red on `main`.**
 > `scripts/css-classes.mjs` fails when the markup names a class no stylesheet defines. Two
 > of mine did — `.centred` in `acceptinvite.tsx` (commit `7a5a243`) and `.audit` in

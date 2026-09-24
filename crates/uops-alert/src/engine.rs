@@ -434,11 +434,17 @@ impl Engine {
         })
     }
 
-    /// Which of this tenant's resources are inside an open maintenance window.
+    /// Which of this tenant's resources should not alert right now, and why.
+    ///
+    /// Two sources, and they are different in kind. A **maintenance window** is scheduled
+    /// work with a start and an end. A **status** is a state a resource sits in until
+    /// somebody changes it — `Maintenance` and `Decommissioned`, which
+    /// `ResourceStatus::alertable` has always named and which nothing consulted until
+    /// 2026-09-25. See `PgStore::not_alertable` for what that cost.
     ///
     /// Cached for [`SUPPRESSION_TTL`] and shared between evaluations: read once per rule,
-    /// this would be two-plus queries a rule a cycle for an answer that changes at the
-    /// edges of a window scheduled last week.
+    /// this would be several queries a rule a cycle for an answer that changes at the
+    /// edges of a window scheduled last week, or when somebody retires a device.
     async fn suppressions(
         &self,
         scope: &TenantScope,
@@ -468,6 +474,17 @@ impl Engine {
         now: DateTime<Utc>,
     ) -> uops_core::Result<Suppressions> {
         let mut covered: Suppressions = HashMap::new();
+
+        // Status first, so that an explicit window over the same resource can only ever
+        // widen what is suppressed and never narrow it — the combine below is `|=`.
+        //
+        // `Suppression::default()` is both flags, which is the right hammer here and for the
+        // reason `uops_core::maintenance` gives for it being the default: an alert that
+        // fired for a device somebody retired is still in the history afterwards, and
+        // somebody has to explain it.
+        for resource in self.pg.not_alertable(scope).await? {
+            covered.insert(resource, Suppression::default());
+        }
 
         for window in self.pg.live_windows(scope, now).await? {
             if !window.schedule.is_open_at(now) {

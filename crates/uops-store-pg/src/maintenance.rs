@@ -368,6 +368,50 @@ impl PgStore {
         Ok(())
     }
 
+    /// Resources whose *status* means alerts should not be raised for them.
+    ///
+    /// A maintenance window is a scheduled thing with a start and an end. A status is not:
+    /// `Maintenance` and `Decommissioned` are states a resource sits in until somebody
+    /// changes them, and `ResourceStatus`'s own documentation has always said so —
+    /// *"suppresses alerting without losing history"* on one, *"retired"* on the other.
+    ///
+    /// Nothing implemented it until 2026-09-25. `ResourceStatus::alertable` was written and
+    /// tested and called by no production code, which is the defect shape
+    /// `docs/unreached-triage.md` catalogues; this is its production caller. The symptom was
+    /// specific and bad: decommissioning is a soft delete, `pollable` deliberately stops
+    /// polling a decommissioned resource, and an absence rule scoped to a kind, a site or a
+    /// group went on expecting it — so retiring a device *caused* the alert that said it had
+    /// gone quiet, and nothing but deleting the rule or the resource would stop it.
+    ///
+    /// The statuses come from `ResourceStatus::not_alertable()` rather than being written
+    /// into this SQL. Writing `('maintenance', 'decommissioned')` here would be a second
+    /// copy of a rule `uops-core` already owns, and a seventh variant would update one of
+    /// them.
+    pub async fn not_alertable(&self, scope: &TenantScope) -> Result<Vec<ResourceId>> {
+        let quiet: Vec<String> = uops_core::ResourceStatus::not_alertable()
+            .into_iter()
+            .map(|s| s.as_str().to_owned())
+            .collect();
+
+        // `status::text = ANY($2)` rather than binding an array of the PostgreSQL enum: the
+        // cast costs a sequential scan of one tenant's resources, which this reads once per
+        // tenant per `SUPPRESSION_TTL` and not once per rule.
+        // tenant-exempt: the tenant is the first bound parameter, from the scope.
+        sqlx::query_scalar!(
+            r#"
+                SELECT id AS "id!: ResourceId"
+                  FROM resource
+                 WHERE tenant_id = $1
+                   AND status::text = ANY($2)
+                "#,
+            scope.tenant_id() as uops_core::TenantId,
+            &quiet,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| map("resource", "not_alertable".to_owned(), e))
+    }
+
     /// Which resources one window covers, right now.
     ///
     /// Resolved at read time rather than stored, and that is the point of targeting a
