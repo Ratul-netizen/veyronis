@@ -172,6 +172,49 @@ the availability path**. The deployment target is Linux, so this is a developmen
 inconvenience rather than a product gap, but it is worth knowing before reading a poller
 log full of failures.
 
+## 5b. What the product makes of it
+
+`crates/uops-poller/tests/live_lab.rs` walks the estate with the product's own code and
+asserts the graph. **PostgreSQL only** — a neighbour walk is SNMP in and
+`resource_relationship` out, so it runs when `ClickHouse` is down, which is how it came to be
+written. Skipped, loudly, when `UOPS_LAB` is unset.
+
+The run of 24 September 2026, nine nodes:
+
+```text
+  192.168.1.237   edge-fw-000100      lldp=4 -> edges 0  candidates 4
+  192.168.1.64    spine-01-000200     lldp=6 -> edges 1  candidates 5
+  192.168.1.49    core-rtr-01-000500  lldp=2 -> edges 2  candidates 0
+  192.168.1.128   leaf-01-000600      lldp=6 -> edges 1  candidates 5
+  192.168.1.207   leaf-02-000700      lldp=6 -> edges 1  candidates 5
+  10.10.6.10      lb-01-000300        lldp=2 -> edges 2  candidates 0
+  10.10.6.11      app-01-000400       lldp=2 -> edges 2  candidates 0
+  10.10.7.10      app-02-000800       lldp=2 -> edges 2  candidates 0
+  10.10.7.11      db-01-000900        lldp=2 -> edges 2  candidates 0
+
+  nodes: 9  edges: 8
+    core-rtr-01 — edge-fw        spine-01 — leaf-01     leaf-01 — lb-01    leaf-02 — app-02
+    edge-fw — spine-01           spine-01 — leaf-02     leaf-01 — app-01   leaf-02 — db-01
+```
+
+Eight edges, and they are the eight cabled links — nothing else. **32 adjacencies reported,
+8 distinct links stored**, which is the dedup the sorted pair gives and the schema's `UNIQUE`
+does not: both ends of every link walk it.
+
+**A second pass records all 32 again and changes nothing**, which the test asserts rather than
+observes. A poller walks every cycle, so an upsert that was not idempotent would grow the graph
+forever — and the failure would look like a topology that slowly filled with duplicates rather
+than like a bug.
+
+**A `mgmt_ip` is not enough to match a neighbour, and finding that out cost the first run.**
+`neighbour_ingest::identifiers_of` matches on chassis id, management address or `sysName`.
+`lldpd` here advertises a chassis id and a system name and *no* management address, so a
+resource known only by the address the poller dials matches nothing: the first run reported 32
+adjacencies and built **zero** edges, every one of them filed as a discovery candidate. The
+test now asks each device for `sysName.0` and records it, which is what identity resolution
+does on a real sweep. Worth keeping in the document because the symptom — a full neighbour
+walk and an empty graph — looks exactly like the M5 defect in §4 and is a different cause.
+
 ## 6. Running it
 
 The lab is `uops-estate` in EVE-NG and is driven through its REST API. Fabric addresses are
