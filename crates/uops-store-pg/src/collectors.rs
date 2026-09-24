@@ -215,7 +215,8 @@ impl PgStore {
         uses_left: Option<i32>,
         by: Option<ActorId>,
     ) -> Result<(String, uuid::Uuid)> {
-        let (token, hash) = session::issue().map_err(|e| uops_core::Error::Storage(e.to_string()))?;
+        let (token, hash) =
+            session::issue().map_err(|e| uops_core::Error::Storage(e.to_string()))?;
 
         // tenant-exempt: an enrolment token belongs to an organization, which sits above
         // the tenant isolation boundary — the same reason `app_user` does.
@@ -914,8 +915,14 @@ mod tests {
         let Err(uops_core::Error::Forbidden(why)) = check_assignment(&configured, &[acme]) else {
             panic!("an unassigned tenant must be refused")
         };
-        assert!(why.contains("globex"), "the message names the tenant: {why}");
-        assert!(!why.contains("acme"), "and not the ones that were fine: {why}");
+        assert!(
+            why.contains("globex"),
+            "the message names the tenant: {why}"
+        );
+        assert!(
+            !why.contains("acme"),
+            "and not the ones that were fine: {why}"
+        );
     }
 
     #[test]

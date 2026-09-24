@@ -232,7 +232,9 @@ async fn a_new_tenant_appears_in_the_switcher_and_can_be_worked_in() {
     .await;
     let tenants = me["tenants"].as_array().expect("tenants");
     assert!(
-        tenants.iter().any(|t| t["tenant_id"].as_str() == Some(id.as_str())),
+        tenants
+            .iter()
+            .any(|t| t["tenant_id"].as_str() == Some(id.as_str())),
         "{me}"
     );
 
@@ -263,7 +265,13 @@ async fn a_malformed_slug_is_explained_rather_than_rejected_by_a_constraint() {
     let w = World::new("badslug").await;
     let admin = sign_in(&w.store, &w.email).await;
 
-    for bad in ["Has Capitals", "has spaces", "-leading", "double--hyphen", "a"] {
+    for bad in [
+        "Has Capitals",
+        "has spaces",
+        "-leading",
+        "double--hyphen",
+        "a",
+    ] {
         let response = app(&w.store)
             .oneshot(admin.build(
                 "POST",
@@ -322,11 +330,7 @@ async fn the_last_tenant_cannot_be_retired() {
     let admin = sign_in(&w.store, &w.email).await;
 
     let response = app(&w.store)
-        .oneshot(admin.build(
-            "POST",
-            &format!("/api/v1/tenants/{}/retire", w.first),
-            None,
-        ))
+        .oneshot(admin.build("POST", &format!("/api/v1/tenants/{}/retire", w.first), None))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -356,11 +360,7 @@ async fn the_platform_tenant_cannot_be_retired_and_says_what_to_do() {
         .unwrap();
 
     let response = app(&w.store)
-        .oneshot(admin.build(
-            "POST",
-            &format!("/api/v1/tenants/{}/retire", w.first),
-            None,
-        ))
+        .oneshot(admin.build("POST", &format!("/api/v1/tenants/{}/retire", w.first), None))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -495,11 +495,7 @@ async fn an_operator_cannot_create_a_tenant() {
             "/api/v1/tenants".to_owned(),
             Some(serde_json::json!({ "name": "Theirs", "slug": slug("theirs") })),
         ),
-        (
-            "POST",
-            format!("/api/v1/tenants/{}/retire", w.first),
-            None,
-        ),
+        ("POST", format!("/api/v1/tenants/{}/retire", w.first), None),
     ] {
         let response = app(&w.store)
             .oneshot(theirs.build(method, &uri, body))

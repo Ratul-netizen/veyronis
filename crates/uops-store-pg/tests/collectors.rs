@@ -91,7 +91,10 @@ async fn a_collector_enrols_and_appears_in_the_inventory() {
         .await
         .expect("enrol");
 
-    assert_eq!(enrolled.org_id, f.org, "the token decides whose collector this is");
+    assert_eq!(
+        enrolled.org_id, f.org,
+        "the token decides whose collector this is"
+    );
     assert!(
         enrolled.tenants.is_empty(),
         "a collector that nobody has assigned serves nothing, not everything"
@@ -246,7 +249,10 @@ async fn ten_collectors_racing_one_single_use_token_produce_one_collector() {
         }
     }
 
-    assert_eq!(enrolled, 1, "a one-use token enrolled {enrolled} collectors");
+    assert_eq!(
+        enrolled, 1,
+        "a one-use token enrolled {enrolled} collectors"
+    );
     assert_eq!(f.store.collectors(f.org).await.unwrap().len(), 1);
 }
 
@@ -478,7 +484,14 @@ async fn one_organizations_inventory_is_not_anothers() {
         .unwrap();
 
     assert_eq!(ours.store.collectors(ours.org).await.unwrap().len(), 1);
-    assert!(theirs.store.collectors(theirs.org).await.unwrap().is_empty());
+    assert!(
+        theirs
+            .store
+            .collectors(theirs.org)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -558,7 +571,10 @@ async fn a_heartbeat_from_a_collector_that_no_longer_exists_is_a_not_found() {
     let err = f.store.heartbeat(uuid::Uuid::now_v7(), &report()).await;
     assert!(matches!(
         err,
-        Err(uops_core::Error::NotFound { kind: "collector", .. })
+        Err(uops_core::Error::NotFound {
+            kind: "collector",
+            ..
+        })
     ));
 }
 

@@ -72,7 +72,8 @@ impl Idp {
 
     /// Sign a set of claims into a compact JWS.
     fn mint(&self, claims: &str) -> String {
-        let header = b64::encode(format!(r#"{{"alg":"ES256","kid":"{KID}","typ":"JWT"}}"#).as_bytes());
+        let header =
+            b64::encode(format!(r#"{{"alg":"ES256","kid":"{KID}","typ":"JWT"}}"#).as_bytes());
         let payload = b64::encode(claims.as_bytes());
         let signed = format!("{header}.{payload}");
         let signature: p256::ecdsa::Signature = self.signing.sign(signed.as_bytes());
@@ -157,14 +158,7 @@ async fn fixture() -> Fixture {
     // A public client: no secret, PKCE alone. That keeps this test independent of
     // whether a KEK is configured, and it is a configuration a real deployment uses.
     let provider = store
-        .create_provider(
-            org,
-            "Test SSO",
-            ISSUER,
-            CLIENT_ID,
-            "groups",
-            None,
-        )
+        .create_provider(org, "Test SSO", ISSUER, CLIENT_ID, "groups", None)
         .await
         .expect("provider");
 
@@ -268,7 +262,10 @@ async fn start(fixture: &Fixture) -> Started {
         location.starts_with(&format!("{ISSUER}/authorize?")),
         "{location}"
     );
-    assert!(location.contains("code_challenge_method=S256"), "{location}");
+    assert!(
+        location.contains("code_challenge_method=S256"),
+        "{location}"
+    );
 
     let set = response
         .headers()
@@ -290,7 +287,10 @@ async fn start(fixture: &Fixture) -> Started {
 
     // The verifier must not have travelled. Only its hash did.
     let verifier = json["v"].as_str().expect("verifier").to_owned();
-    assert!(!location.contains(&verifier), "the verifier was sent to the provider");
+    assert!(
+        !location.contains(&verifier),
+        "the verifier was sent to the provider"
+    );
 
     Started {
         cookie: format!("uops_oidc={value}"),
@@ -318,7 +318,9 @@ async fn callback(fixture: &Fixture, cookie: &str, state: &str) -> axum::respons
         .clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/auth/oidc/callback?code=the-code&state={state}"))
+                .uri(format!(
+                    "/api/v1/auth/oidc/callback?code=the-code&state={state}"
+                ))
                 .header(header::COOKIE, cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -339,7 +341,11 @@ async fn a_user_signs_in_and_is_provisioned_with_the_role_their_group_grants() {
         .serve(f.idp.mint(&claims(&started.nonce, r#"["noc"]"#)));
 
     let response = callback(&f, &started.cookie, &started.state).await;
-    assert_eq!(response.status(), StatusCode::SEE_OTHER, "a sign-in redirects");
+    assert_eq!(
+        response.status(),
+        StatusCode::SEE_OTHER,
+        "a sign-in redirects"
+    );
     assert_eq!(
         response
             .headers()
@@ -378,7 +384,10 @@ async fn a_user_signs_in_and_is_provisioned_with_the_role_their_group_grants() {
             user.password_hash.is_none(),
             "an account provisioned through SSO has no password"
         );
-        f.store.tenant_memberships(user.user_id).await.expect("roles")
+        f.store
+            .tenant_memberships(user.user_id)
+            .await
+            .expect("roles")
     };
     assert_eq!(memberships.len(), 1);
     assert_eq!(memberships[0].tenant_id, f.tenant);
@@ -387,10 +396,8 @@ async fn a_user_signs_in_and_is_provisioned_with_the_role_their_group_grants() {
     // PKCE: the verifier the browser never saw travelled to the token endpoint, and it
     // is the one the challenge was built from.
     let form = f.idp.last_form.lock().unwrap().clone();
-    let sent: std::collections::HashMap<&str, &str> = form
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
+    let sent: std::collections::HashMap<&str, &str> =
+        form.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     assert_eq!(sent.get("code_verifier"), Some(&started.verifier.as_str()));
     assert_eq!(sent.get("grant_type"), Some(&"authorization_code"));
     assert_eq!(
@@ -767,12 +774,16 @@ async fn an_admin_of_one_organization_cannot_see_anothers_provider() {
     let suffix = uuid::Uuid::now_v7();
 
     let other_org = new_org(&f.store, &format!("Somebody else {suffix}")).await;
-    let other_tenant =
-        new_tenant(&f.store, other_org, "Theirs", &format!("theirs-{suffix}")).await;
+    let other_tenant = new_tenant(&f.store, other_org, "Theirs", &format!("theirs-{suffix}")).await;
     let hash = password::hash(&Secret::new("correct horse battery".to_owned())).unwrap();
     let outsider = f
         .store
-        .create_user(other_org, &format!("outsider-{suffix}@test.invalid"), "Out", &hash)
+        .create_user(
+            other_org,
+            &format!("outsider-{suffix}@test.invalid"),
+            "Out",
+            &hash,
+        )
         .await
         .unwrap();
     f.store
@@ -815,7 +826,12 @@ async fn an_admin_of_one_tenant_is_not_an_admin_of_the_organization() {
     let hash = password::hash(&Secret::new("correct horse battery".to_owned())).unwrap();
     let one_tenant_admin = f
         .store
-        .create_user(f.org, &format!("local-{suffix}@test.invalid"), "Local", &hash)
+        .create_user(
+            f.org,
+            &format!("local-{suffix}@test.invalid"),
+            "Local",
+            &hash,
+        )
         .await
         .unwrap();
     f.store
@@ -854,7 +870,12 @@ async fn a_disabled_account_is_not_an_organization_admin() {
 
     let admin = f
         .store
-        .create_user(f.org, &format!("admin-{suffix}@test.invalid"), "Admin", &hash)
+        .create_user(
+            f.org,
+            &format!("admin-{suffix}@test.invalid"),
+            "Admin",
+            &hash,
+        )
         .await
         .unwrap();
     f.store

@@ -583,7 +583,10 @@ async fn a_new_installation_has_a_resource_for_itself() {
 
     let resource = f
         .store
-        .resource(&uops_core::TenantScope::system(f.tenant), target.resource_id)
+        .resource(
+            &uops_core::TenantScope::system(f.tenant),
+            target.resource_id,
+        )
         .await
         .expect("the resource exists");
     assert_eq!(resource.kind, uops_core::ResourceKind::Service);
@@ -624,10 +627,7 @@ async fn the_installation_is_not_pollable_and_not_a_runbook_target() {
 /// timing oracle. A test for an intentionally asynchronous write has to wait for it, and a
 /// fixed sleep is a flake waiting for a slow day: this polls to a deadline instead, so it
 /// is fast when the write is fast and still correct when it is not.
-async fn platform_events_eventually(
-    f: &Fixture,
-    want: usize,
-) -> Vec<(String, String, String)> {
+async fn platform_events_eventually(f: &Fixture, want: usize) -> Vec<(String, String, String)> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let found = platform_events(f).await;

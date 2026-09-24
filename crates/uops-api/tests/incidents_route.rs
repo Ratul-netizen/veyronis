@@ -436,7 +436,9 @@ impl Fixture {
             .unwrap()
     }
 
-    async fn audit_log(&self) -> Vec<(String, Option<serde_json::Value>, Option<serde_json::Value>)> {
+    async fn audit_log(
+        &self,
+    ) -> Vec<(String, Option<serde_json::Value>, Option<serde_json::Value>)> {
         self.store
             .audit_entries(self.tenant, 50)
             .await
@@ -489,8 +491,14 @@ async fn suppression_is_off_until_somebody_turns_it_on_and_that_is_audited() {
         .iter()
         .find(|(action, _, _)| action == "incidents.suppression.set")
         .expect("switching it on is audited");
-    assert_eq!(entry.1.as_ref().unwrap()["suppress_downstream_alerts"], false);
-    assert_eq!(entry.2.as_ref().unwrap()["suppress_downstream_alerts"], true);
+    assert_eq!(
+        entry.1.as_ref().unwrap()["suppress_downstream_alerts"],
+        false
+    );
+    assert_eq!(
+        entry.2.as_ref().unwrap()["suppress_downstream_alerts"],
+        true
+    );
     assert_eq!(entry.2.as_ref().unwrap()["changed"], true);
 }
 
@@ -520,8 +528,14 @@ async fn turning_suppression_off_is_audited_too_and_a_no_op_says_so() {
     assert_eq!(sets.len(), 2, "both directions are recorded");
 
     // Newest first, so the second write is the first row.
-    assert_eq!(sets[0].1.as_ref().unwrap()["suppress_downstream_alerts"], true);
-    assert_eq!(sets[0].2.as_ref().unwrap()["suppress_downstream_alerts"], false);
+    assert_eq!(
+        sets[0].1.as_ref().unwrap()["suppress_downstream_alerts"],
+        true
+    );
+    assert_eq!(
+        sets[0].2.as_ref().unwrap()["suppress_downstream_alerts"],
+        false
+    );
 
     // Clicking the switch twice produces a row that says nothing happened, rather than a
     // second row that looks like a decision.

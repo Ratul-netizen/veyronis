@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use uops_core::{OrgId, SiteId, TenantId};
-use uops_store_ch::{EventRow, EventStore, ChStore};
+use uops_store_ch::{ChStore, EventRow, EventStore};
 use uops_store_pg::{Job, PgStore, PlatformTarget};
 
 use crate::seen::Seen;
@@ -134,7 +134,6 @@ pub async fn target_for_tenant(
 ) -> Result<Option<(OrgId, PlatformTarget)>, uops_core::Error> {
     pg.platform_target_for_tenant(tenant).await
 }
-
 
 /// Observe the small set of persisted facts named in `docs/self-monitoring.md` §4 and
 /// write changes as first-party events. A PostgreSQL advisory lock makes this one observer

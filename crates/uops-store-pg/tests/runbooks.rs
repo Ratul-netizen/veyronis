@@ -53,8 +53,8 @@ async fn fixture(slug: &str) -> Fixture {
         .await
         .expect("tenant");
 
-    let hash = uops_secrets::password::hash(&Secret::new("correct horse".to_owned()))
-        .expect("hash");
+    let hash =
+        uops_secrets::password::hash(&Secret::new("correct horse".to_owned())).expect("hash");
     let mut users = Vec::new();
     for who in ["starter", "approver", "else"] {
         users.push(
@@ -129,7 +129,11 @@ async fn saving_twice_writes_a_second_version_and_leaves_the_first() {
 
     let first = f
         .store
-        .save_runbook(&f.scope, &runbook("restart-bgp", Approvals::One), Some(f.starter))
+        .save_runbook(
+            &f.scope,
+            &runbook("restart-bgp", Approvals::One),
+            Some(f.starter),
+        )
         .await
         .expect("save");
     assert_eq!(first.version, 1);
@@ -221,7 +225,14 @@ async fn one_tenants_runbooks_are_not_anothers() {
         .unwrap();
 
     assert_eq!(ours.store.runbooks(&ours.scope).await.unwrap().len(), 1);
-    assert!(theirs.store.runbooks(&theirs.scope).await.unwrap().is_empty());
+    assert!(
+        theirs
+            .store
+            .runbooks(&theirs.scope)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         theirs
             .store
@@ -309,7 +320,10 @@ async fn two_distinct_people_are_two_approvals() {
     let f = fixture("two-people").await;
     let run = a_run(&f).await;
 
-    f.store.approve_run(&f.scope, run, f.approver).await.unwrap();
+    f.store
+        .approve_run(&f.scope, run, f.approver)
+        .await
+        .unwrap();
     f.store
         .approve_run(&f.scope, run, f.someone_else)
         .await
@@ -352,7 +366,10 @@ async fn the_approval_records_what_was_being_looked_at() {
     // the fingerprint is what `uops_runbook::decide` compares.
     let f = fixture("fingerprint").await;
     let run = a_run(&f).await;
-    f.store.approve_run(&f.scope, run, f.approver).await.unwrap();
+    f.store
+        .approve_run(&f.scope, run, f.approver)
+        .await
+        .unwrap();
 
     let runs = f.store.runs(&f.scope, 10).await.unwrap();
     let listed = runs.iter().find(|r| r.id == run).unwrap();
@@ -404,11 +421,12 @@ async fn a_transcript_is_redacted_on_the_way_in() {
         .await
         .expect("record");
 
-    let stored: String = sqlx::query_scalar("SELECT output FROM runbook_run_step WHERE run_id = $1")
-        .bind(run)
-        .fetch_one(f.store.pool())
-        .await
-        .unwrap();
+    let stored: String =
+        sqlx::query_scalar("SELECT output FROM runbook_run_step WHERE run_id = $1")
+            .bind(run)
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
 
     assert!(!stored.contains("0822455D0A16"), "{stored}");
     assert!(stored.contains("<redacted>"), "{stored}");
@@ -436,7 +454,10 @@ async fn a_state_change_stamps_the_clock_it_should() {
         .unwrap();
     let done = f.store.runs(&f.scope, 10).await.unwrap();
     let r = done.iter().find(|r| r.id == run).unwrap();
-    assert!(r.finished_at.is_some(), "a terminal state stamps finished_at");
+    assert!(
+        r.finished_at.is_some(),
+        "a terminal state stamps finished_at"
+    );
     assert_eq!(r.failure.as_deref(), Some("step 1 failed"));
     assert!(
         r.state.touched_a_device(),

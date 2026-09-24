@@ -111,7 +111,11 @@ impl Pending {
         // A discovery document's endpoint may already carry a query — Entra ID's does
         // not, some Keycloak deployments behind a rewriting proxy do. Appending with the
         // wrong separator produces a URL that fails in a way nobody can read.
-        let separator = if authorization_endpoint.contains('?') { '&' } else { '?' };
+        let separator = if authorization_endpoint.contains('?') {
+            '&'
+        } else {
+            '?'
+        };
         let mut url = format!("{authorization_endpoint}{separator}response_type=code");
         for (key, value) in [
             ("client_id", client_id),
@@ -249,7 +253,10 @@ mod tests {
         // `plain` sends the verifier itself and therefore protects against nothing.
         let pending = Pending::start(None).unwrap();
         assert_ne!(pending.challenge(), pending.verifier);
-        assert_eq!(pending.challenge(), b64::encode(&sha256(pending.verifier.as_bytes())));
+        assert_eq!(
+            pending.challenge(),
+            b64::encode(&sha256(pending.verifier.as_bytes()))
+        );
     }
 
     #[test]
@@ -277,7 +284,10 @@ mod tests {
         assert!(url.contains(&format!("state={}", encode_component(&pending.state))));
         assert!(url.contains(&format!("nonce={}", encode_component(&pending.nonce))));
         // The verifier is the one value that must never travel.
-        assert!(!url.contains(&pending.verifier), "the verifier was sent to the provider");
+        assert!(
+            !url.contains(&pending.verifier),
+            "the verifier was sent to the provider"
+        );
     }
 
     #[test]
@@ -302,7 +312,10 @@ mod tests {
             "openid email profile",
         );
         assert!(url.contains("scope=openid%20email%20profile"), "{url}");
-        assert!(url.contains("redirect_uri=https%3A%2F%2Fuops.example.com%2Fcb"), "{url}");
+        assert!(
+            url.contains("redirect_uri=https%3A%2F%2Fuops.example.com%2Fcb"),
+            "{url}"
+        );
     }
 
     #[test]
@@ -338,7 +351,10 @@ mod tests {
     #[test]
     fn an_ordinary_path_survives() {
         assert_eq!(safe_return_to(Some("/incidents")), "/incidents");
-        assert_eq!(safe_return_to(Some("/r/abc?tab=timeline")), "/r/abc?tab=timeline");
+        assert_eq!(
+            safe_return_to(Some("/r/abc?tab=timeline")),
+            "/r/abc?tab=timeline"
+        );
         assert_eq!(safe_return_to(None), "/");
     }
 

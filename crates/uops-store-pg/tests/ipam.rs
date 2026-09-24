@@ -91,13 +91,15 @@ fn subnet(range: &str, name: &str) -> NewSubnet {
 /// A resource claiming one management address.
 async fn resource_at(store: &PgStore, tenant: TenantId, name: &str, address: &str) -> ResourceId {
     let id = ResourceId::new();
-    sqlx::query("INSERT INTO resource (id, tenant_id, kind, name, status) VALUES ($1,$2,'device',$3,'up')")
-        .bind(id.into_uuid())
-        .bind(tenant.into_uuid())
-        .bind(name)
-        .execute(store.pool())
-        .await
-        .expect("resource");
+    sqlx::query(
+        "INSERT INTO resource (id, tenant_id, kind, name, status) VALUES ($1,$2,'device',$3,'up')",
+    )
+    .bind(id.into_uuid())
+    .bind(tenant.into_uuid())
+    .bind(name)
+    .execute(store.pool())
+    .await
+    .expect("resource");
 
     sqlx::query(
         "INSERT INTO resource_identifier (id, tenant_id, resource_id, kind, value, confidence, source)
@@ -159,8 +161,14 @@ async fn the_same_range_cannot_be_declared_twice() {
         .expect("declare");
 
     // One subnet described twice would produce two sets of numbers that diverge.
-    let again = f.store.declare_subnet(&scope, &subnet("10.1.0.0/24", "second")).await;
-    assert!(again.is_err(), "a second declaration of one range must be refused");
+    let again = f
+        .store
+        .declare_subnet(&scope, &subnet("10.1.0.0/24", "second"))
+        .await;
+    assert!(
+        again.is_err(),
+        "a second declaration of one range must be refused"
+    );
 }
 
 #[tokio::test]
@@ -174,7 +182,10 @@ async fn a_host_address_is_normalised_to_its_network() {
         .declare_subnet(&scope, &subnet("10.2.0.0/24", "network"))
         .await
         .expect("declare");
-    let again = f.store.declare_subnet(&scope, &subnet("10.2.0.5/24", "host form")).await;
+    let again = f
+        .store
+        .declare_subnet(&scope, &subnet("10.2.0.5/24", "host form"))
+        .await;
     assert!(again.is_err(), "10.2.0.5/24 and 10.2.0.0/24 are one range");
 }
 
@@ -224,7 +235,11 @@ async fn an_address_that_is_both_assigned_and_responding_is_counted_once_in_each
     resource_at(&f.store, f.a, "sw-1", "10.5.0.1").await;
     candidate_at(&f.store, f.a, "10.5.0.1").await;
 
-    let u = &f.store.subnet_utilisation(&scope).await.expect("utilisation")[0];
+    let u = &f
+        .store
+        .subnet_utilisation(&scope)
+        .await
+        .expect("utilisation")[0];
     assert_eq!(u.assigned, 1);
     assert_eq!(u.responding, 1);
     assert_eq!(
@@ -248,7 +263,11 @@ async fn an_address_that_answered_and_nobody_claims_is_the_finding() {
     // number an address inventory is actually bought for.
     candidate_at(&f.store, f.a, "10.6.0.99").await;
 
-    let u = &f.store.subnet_utilisation(&scope).await.expect("utilisation")[0];
+    let u = &f
+        .store
+        .subnet_utilisation(&scope)
+        .await
+        .expect("utilisation")[0];
     assert_eq!(u.assigned, 1);
     assert_eq!(u.responding, 2);
     assert_eq!(u.unaccounted, 1);
@@ -292,7 +311,11 @@ async fn an_assigned_address_that_never_answered_is_still_listed() {
     // `docs/ipam.md` §2.6. An inner join in the other direction would lose it.
     resource_at(&f.store, f.a, "powered-off", "10.7.0.5").await;
 
-    let u = &f.store.subnet_utilisation(&scope).await.expect("utilisation")[0];
+    let u = &f
+        .store
+        .subnet_utilisation(&scope)
+        .await
+        .expect("utilisation")[0];
     assert_eq!(u.assigned, 1);
     assert_eq!(u.responding, 0);
 
@@ -321,7 +344,11 @@ async fn an_address_outside_the_range_is_not_counted_in_it() {
     // accept this.
     candidate_at(&f.store, f.a, "10.8.1.7").await;
 
-    let u = &f.store.subnet_utilisation(&scope).await.expect("utilisation")[0];
+    let u = &f
+        .store
+        .subnet_utilisation(&scope)
+        .await
+        .expect("utilisation")[0];
     assert_eq!(u.responding, 1, "only the address inside the range counts");
 }
 
@@ -377,7 +404,10 @@ async fn one_tenants_addresses_are_invisible_to_another() {
         .forget_subnet(&f.scope_b(), in_a.id)
         .await
         .expect("forget");
-    assert!(!deleted, "a subnet id from another tenant cannot be deleted");
+    assert!(
+        !deleted,
+        "a subnet id from another tenant cannot be deleted"
+    );
     assert_eq!(
         f.store.subnets(&f.scope_a()).await.expect("list").len(),
         1,
@@ -408,5 +438,8 @@ async fn ipv6_is_refused_by_the_schema() {
     .bind(f.a.into_uuid())
     .execute(f.store.pool())
     .await;
-    assert!(refused.is_err(), "an IPv6 range must be refused by the schema");
+    assert!(
+        refused.is_err(),
+        "an IPv6 range must be refused by the schema"
+    );
 }

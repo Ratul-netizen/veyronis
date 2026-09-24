@@ -31,6 +31,7 @@ use uops_snmp::bulk::Tuning;
 use uops_snmp::transport::Target;
 use uops_snmp::udp::UdpTransport;
 use uops_store_pg::sweep_ingest::SweepContext;
+use uops_store_pg::topology::Topology;
 use uops_store_pg::{Config, PgStore};
 
 /// What the lab's `snmpd.conf` sets. Read-only, and a lab on a private segment.
@@ -190,7 +191,9 @@ async fn walk_estate(
 
     for address in addresses {
         let target = Target {
-            address: format!("{address}:161").parse().expect("an address and port"),
+            address: format!("{address}:161")
+                .parse()
+                .expect("an address and port"),
         };
         let named = sys_name(transport, &target).await;
         let resource = onboard(store, tenant, address, named.as_deref()).await;
@@ -256,7 +259,9 @@ async fn the_lab_estate_becomes_a_topology_graph() {
     let mut second_pass_edges: i64 = 0;
     for (address, resource) in &by_address {
         let target = Target {
-            address: format!("{address}:161").parse().expect("an address and port"),
+            address: format!("{address}:161")
+                .parse()
+                .expect("an address and port"),
         };
         let mut tuning = Tuning::default();
         let found = neighbours(&transport, &target, &mut tuning).await;
@@ -286,7 +291,11 @@ async fn the_lab_estate_becomes_a_topology_graph() {
     let graph = store.topology(&scope).await.expect("topology");
     let adjacency = after_two;
 
-    println!("\n  nodes: {}  edges: {}", graph.nodes.len(), graph.edges.len());
+    println!(
+        "\n  nodes: {}  edges: {}",
+        graph.nodes.len(),
+        graph.edges.len()
+    );
     for (a, b) in &adjacency {
         println!("    {a} — {b}");
     }
@@ -297,6 +306,34 @@ async fn the_lab_estate_becomes_a_topology_graph() {
          over again: `record_neighbours` correct, tested, and reaching nothing"
     );
 
+    what_the_graph_answers(
+        &store,
+        &scope,
+        &by_address,
+        &graph,
+        &adjacency,
+        &walked,
+        answered,
+    )
+    .await;
+}
+
+/// What the graph can and cannot answer, once it exists.
+///
+/// Extracted from the test above because `clippy::too_many_lines` fired at 110 — and the
+/// split is the one the test's own commentary already marked, the same seam as
+/// "Extract the estate walk, so the test reads as its three phases". The first half proves
+/// the estate becomes a graph; this half asks that graph the two M9 questions.
+#[allow(clippy::too_many_lines)]
+async fn what_the_graph_answers(
+    store: &PgStore,
+    scope: &TenantScope,
+    by_address: &BTreeMap<String, ResourceId>,
+    graph: &Topology,
+    adjacency: &BTreeSet<(String, String)>,
+    walked: &BTreeMap<String, usize>,
+    answered: usize,
+) {
     // --- what M9 can and cannot do with a purely LLDP-discovered estate -----------------
     //
     // Two traversals, and the difference is the whole of §2.4. `resource_neighbourhood`
@@ -321,11 +358,12 @@ async fn the_lab_estate_becomes_a_topology_graph() {
         })
         .collect();
 
-    let role = |r: &str| -> ResourceId { *by_role.get(r).unwrap_or_else(|| panic!("{r}: {by_role:?}")) };
+    let role =
+        |r: &str| -> ResourceId { *by_role.get(r).unwrap_or_else(|| panic!("{r}: {by_role:?}")) };
 
     // Grouping: within RADIUS hops of leaf-01, by the undirected walk.
     let hood = store
-        .neighbourhood(&scope, role("leaf-01"))
+        .neighbourhood(scope, role("leaf-01"))
         .await
         .expect("neighbourhood");
     let names: BTreeMap<ResourceId, String> =
@@ -333,7 +371,10 @@ async fn the_lab_estate_becomes_a_topology_graph() {
 
     println!("\n  within RADIUS = {} of leaf-01:", uops_incident::RADIUS);
     for (id, depth) in &hood.within {
-        println!("    {depth} hop  {}", names.get(id).cloned().unwrap_or_default());
+        println!(
+            "    {depth} hop  {}",
+            names.get(id).cloned().unwrap_or_default()
+        );
     }
 
     for near in ["lb-01", "app-01", "spine-01"] {
@@ -353,8 +394,10 @@ async fn the_lab_estate_becomes_a_topology_graph() {
         "something is upstream of leaf-01 on an estate whose only edges are `connected_to`.          Either a dependency edge arrived from somewhere, which is good and this assertion          should be relaxed, or `resource_dependencies` has started walking adjacency, which          would make a cable imply causation"
     );
 
-    println!("\n  upstream of leaf-01: {} — LLDP gives adjacency, not dependency",
-             hood.upstream.len());
+    println!(
+        "\n  upstream of leaf-01: {} — LLDP gives adjacency, not dependency",
+        hood.upstream.len()
+    );
 
     // Both ends of every cabled link walk it, so the adjacency count is what a sorted pair
     // collapses to — the dedup property the schema's UNIQUE alone does not give.

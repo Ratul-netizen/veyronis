@@ -60,7 +60,10 @@ impl Hop {
             return None;
         }
         let lost = self.rtt_ms.iter().filter(|r| r.is_none()).count();
-        #[allow(clippy::cast_precision_loss, reason = "three probes, not three billion")]
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "three probes, not three billion"
+        )]
         Some(lost as f64 / self.rtt_ms.len() as f64)
     }
 

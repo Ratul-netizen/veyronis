@@ -101,7 +101,9 @@ pub async fn take_one<T: Transport + ?Sized>(
             // Not a failure. M10 §3: the run *stays pending rather than failing*, because
             // what went wrong is that ten minutes passed, and the operator's next step is
             // to ask somebody again.
-            store.return_run_to_queue(&claimed.scope(), claimed.id).await?;
+            store
+                .return_run_to_queue(&claimed.scope(), claimed.id)
+                .await?;
             println!(
                 "runner: run {} went back to waiting — {}",
                 claimed.id,

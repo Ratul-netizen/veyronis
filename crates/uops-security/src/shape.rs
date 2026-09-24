@@ -149,7 +149,10 @@ fn pairs(text: &str) -> BTreeMap<String, String> {
 
         // The key is back to the previous space. Nothing before the first space in
         // `interface Gi0/1 src=…` becomes part of the key.
-        let start = (i..eq).rev().find(|&n| bytes[n].is_whitespace()).map_or(i, |n| n + 1);
+        let start = (i..eq)
+            .rev()
+            .find(|&n| bytes[n].is_whitespace())
+            .map_or(i, |n| n + 1);
         let key: String = bytes[start..eq].iter().collect();
 
         // The value: quoted runs to the closing quote, unquoted to the next space.
@@ -192,7 +195,6 @@ mod cef_field {
     /// Vendor, Product, Version, `SignatureID`, Name, Severity, extension.
     pub const COUNT: usize = 7;
 }
-
 
 /// `CEF:0|Vendor|Product|Version|SignatureID|Name|Severity|extension`
 ///
@@ -312,7 +314,14 @@ fn json(body: &str) -> Option<Parsed> {
                 let end = (from..chars.len())
                     .find(|&n| chars[n] == ',')
                     .unwrap_or(chars.len());
-                (chars[from..end].iter().collect::<String>().trim().to_owned(), end)
+                (
+                    chars[from..end]
+                        .iter()
+                        .collect::<String>()
+                        .trim()
+                        .to_owned(),
+                    end,
+                )
             }
         };
         i = next;
@@ -402,7 +411,9 @@ fn structured_data(structured: &BTreeMap<String, String>) -> Option<Parsed> {
     for (key, value) in structured {
         let name = key.rsplit('.').next().unwrap_or(key);
         if !name.is_empty() {
-            fields.entry(name.to_owned()).or_insert_with(|| value.clone());
+            fields
+                .entry(name.to_owned())
+                .or_insert_with(|| value.clone());
         }
     }
     (fields.len() >= MIN_PAIRS).then_some(Parsed {
@@ -448,10 +459,16 @@ mod tests {
 
     #[test]
     fn a_firewall_body_becomes_its_fields() {
-        let parsed = parse("src=10.0.0.5 dst=8.8.8.8 dpt=53 proto=UDP act=deny", &none())
-            .expect("a key=value body");
+        let parsed = parse(
+            "src=10.0.0.5 dst=8.8.8.8 dpt=53 proto=UDP act=deny",
+            &none(),
+        )
+        .expect("a key=value body");
         assert_eq!(parsed.shape, Shape::KeyValue);
-        assert_eq!(parsed.fields.get("src").map(String::as_str), Some("10.0.0.5"));
+        assert_eq!(
+            parsed.fields.get("src").map(String::as_str),
+            Some("10.0.0.5")
+        );
         assert_eq!(parsed.fields.get("dpt").map(String::as_str), Some("53"));
         assert_eq!(parsed.fields.get("act").map(String::as_str), Some("deny"));
     }
@@ -496,8 +513,12 @@ mod tests {
     fn an_unterminated_quote_keeps_what_there_was() {
         // A truncated message is common. The value up to the cut is still a value, and
         // dropping the whole pair would lose the fields after it too.
-        let parsed = parse(r#"src=1.1.1.1 dst=2.2.2.2 msg="cut off here"#, &none()).expect("parsed");
-        assert_eq!(parsed.fields.get("msg").map(String::as_str), Some("cut off here"));
+        let parsed =
+            parse(r#"src=1.1.1.1 dst=2.2.2.2 msg="cut off here"#, &none()).expect("parsed");
+        assert_eq!(
+            parsed.fields.get("msg").map(String::as_str),
+            Some("cut off here")
+        );
     }
 
     // --- CEF ---
@@ -513,8 +534,14 @@ mod tests {
         assert_eq!(parsed.shape, Shape::Cef);
         assert_eq!(parsed.vendor.as_deref(), Some("Palo Alto Networks"));
         assert_eq!(parsed.name.as_deref(), Some("Traffic Denied"));
-        assert_eq!(parsed.fields.get("src").map(String::as_str), Some("10.0.0.5"));
-        assert_eq!(parsed.fields.get("cef.severity").map(String::as_str), Some("5"));
+        assert_eq!(
+            parsed.fields.get("src").map(String::as_str),
+            Some("10.0.0.5")
+        );
+        assert_eq!(
+            parsed.fields.get("cef.severity").map(String::as_str),
+            Some("5")
+        );
     }
 
     #[test]
@@ -546,8 +573,14 @@ mod tests {
         )
         .expect("a JSON body");
         assert_eq!(parsed.shape, Shape::Json);
-        assert_eq!(parsed.fields.get("src_ip").map(String::as_str), Some("10.0.0.5"));
-        assert_eq!(parsed.fields.get("action").map(String::as_str), Some("allowed"));
+        assert_eq!(
+            parsed.fields.get("src_ip").map(String::as_str),
+            Some("10.0.0.5")
+        );
+        assert_eq!(
+            parsed.fields.get("action").map(String::as_str),
+            Some("allowed")
+        );
         // A number is kept as the text it was. The attributes map is `Map(String, String)`
         // and inventing a numeric type here would have to be undone at the column.
         assert_eq!(parsed.fields.get("port").map(String::as_str), Some("443"));
@@ -566,7 +599,10 @@ mod tests {
             parsed.fields.get("user").map(String::as_str),
             Some(r#"{"name":"alice","id":7}"#)
         );
-        assert_eq!(parsed.fields.get("outcome").map(String::as_str), Some("success"));
+        assert_eq!(
+            parsed.fields.get("outcome").map(String::as_str),
+            Some("success")
+        );
     }
 
     #[test]
@@ -605,7 +641,10 @@ mod tests {
 
         let parsed = parse("some prose the device wrote", &sd).expect("structured data");
         assert_eq!(parsed.shape, Shape::StructuredData);
-        assert_eq!(parsed.fields.get("src").map(String::as_str), Some("10.0.0.5"));
+        assert_eq!(
+            parsed.fields.get("src").map(String::as_str),
+            Some("10.0.0.5")
+        );
         assert_eq!(parsed.fields.get("act").map(String::as_str), Some("deny"));
     }
 

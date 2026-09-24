@@ -95,10 +95,8 @@ impl AppState {
     /// [`AppState::oidc_redirect_uri`].
     #[must_use]
     pub fn with_public_url(mut self, base: &str) -> Self {
-        self.oidc_redirect_uri = format!(
-            "{}/api/v1/auth/oidc/callback",
-            base.trim_end_matches('/')
-        );
+        self.oidc_redirect_uri =
+            format!("{}/api/v1/auth/oidc/callback", base.trim_end_matches('/'));
         self
     }
 

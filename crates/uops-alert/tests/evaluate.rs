@@ -759,7 +759,11 @@ async fn a_detection_over_events_is_an_alert_rule_and_uses_the_same_engine() {
     assert_eq!(phases[0], Phase::Pending, "{phases:?}");
     assert_eq!(phases[4], Phase::Pending, "five minutes is not yet elapsed");
     assert_eq!(phases[5], Phase::Firing, "{phases:?}");
-    assert_eq!(phases[11], Phase::Firing, "still firing while the burst continues");
+    assert_eq!(
+        phases[11],
+        Phase::Firing,
+        "still firing while the burst continues"
+    );
     assert_eq!(phases[12], Phase::Resolved, "{phases:?}");
     assert_eq!(phases[13], Phase::Ok, "{phases:?}");
     assert_eq!(notifications, 2, "one firing, one resolution: {phases:?}");

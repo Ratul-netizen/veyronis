@@ -55,9 +55,9 @@ pub mod error;
 pub mod facts;
 pub mod groups;
 pub mod identity;
+pub mod incidents;
 pub mod ingest;
 pub mod ipam;
-pub mod incidents;
 pub mod lease;
 pub mod maintenance;
 pub mod neighbour_ingest;
@@ -96,9 +96,9 @@ pub use discovery::{DiscoveredChild, DiscoveryReport};
 pub use enrich::PgEnricher;
 pub use facts::{DeviceFacts, IdentityReport};
 pub use groups::{GroupSummary, NewGroup};
-pub use ipam::{Address, NewSubnet, Subnet, Utilisation};
-pub use slo::{NewSlo, Slo};
 pub use incidents::IncidentRow;
+pub use ingest::{IngestToken, IssuedToken};
+pub use ipam::{Address, NewSubnet, Subnet, Utilisation};
 pub use lease::{Claim, Job, LeaseRow, PERIOD, RENEW_EVERY, identity};
 pub use maintenance::{MaintenanceWindow, NewWindow};
 pub use notify::{Attempt, Channel, NewChannel, Outcome, Reservation, SentRecord};
@@ -111,12 +111,10 @@ pub use runbooks::{
     RunbookRow,
 };
 pub use sealed::PgSealedStore;
-pub use ingest::{IngestToken, IssuedToken};
-pub use tenants::{TenantChange, TenantRow};
-pub use users::{
-    AdminUser, Change, INVITATION_VALID_FOR, Invited, Member, PendingInvitation,
-};
 pub use searches::{NewSearch, SavedSearch};
 pub use sites::{Location, SiteOverview, StatusCounts};
+pub use slo::{NewSlo, Slo};
 pub use sso::{OrgAuditEntry, PasswordPolicy, Provider, Provisioned, SignInOption};
 pub use store::{Config, PgStore};
+pub use tenants::{TenantChange, TenantRow};
+pub use users::{AdminUser, Change, INVITATION_VALID_FOR, Invited, Member, PendingInvitation};

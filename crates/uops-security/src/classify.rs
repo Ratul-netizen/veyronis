@@ -90,7 +90,15 @@ pub struct Classification {
 /// Whole-value matches, not substrings: `denied` contains no allow word, but a substring
 /// rule on `pass` would match `bypassed` and a substring rule on `ok` matches almost
 /// everything. The same argument `uops_runbook::validate` makes about its deny-list.
-const ALLOW: &[&str] = &["allow", "allowed", "accept", "accepted", "pass", "permit", "permitted"];
+const ALLOW: &[&str] = &[
+    "allow",
+    "allowed",
+    "accept",
+    "accepted",
+    "pass",
+    "permit",
+    "permitted",
+];
 
 /// Words that mean it was not.
 const DENY: &[&str] = &[
@@ -98,19 +106,53 @@ const DENY: &[&str] = &[
 ];
 
 /// Words that mean an attempt worked.
-const SUCCEEDED: &[&str] = &["success", "succeeded", "accept", "accepted", "ok", "pass", "passed"];
+const SUCCEEDED: &[&str] = &[
+    "success",
+    "succeeded",
+    "accept",
+    "accepted",
+    "ok",
+    "pass",
+    "passed",
+];
 
 /// Words that mean it did not.
-const FAILED: &[&str] = &["fail", "failed", "failure", "invalid", "denied", "reject", "rejected"];
+const FAILED: &[&str] = &[
+    "fail", "failed", "failure", "invalid", "denied", "reject", "rejected",
+];
 
 /// Words that mean a session opened.
-const OPENED: &[&str] = &["start", "started", "connect", "connected", "login", "logon", "up"];
+const OPENED: &[&str] = &[
+    "start",
+    "started",
+    "connect",
+    "connected",
+    "login",
+    "logon",
+    "up",
+];
 
 /// Words that mean it closed.
-const CLOSED: &[&str] = &["stop", "stopped", "disconnect", "disconnected", "logout", "logoff", "down"];
+const CLOSED: &[&str] = &[
+    "stop",
+    "stopped",
+    "disconnect",
+    "disconnected",
+    "logout",
+    "logoff",
+    "down",
+];
 
 /// Words that say a message is about a tunnel.
-const TUNNEL: &[&str] = &["vpn", "ipsec", "ssl-vpn", "sslvpn", "anyconnect", "wireguard", "tunnel"];
+const TUNNEL: &[&str] = &[
+    "vpn",
+    "ipsec",
+    "ssl-vpn",
+    "sslvpn",
+    "anyconnect",
+    "wireguard",
+    "tunnel",
+];
 
 /// Whether a value is one of these words, case-insensitively.
 fn is(value: &str, words: &[&str]) -> bool {
@@ -127,7 +169,10 @@ fn mentions(text: &str, words: &[&str]) -> bool {
 }
 
 fn get<'a>(fields: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
-    fields.get(key).map(String::as_str).filter(|v| !v.trim().is_empty())
+    fields
+        .get(key)
+        .map(String::as_str)
+        .filter(|v| !v.trim().is_empty())
 }
 
 /// Classify ECS-mapped fields, or decline.
@@ -166,8 +211,7 @@ pub fn classify(fields: &BTreeMap<String, String>, context: &str) -> Option<Clas
 
     // Network: two addresses **and** an action word. One address is a mention; two
     // addresses with no verdict is a flow record, which M7 already stores better.
-    let both_ends =
-        get(fields, "source.ip").is_some() && get(fields, "destination.ip").is_some();
+    let both_ends = get(fields, "source.ip").is_some() && get(fields, "destination.ip").is_some();
     if both_ends && let Some(kind) = verdict(action, outcome) {
         return Some(Classification {
             category: Category::Network,
@@ -177,7 +221,9 @@ pub fn classify(fields: &BTreeMap<String, String>, context: &str) -> Option<Clas
 
     // Authentication: a user **and** an outcome. A user with no outcome is a message that
     // happens to name somebody.
-    if user.is_some() && let Some(kind) = auth_outcome(action, outcome) {
+    if user.is_some()
+        && let Some(kind) = auth_outcome(action, outcome)
+    {
         return Some(Classification {
             category: Category::Authentication,
             kind,
@@ -321,7 +367,10 @@ mod tests {
     #[test]
     fn a_resolver_log_is_a_dns_query() {
         let it = classify(
-            &fields(&[("dns.question.name", "example.invalid"), ("source.ip", "10.0.0.5")]),
+            &fields(&[
+                ("dns.question.name", "example.invalid"),
+                ("source.ip", "10.0.0.5"),
+            ]),
             "",
         )
         .expect("a dns event");
@@ -393,7 +442,12 @@ mod tests {
 
     #[test]
     fn every_category_and_kind_has_an_ecs_name() {
-        for c in [Category::Authentication, Category::Network, Category::Dns, Category::Vpn] {
+        for c in [
+            Category::Authentication,
+            Category::Network,
+            Category::Dns,
+            Category::Vpn,
+        ] {
             assert!(!c.as_str().is_empty());
         }
         for k in [

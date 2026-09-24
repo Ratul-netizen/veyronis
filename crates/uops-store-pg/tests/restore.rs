@@ -103,7 +103,11 @@ async fn a_restore_without_the_kek_cannot_open_a_credential() {
 
     // Sealed by the deployment that took the backup.
     let id = vault(&store, ring(0x0a))
-        .put(tenant, snmpv3(), &CredentialMeta::new("core-switches-snmpv3"))
+        .put(
+            tenant,
+            snmpv3(),
+            &CredentialMeta::new("core-switches-snmpv3"),
+        )
         .expect("seal");
 
     // The restored deployment: same rows, same key id, different key material. Nothing
@@ -124,7 +128,10 @@ async fn a_restore_without_the_kek_cannot_open_a_credential() {
         .expect("the row survives a key it cannot open");
     assert_eq!(summary.name, "core-switches-snmpv3");
     assert_eq!(
-        restored.list(tenant).expect("listing works without the key").len(),
+        restored
+            .list(tenant)
+            .expect("listing works without the key")
+            .len(),
         1
     );
 }
@@ -138,7 +145,11 @@ async fn a_restore_with_the_kek_opens_it() {
     let tenant = tenant(&store, "with-kek").await;
 
     let id = vault(&store, ring(0x0a))
-        .put(tenant, snmpv3(), &CredentialMeta::new("core-switches-snmpv3"))
+        .put(
+            tenant,
+            snmpv3(),
+            &CredentialMeta::new("core-switches-snmpv3"),
+        )
         .expect("seal");
 
     let opened = vault(&store, ring(0x0a))

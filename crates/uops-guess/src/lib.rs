@@ -352,7 +352,10 @@ pub fn guess(evidence: &Evidence<'_>) -> Guess {
     };
 
     // A vendor with no role still earns its line: "Cisco" is worth more than nothing.
-    if role == Role::Unknown && because.is_empty() && let Some(name) = vendor {
+    if role == Role::Unknown
+        && because.is_empty()
+        && let Some(name) = vendor
+    {
         because.push(Reason {
             from: "mac",
             saying: format!("the MAC is assigned to {name}"),

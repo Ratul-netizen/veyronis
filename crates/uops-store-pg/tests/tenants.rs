@@ -168,7 +168,14 @@ async fn a_new_tenant_is_scheduled_without_a_restart() -> Result<()> {
 async fn a_malformed_slug_is_refused_by_the_database() -> Result<()> {
     let w = World::new("badslug").await;
 
-    for bad in ["Has Capitals", "has spaces", "-leading", "trailing-", "a", "under_score"] {
+    for bad in [
+        "Has Capitals",
+        "has spaces",
+        "-leading",
+        "trailing-",
+        "a",
+        "under_score",
+    ] {
         let outcome = w.store.create_tenant(w.org, "Bad", bad, w.admin).await;
         assert!(
             outcome.is_err(),
@@ -409,7 +416,9 @@ async fn a_tenant_can_be_renamed_and_keeps_its_id() -> Result<()> {
     let fresh = World::slug("renamed");
 
     assert_eq!(
-        w.store.rename_tenant(w.org, w.first, "New Name", &fresh).await?,
+        w.store
+            .rename_tenant(w.org, w.first, "New Name", &fresh)
+            .await?,
         TenantChange::Done
     );
 

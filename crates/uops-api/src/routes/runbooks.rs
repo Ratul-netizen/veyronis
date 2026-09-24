@@ -467,7 +467,11 @@ async fn blocked_reason(
         outside.len(),
         targets.len(),
         named.join(", "),
-        if outside.len() > named.len() { ", …" } else { "" },
+        if outside.len() > named.len() {
+            ", …"
+        } else {
+            ""
+        },
     )))
 }
 

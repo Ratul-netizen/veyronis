@@ -535,13 +535,12 @@ impl PgStore {
             id: run.to_string(),
         })?;
 
-        let (_, runbook) = self
-            .runbook_version(scope, row.version_id)
-            .await?
-            .ok_or(uops_core::Error::NotFound {
+        let (_, runbook) = self.runbook_version(scope, row.version_id).await?.ok_or(
+            uops_core::Error::NotFound {
                 kind: "runbook version",
                 id: row.version_id.to_string(),
-            })?;
+            },
+        )?;
 
         // tenant-exempt: the tenant is a bound parameter, from the scope.
         let approvals = sqlx::query!(
@@ -1285,7 +1284,10 @@ mod tests {
         let names: Vec<&str> = all.iter().map(|s| s.as_str()).collect();
         assert_eq!(names.len(), 7);
         for name in &names {
-            assert!(name.chars().all(|c| c.is_ascii_lowercase() || c == '_'), "{name}");
+            assert!(
+                name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{name}"
+            );
         }
     }
 }

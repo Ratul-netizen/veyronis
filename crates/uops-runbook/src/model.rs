@@ -173,8 +173,12 @@ pub enum Rollback {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Expect {
-    Contains { text: String },
-    NotContains { text: String },
+    Contains {
+        text: String,
+    },
+    NotContains {
+        text: String,
+    },
     /// The process exited zero, or the HTTP status was 2xx.
     Success,
 }

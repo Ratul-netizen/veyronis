@@ -120,7 +120,9 @@ impl QueueLock {
 
         let url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://uops:uops@localhost:5432/uops".into());
-        let mut held = sqlx::PgConnection::connect(&url).await.expect("lock connection");
+        let mut held = sqlx::PgConnection::connect(&url)
+            .await
+            .expect("lock connection");
 
         // `pg_try_advisory_lock` in a loop rather than `pg_advisory_lock`, so a leaked
         // lock fails with a sentence instead of hanging a test run for ever. Thirty
@@ -343,7 +345,10 @@ async fn queue(
     (saved.id, run)
 }
 
-async fn steps_of(fixture: &Fixture, run: uuid::Uuid) -> Vec<(i32, String, String, Option<String>)> {
+async fn steps_of(
+    fixture: &Fixture,
+    run: uuid::Uuid,
+) -> Vec<(i32, String, String, Option<String>)> {
     sqlx::query_as::<_, (i32, String, String, Option<String>)>(
         "SELECT step_index, name, state::text, output
            FROM runbook_run_step
@@ -376,7 +381,13 @@ async fn a_dry_run_executes_the_read_only_step_and_does_not_send_the_destructive
     // simulation. The `show` really goes to the device, so the precondition is genuinely
     // checked; the `clear` is not sent at all.
     let fixture = fixture("dry").await;
-    let (_, run) = queue(&fixture, &two_step("dry", Approvals::None), true, RunState::Ready).await;
+    let (_, run) = queue(
+        &fixture,
+        &two_step("dry", Approvals::None),
+        true,
+        RunState::Ready,
+    )
+    .await;
 
     let transport = Scripted::new();
     let turn = uops_runner::take_one(&fixture.store, &transport, chrono::Utc::now())
@@ -395,7 +406,11 @@ async fn a_dry_run_executes_the_read_only_step_and_does_not_send_the_destructive
     // to come, and a screen showing `pending` for ever is a screen that lies.
     assert_eq!(steps[1].2, "skipped");
     assert!(
-        steps[1].3.as_deref().unwrap_or_default().contains("dry run"),
+        steps[1]
+            .3
+            .as_deref()
+            .unwrap_or_default()
+            .contains("dry run"),
         "{:?}",
         steps[1].3
     );
@@ -497,7 +512,11 @@ async fn an_expectation_that_the_device_does_not_meet_fails_the_step() {
     assert_eq!(steps[0].2, "failed");
     assert_eq!(steps[1].2, "skipped");
     assert!(
-        steps[1].3.as_deref().unwrap_or_default().contains("earlier step failed"),
+        steps[1]
+            .3
+            .as_deref()
+            .unwrap_or_default()
+            .contains("earlier step failed"),
         "{:?}",
         steps[1].3
     );
@@ -542,7 +561,10 @@ async fn an_approval_older_than_its_window_sends_the_run_back_to_waiting_rather_
     assert_eq!(turn.executed, 0);
     let (state, failure) = run_row(&fixture, run).await;
     assert_eq!(state, "awaiting_approval");
-    assert!(failure.is_none(), "a stale approval is not a failure: {failure:?}");
+    assert!(
+        failure.is_none(),
+        "a stale approval is not a failure: {failure:?}"
+    );
     assert!(transport.sent().is_empty(), "nothing was sent");
 }
 
@@ -652,14 +674,22 @@ async fn a_credential_never_reaches_the_run_record() {
         for reference in &referenced {
             assert!(!rendered.contains(reference.as_str()), "{rendered}");
             assert!(
-                !output.as_deref().unwrap_or_default().contains(reference.as_str()),
+                !output
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains(reference.as_str()),
                 "{output:?}"
             );
         }
     }
     let (_, failure) = run_row(&fixture, run).await;
     for reference in &referenced {
-        assert!(!failure.as_deref().unwrap_or_default().contains(reference.as_str()));
+        assert!(
+            !failure
+                .as_deref()
+                .unwrap_or_default()
+                .contains(reference.as_str())
+        );
     }
 }
 

@@ -125,14 +125,17 @@ fn verify_with(key: &Jwk, signed: &[u8], signature: &[u8]) -> bool {
             use rsa::pkcs1v15::{Signature, VerifyingKey};
             use rsa::{BigUint, RsaPublicKey};
 
-            let Ok(public) = RsaPublicKey::new(BigUint::from_bytes_be(n), BigUint::from_bytes_be(e))
+            let Ok(public) =
+                RsaPublicKey::new(BigUint::from_bytes_be(n), BigUint::from_bytes_be(e))
             else {
                 return false;
             };
             let Ok(sig) = Signature::try_from(signature) else {
                 return false;
             };
-            VerifyingKey::<Sha256>::new(public).verify(signed, &sig).is_ok()
+            VerifyingKey::<Sha256>::new(public)
+                .verify(signed, &sig)
+                .is_ok()
         }
         Material::P256 { x, y } => {
             use p256::ecdsa::{Signature, VerifyingKey};

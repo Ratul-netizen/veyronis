@@ -587,7 +587,10 @@ async fn topology_suppression_applies_to_a_detection_like_any_other_alert() {
         .expect("events");
 
     let engine = Engine::new(pg.clone(), ch.clone());
-    let upstream = engine.evaluate(&scope, &cause, now).await.expect("evaluate");
+    let upstream = engine
+        .evaluate(&scope, &cause, now)
+        .await
+        .expect("evaluate");
     let downstream = engine
         .evaluate(&scope, &symptom, now)
         .await
@@ -596,7 +599,11 @@ async fn topology_suppression_applies_to_a_detection_like_any_other_alert() {
     // One incident for both, and only the cause notified. The detection's alert is still
     // on it — suppression takes the *notification*, never the alert.
     let incidents = pg.incidents(&scope, 10).await.expect("incidents");
-    assert_eq!(incidents.len(), 1, "a cascade is one incident: {incidents:?}");
+    assert_eq!(
+        incidents.len(),
+        1,
+        "a cascade is one incident: {incidents:?}"
+    );
     assert_eq!(incidents[0].alerts, 2, "both alerts are on it");
     assert_eq!(
         incidents[0].candidate_resource_id,
@@ -637,13 +644,11 @@ async fn a_burst_of_failed_sign_ins_against_the_product_fires_a_detection() {
     let scope = tenant(&pg, "selfauth").await;
 
     // The installation, as a first run or migration 0027 would have created it.
-    let org = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT org_id FROM tenant WHERE id = $1",
-    )
-    .bind(scope.tenant_id().into_uuid())
-    .fetch_one(pg.pool())
-    .await
-    .expect("org");
+    let org = sqlx::query_scalar::<_, uuid::Uuid>("SELECT org_id FROM tenant WHERE id = $1")
+        .bind(scope.tenant_id().into_uuid())
+        .fetch_one(pg.pool())
+        .await
+        .expect("org");
     let platform = pg
         .nominate_platform_tenant(uops_core::OrgId::from_uuid(org), scope.tenant_id())
         .await

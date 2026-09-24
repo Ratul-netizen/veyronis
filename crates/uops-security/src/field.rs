@@ -175,7 +175,10 @@ mod tests {
         // An event that carried less than the log line it summarises would be strictly
         // worse than the line. The namespace is so it cannot be mistaken for a convention.
         let mapped = to_ecs(&raw(&[("weird_vendor_thing", "42")]));
-        assert_eq!(mapped.get("vendor.weird_vendor_thing").map(String::as_str), Some("42"));
+        assert_eq!(
+            mapped.get("vendor.weird_vendor_thing").map(String::as_str),
+            Some("42")
+        );
         assert!(ecs_field("weird_vendor_thing").is_none());
     }
 
@@ -186,7 +189,10 @@ mod tests {
         // thing a detection then counts.
         let mapped = to_ecs(&raw(&[("src", "  "), ("dst", "10.0.0.1")]));
         assert!(!mapped.contains_key("source.ip"));
-        assert_eq!(mapped.get("destination.ip").map(String::as_str), Some("10.0.0.1"));
+        assert_eq!(
+            mapped.get("destination.ip").map(String::as_str),
+            Some("10.0.0.1")
+        );
     }
 
     #[test]
@@ -194,7 +200,10 @@ mod tests {
         // Not lower-cased: `user.name` is a credential-shaped value and `Administrator`
         // is not `administrator` on every system that matters.
         let mapped = to_ecs(&raw(&[("user", " Administrator ")]));
-        assert_eq!(mapped.get("user.name").map(String::as_str), Some("Administrator"));
+        assert_eq!(
+            mapped.get("user.name").map(String::as_str),
+            Some("Administrator")
+        );
     }
 
     #[test]
@@ -202,7 +211,11 @@ mod tests {
         // The lookup normalises the *input*; an alias written `Src-IP` in the table would
         // therefore never match anything. Asserted rather than trusted to review.
         for (alias, field) in ALIASES {
-            assert_eq!(*alias, normalise_key(alias), "alias {alias} is not normalised");
+            assert_eq!(
+                *alias,
+                normalise_key(alias),
+                "alias {alias} is not normalised"
+            );
             assert!(field.contains('.'), "{field} is not an ECS-shaped name");
         }
     }
@@ -217,10 +230,7 @@ mod tests {
                 .filter(|(a, _)| a == alias)
                 .map(|(_, f)| *f)
                 .collect();
-            assert!(
-                all.iter().all(|f| f == field),
-                "{alias} maps to {all:?}"
-            );
+            assert!(all.iter().all(|f| f == field), "{alias} maps to {all:?}");
         }
     }
 }

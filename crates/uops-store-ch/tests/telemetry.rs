@@ -2273,11 +2273,7 @@ async fn failed_authentications_group_by_user_and_source() {
     let found = grouped(&result);
 
     assert_eq!(found["alice"], (9, 1), "one user, one source: {found:?}");
-    assert_eq!(
-        found["grace"],
-        (9, 3),
-        "one user, three sources: {found:?}"
-    );
+    assert_eq!(found["grace"], (9, 3), "one user, three sources: {found:?}");
     // Alice and Grace have the *same* failure count and different shapes. That is the whole
     // argument for the pair: a threshold on failures alone cannot tell them apart.
     assert_eq!(

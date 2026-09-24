@@ -59,7 +59,9 @@ impl QueueLock {
 
         let url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://uops:uops@localhost:5432/uops".into());
-        let mut held = sqlx::PgConnection::connect(&url).await.expect("lock connection");
+        let mut held = sqlx::PgConnection::connect(&url)
+            .await
+            .expect("lock connection");
 
         // `pg_try_advisory_lock` in a loop rather than `pg_advisory_lock`, so a leaked
         // lock fails with a sentence instead of hanging a test run for ever. Thirty
@@ -357,7 +359,11 @@ async fn saving_twice_writes_a_second_version_and_leaves_the_first_readable() {
     let f = fixture("versions", 1).await;
 
     let (status, first) = f
-        .call(f.send("POST", "/api/v1/runbooks", &two_step("restart-bgp", "one", 10)))
+        .call(f.send(
+            "POST",
+            "/api/v1/runbooks",
+            &two_step("restart-bgp", "one", 10),
+        ))
         .await;
     assert_eq!(status, StatusCode::CREATED, "{first}");
     assert_eq!(first["version"], 1);
@@ -428,7 +434,10 @@ async fn a_runbook_that_does_not_validate_is_refused_and_every_problem_is_named(
     // The word it matched on, which is what tells the author what to change.
     assert!(said.contains("reload"), "{said}");
     // And the second problem, in the same response.
-    assert!(said.contains("erase it") || said.contains("rollback"), "{said}");
+    assert!(
+        said.contains("erase it") || said.contains("rollback"),
+        "{said}"
+    );
     assert!(
         said.matches('•').count() >= 2,
         "every problem, not the first: {said}"
@@ -467,7 +476,9 @@ async fn a_plan_names_every_resource_and_renders_every_command() {
 
     // The literal command, substituted. A reviewer reads what would be sent, not a
     // template — a template is what the mistake hides in.
-    let rendered = plan["steps"][0]["steps"][1]["rendered"][0].as_str().unwrap();
+    let rendered = plan["steps"][0]["steps"][1]["rendered"][0]
+        .as_str()
+        .unwrap();
     assert!(rendered.starts_with("clear bgp neighbor sw-"), "{rendered}");
 
     // Says what would run, never what would succeed.
@@ -618,7 +629,11 @@ async fn a_destructive_run_waits_for_an_approval_and_a_dry_run_of_it_does_not() 
 async fn a_run_approved_by_somebody_else_becomes_ready_and_one_approved_by_its_starter_does_not() {
     let f = fixture("approve", 1).await;
     let (_, book) = f
-        .call(f.send("POST", "/api/v1/runbooks", &two_step("two-person", "one", 10)))
+        .call(f.send(
+            "POST",
+            "/api/v1/runbooks",
+            &two_step("two-person", "one", 10),
+        ))
         .await;
     let id = book["id"].as_str().unwrap();
 
@@ -720,7 +735,11 @@ async fn a_break_glass_run_starts_unapproved_is_audited_as_its_own_event_and_say
         .expect("break glass");
 
     let (_, book) = f
-        .call(f.send("POST", "/api/v1/runbooks", &two_step("emergency", "two", 10)))
+        .call(f.send(
+            "POST",
+            "/api/v1/runbooks",
+            &two_step("emergency", "two", 10),
+        ))
         .await;
     let id = book["id"].as_str().unwrap();
 
@@ -746,10 +765,7 @@ async fn a_break_glass_run_starts_unapproved_is_audited_as_its_own_event_and_say
     // run's detail.
     let log = f.audit_log().await;
     let actions: Vec<&str> = log.iter().map(|(a, _)| a.as_str()).collect();
-    assert!(
-        actions.contains(&"runbooks.run.break_glass"),
-        "{actions:?}"
-    );
+    assert!(actions.contains(&"runbooks.run.break_glass"), "{actions:?}");
     assert!(!actions.contains(&"runbooks.run.start"), "{actions:?}");
 
     // And it stays said: re-reading the run later still reports it unapproved.
@@ -778,7 +794,10 @@ async fn an_ordinary_operator_gets_no_break_glass_and_the_event_says_so() {
     assert_eq!(run["break_glass"], false);
 
     let actions: Vec<String> = f.audit_log().await.into_iter().map(|(a, _)| a).collect();
-    assert!(actions.contains(&"runbooks.run.start".to_owned()), "{actions:?}");
+    assert!(
+        actions.contains(&"runbooks.run.start".to_owned()),
+        "{actions:?}"
+    );
     assert!(
         !actions.contains(&"runbooks.run.break_glass".to_owned()),
         "{actions:?}"
@@ -867,7 +886,11 @@ async fn a_retired_runbook_cannot_be_run_and_its_history_still_reads() {
     .await;
 
     let (status, _) = f
-        .call(f.send("DELETE", &format!("/api/v1/runbooks/{id}"), &serde_json::json!({})))
+        .call(f.send(
+            "DELETE",
+            &format!("/api/v1/runbooks/{id}"),
+            &serde_json::json!({}),
+        ))
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 

@@ -46,7 +46,10 @@ pub struct TokenView {
 ///
 /// Includes revoked and expired ones: *what did we hand out* is a question about history, and a
 /// list that hid them would answer something else.
-pub async fn list(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<Vec<TokenView>>> {
+pub async fn list(
+    State(state): State<AppState>,
+    caller: Caller,
+) -> ApiResult<Json<Vec<TokenView>>> {
     caller.require(Role::Admin)?;
 
     let now = chrono::Utc::now();

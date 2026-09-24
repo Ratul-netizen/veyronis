@@ -66,8 +66,12 @@ pub trait Fetch: Send + Sync + std::fmt::Debug {
     /// [`Error::Transport`] for a failure to reach the provider, and [`Error::Provider`]
     /// for a refusal the provider described — those are different conversations and the
     /// error type keeps them apart.
-    fn post_form(&self, url: &str, form: &[(&str, &str)], basic: Option<(&str, &str)>)
-    -> Result<String>;
+    fn post_form(
+        &self,
+        url: &str,
+        form: &[(&str, &str)],
+        basic: Option<(&str, &str)>,
+    ) -> Result<String>;
 }
 
 /// A cached key set for one provider.
@@ -120,11 +124,16 @@ impl Keys {
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<Jwks> {
         {
-            let cached = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let cached = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let (Some(jwks), Some(at)) = (cached.jwks.as_ref(), cached.fetched_at) {
                 let fresh = now - at < KEYS_TTL;
-                let known = kid.is_none_or(|k| !jwks.candidates(Some(k), crate::Alg::Rs256).is_empty()
-                    || !jwks.candidates(Some(k), crate::Alg::Es256).is_empty());
+                let known = kid.is_none_or(|k| {
+                    !jwks.candidates(Some(k), crate::Alg::Rs256).is_empty()
+                        || !jwks.candidates(Some(k), crate::Alg::Es256).is_empty()
+                });
                 if fresh && known {
                     return Ok(jwks.clone());
                 }
@@ -136,11 +145,12 @@ impl Keys {
             }
         }
 
-        let fetched = http
-            .get(jwks_uri)
-            .and_then(|body| Jwks::parse(&body));
+        let fetched = http.get(jwks_uri).and_then(|body| Jwks::parse(&body));
 
-        let mut cached = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cached = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match fetched {
             Ok(jwks) => {
                 cached.jwks = Some(jwks.clone());
@@ -156,7 +166,10 @@ impl Keys {
 
     /// Drop the cache. For an operator who has just changed the provider.
     pub fn forget(&self) {
-        let mut cached = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cached = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *cached = Cached::default();
     }
 }
@@ -217,7 +230,9 @@ pub fn redeem(
     // `client_secret_basic` is the spec's default and what every provider accepts;
     // `client_secret_post` is the fallback for the ones that do not. A public client —
     // no secret at all — is legitimate here precisely because PKCE is always on.
-    let basic = if let Some(secret) = client_secret { Some((client_id, secret)) } else {
+    let basic = if let Some(secret) = client_secret {
+        Some((client_id, secret))
+    } else {
         form.push(("client_id", client_id));
         None
     };
@@ -374,7 +389,12 @@ mod tests {
             }
             Ok(self.body.lock().unwrap().clone())
         }
-        fn post_form(&self, _: &str, _: &[(&str, &str)], _: Option<(&str, &str)>) -> Result<String> {
+        fn post_form(
+            &self,
+            _: &str,
+            _: &[(&str, &str)],
+            _: Option<(&str, &str)>,
+        ) -> Result<String> {
             Ok(self.body.lock().unwrap().clone())
         }
     }
@@ -395,7 +415,8 @@ mod tests {
         let http = Scripted::new(&jwks("k1"));
         let keys = Keys::new();
         for _ in 0..5 {
-            keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
+            keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+                .unwrap();
         }
         assert_eq!(http.gets.load(Ordering::SeqCst), 1);
     }
@@ -406,10 +427,13 @@ mod tests {
         // logins for everybody.
         let http = Scripted::new(&jwks("k1"));
         let keys = Keys::new();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+            .unwrap();
 
         http.serve(&jwks("k2"));
-        let set = keys.for_token(&http, "https://idp/keys", Some("k2"), at(2)).unwrap();
+        let set = keys
+            .for_token(&http, "https://idp/keys", Some("k2"), at(2))
+            .unwrap();
         assert_eq!(set.candidates(Some("k2"), crate::Alg::Rs256).len(), 1);
         assert_eq!(http.gets.load(Ordering::SeqCst), 2);
     }
@@ -421,9 +445,15 @@ mod tests {
         // identity provider.
         let http = Scripted::new(&jwks("k1"));
         let keys = Keys::new();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+            .unwrap();
         for i in 0..50 {
-            let _ = keys.for_token(&http, "https://idp/keys", Some(&format!("made-up-{i}")), at(0));
+            let _ = keys.for_token(
+                &http,
+                "https://idp/keys",
+                Some(&format!("made-up-{i}")),
+                at(0),
+            );
         }
         assert_eq!(
             http.gets.load(Ordering::SeqCst),
@@ -436,8 +466,10 @@ mod tests {
     fn the_cache_expires_on_its_own() {
         let http = Scripted::new(&jwks("k1"));
         let keys = Keys::new();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(61)).unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+            .unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(61))
+            .unwrap();
         assert_eq!(http.gets.load(Ordering::SeqCst), 2);
     }
 
@@ -448,10 +480,13 @@ mod tests {
         // failure that outlasts it.
         let http = Scripted::new(&jwks("k1"));
         let keys = Keys::new();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+            .unwrap();
 
         http.go_down();
-        let set = keys.for_token(&http, "https://idp/keys", Some("k1"), at(120)).unwrap();
+        let set = keys
+            .for_token(&http, "https://idp/keys", Some("k1"), at(120))
+            .unwrap();
         assert_eq!(set.candidates(Some("k1"), crate::Alg::Rs256).len(), 1);
     }
 
@@ -460,16 +495,21 @@ mod tests {
         let http = Scripted::new("");
         http.go_down();
         let keys = Keys::new();
-        assert!(keys.for_token(&http, "https://idp/keys", None, at(0)).is_err());
+        assert!(
+            keys.for_token(&http, "https://idp/keys", None, at(0))
+                .is_err()
+        );
     }
 
     #[test]
     fn forgetting_the_cache_makes_the_next_call_fetch() {
         let http = Scripted::new(&jwks("k1"));
         let keys = Keys::new();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+            .unwrap();
         keys.forget();
-        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0)).unwrap();
+        keys.for_token(&http, "https://idp/keys", Some("k1"), at(0))
+            .unwrap();
         assert_eq!(http.gets.load(Ordering::SeqCst), 2);
     }
 
@@ -488,9 +528,19 @@ mod tests {
             jwks_uri: "https://idp.example.com/keys".to_owned(),
             end_session_endpoint: None,
         };
-        let err = redeem(&http, &provider, "uops", Some("s"), "https://uops/cb", "c", "v")
-            .unwrap_err();
-        let Error::Provider(why) = err else { panic!("{err:?}") };
+        let err = redeem(
+            &http,
+            &provider,
+            "uops",
+            Some("s"),
+            "https://uops/cb",
+            "c",
+            "v",
+        )
+        .unwrap_err();
+        let Error::Provider(why) = err else {
+            panic!("{err:?}")
+        };
         assert!(why.contains("invalid_grant"), "{why}");
         assert!(why.contains("redirect_uri"), "{why}");
     }
@@ -505,8 +555,16 @@ mod tests {
             jwks_uri: "https://idp.example.com/keys".to_owned(),
             end_session_endpoint: None,
         };
-        let response =
-            redeem(&http, &provider, "uops", Some("s"), "https://uops/cb", "c", "v").unwrap();
+        let response = redeem(
+            &http,
+            &provider,
+            "uops",
+            Some("s"),
+            "https://uops/cb",
+            "c",
+            "v",
+        )
+        .unwrap();
         assert_eq!(response.id_token, "a.b.c");
     }
 

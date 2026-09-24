@@ -159,11 +159,7 @@ pub async fn callback(
     // The cookie is consumed whatever happens below. A failed sign-in must not leave a
     // usable `state` and verifier in the browser for a second attempt to reuse — that is
     // the difference between a one-shot authorization code and a replayable one.
-    let clear_pending = cookie::header(&cookie::clear(
-        PENDING_COOKIE,
-        true,
-        state.secure_cookies,
-    ));
+    let clear_pending = cookie::header(&cookie::clear(PENDING_COOKIE, true, state.secure_cookies));
 
     let outcome = complete(&state, &headers, &query).await;
 
@@ -207,17 +203,21 @@ async fn complete(
         });
     }
 
-    let cookie_value = read_cookie(headers, PENDING_COOKIE)
-        .ok_or("no sign-in is in progress in this browser")?;
+    let cookie_value =
+        read_cookie(headers, PENDING_COOKIE).ok_or("no sign-in is in progress in this browser")?;
     let (provider_id, pending) =
         decode_pending(&cookie_value).ok_or("the sign-in cookie could not be read")?;
 
-    let returned_state = query.state.as_deref().ok_or("the callback carried no state")?;
-    pending
-        .accept(returned_state)
-        .map_err(|e| format!("{e}"))?;
+    let returned_state = query
+        .state
+        .as_deref()
+        .ok_or("the callback carried no state")?;
+    pending.accept(returned_state).map_err(|e| format!("{e}"))?;
 
-    let code = query.code.as_deref().ok_or("the callback carried no code")?;
+    let code = query
+        .code
+        .as_deref()
+        .ok_or("the callback carried no code")?;
 
     let provider = state
         .store
@@ -235,15 +235,13 @@ async fn complete(
         .provider_secret(provider_id)
         .await
         .map_err(|e| format!("{e}"))?;
-    let secret: Option<Secret<String>> = match sealed {
-        Some(ref value) => Some(
-            state
-                .sso
-                .open(provider_id, value)
-                .ok_or("this provider has a client secret and this server has no KEK to open it")?,
-        ),
-        None => None,
-    };
+    let secret: Option<Secret<String>> =
+        match sealed {
+            Some(ref value) => Some(state.sso.open(provider_id, value).ok_or(
+                "this provider has a client secret and this server has no KEK to open it",
+            )?),
+            None => None,
+        };
 
     // Discovery, the token exchange and the key fetch, on a blocking thread.
     //
@@ -348,7 +346,11 @@ async fn complete(
         // A provider that releases no address. The account still needs one, because
         // `app_user.email` is NOT NULL and the switcher shows it; making it obviously
         // synthetic is better than making it look like a real address nobody reads.
-        format!("{}@{}", token.subject, provider.issuer.trim_start_matches("https://"))
+        format!(
+            "{}@{}",
+            token.subject,
+            provider.issuer.trim_start_matches("https://")
+        )
     });
     let display_name = token
         .name
@@ -568,7 +570,11 @@ pub async fn create_provider(
         )
         .await?;
 
-    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": created }))).into_response())
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "id": created })),
+    )
+        .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -765,7 +771,10 @@ pub async fn set_required(
         }
     }
 
-    state.store.set_require_sso(admin.org_id, body.required).await?;
+    state
+        .store
+        .set_require_sso(admin.org_id, body.required)
+        .await?;
     state
         .store
         .record_org_audit(
@@ -852,11 +861,7 @@ fn encode_pending(provider: uuid::Uuid, pending: &Pending) -> String {
         v: pending.verifier.clone(),
         r: pending.return_to.clone(),
     };
-    uops_oidc::b64::encode(
-        serde_json::to_string(&body)
-            .unwrap_or_default()
-            .as_bytes(),
-    )
+    uops_oidc::b64::encode(serde_json::to_string(&body).unwrap_or_default().as_bytes())
 }
 
 fn decode_pending(value: &str) -> Option<(uuid::Uuid, Pending)> {
@@ -897,9 +902,7 @@ async fn discover(
     let sso = std::sync::Arc::clone(&state.sso);
     let issuer = provider.issuer.clone();
 
-    let unreachable = || {
-        ApiError::Unavailable("the identity provider could not be reached")
-    };
+    let unreachable = || ApiError::Unavailable("the identity provider could not be reached");
 
     tokio::task::spawn_blocking(move || uops_oidc::fetch::discover(sso.http(), &issuer))
         .await
@@ -941,7 +944,10 @@ mod tests {
 
         // The characters a cookie value may not contain.
         for forbidden in [';', ',', ' ', '"', '\\'] {
-            assert!(!encoded.contains(forbidden), "{encoded} contains {forbidden}");
+            assert!(
+                !encoded.contains(forbidden),
+                "{encoded} contains {forbidden}"
+            );
         }
 
         let (id, back) = decode_pending(&encoded).unwrap();
@@ -981,9 +987,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            "theme=dark; uops_oidc=abc; uops_session=xyz".parse().unwrap(),
+            "theme=dark; uops_oidc=abc; uops_session=xyz"
+                .parse()
+                .unwrap(),
         );
-        assert_eq!(read_cookie(&headers, PENDING_COOKIE).as_deref(), Some("abc"));
+        assert_eq!(
+            read_cookie(&headers, PENDING_COOKIE).as_deref(),
+            Some("abc")
+        );
         assert_eq!(read_cookie(&headers, "absent"), None);
     }
 

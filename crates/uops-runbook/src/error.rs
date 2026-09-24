@@ -48,7 +48,10 @@ impl Error {
     /// and a malformed template is a saved mistake.
     #[must_use]
     pub const fn is_authoring_mistake(&self) -> bool {
-        matches!(self, Self::MalformedTemplate(_) | Self::UnknownPlaceholder(_))
+        matches!(
+            self,
+            Self::MalformedTemplate(_) | Self::UnknownPlaceholder(_)
+        )
     }
 }
 

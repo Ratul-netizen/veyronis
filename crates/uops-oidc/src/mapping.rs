@@ -187,9 +187,21 @@ mod tests {
     fn the_highest_role_wins_on_one_tenant() {
         let t = tenant();
         let mapping = Mapping::new(vec![
-            Grant { group: "staff".to_owned(), tenant_id: t, role: Role::Viewer },
-            Grant { group: "noc".to_owned(), tenant_id: t, role: Role::Operator },
-            Grant { group: "admins".to_owned(), tenant_id: t, role: Role::Admin },
+            Grant {
+                group: "staff".to_owned(),
+                tenant_id: t,
+                role: Role::Viewer,
+            },
+            Grant {
+                group: "noc".to_owned(),
+                tenant_id: t,
+                role: Role::Operator,
+            },
+            Grant {
+                group: "admins".to_owned(),
+                tenant_id: t,
+                role: Role::Admin,
+            },
         ]);
 
         // Every order of the same three groups gives the same answer. If it did not,
@@ -209,8 +221,16 @@ mod tests {
     fn adding_a_group_never_removes_access() {
         let t = tenant();
         let mapping = Mapping::new(vec![
-            Grant { group: "admins".to_owned(), tenant_id: t, role: Role::Admin },
-            Grant { group: "contractors".to_owned(), tenant_id: t, role: Role::Viewer },
+            Grant {
+                group: "admins".to_owned(),
+                tenant_id: t,
+                role: Role::Admin,
+            },
+            Grant {
+                group: "contractors".to_owned(),
+                tenant_id: t,
+                role: Role::Viewer,
+            },
         ]);
         let before = mapping.apply(&["admins".to_owned()]);
         let after = mapping.apply(&["admins".to_owned(), "contractors".to_owned()]);
@@ -224,8 +244,16 @@ mod tests {
         let acme = tenant();
         let globex = tenant();
         let mapping = Mapping::new(vec![
-            Grant { group: "noc".to_owned(), tenant_id: acme, role: Role::Admin },
-            Grant { group: "noc".to_owned(), tenant_id: globex, role: Role::Viewer },
+            Grant {
+                group: "noc".to_owned(),
+                tenant_id: acme,
+                role: Role::Admin,
+            },
+            Grant {
+                group: "noc".to_owned(),
+                tenant_id: globex,
+                role: Role::Viewer,
+            },
         ]);
         let out = mapping.apply(&["noc".to_owned()]);
         assert_eq!(out.roles.get(&acme), Some(&Role::Admin));

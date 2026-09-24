@@ -40,7 +40,10 @@ struct Document {
 /// fetch the wrong document.
 #[must_use]
 pub fn well_known(issuer: &str) -> String {
-    format!("{}/.well-known/openid-configuration", issuer.trim_end_matches('/'))
+    format!(
+        "{}/.well-known/openid-configuration",
+        issuer.trim_end_matches('/')
+    )
 }
 
 impl Discovered {
@@ -120,7 +123,10 @@ mod tests {
 
     #[test]
     fn a_plain_http_endpoint_is_refused() {
-        let body = document(ISSUER).replace("https://idp.example.com/token", "http://idp.example.com/token");
+        let body = document(ISSUER).replace(
+            "https://idp.example.com/token",
+            "http://idp.example.com/token",
+        );
         let err = Discovered::parse(ISSUER, &body).unwrap_err();
         let Error::Discovery(why) = err else { panic!() };
         assert!(why.contains("token_endpoint"), "{why}");

@@ -20,19 +20,19 @@ pub mod health;
 pub mod incidents;
 pub mod ingest;
 pub mod maintenance;
+pub mod path;
 pub mod query;
 pub mod resources;
+pub mod runbooks;
 pub mod searches;
 pub mod servicemap;
 pub mod sites;
 pub mod slos;
+pub mod sso;
 pub mod subnets;
 pub mod tenants;
-pub mod sso;
-pub mod runbooks;
 pub mod topology;
 pub mod users;
-pub mod path;
 
 use axum::routing::{any, delete, get, patch, post, put};
 use axum::{Router, middleware};
@@ -76,7 +76,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v1/sso/providers/{id}/grants",
-            get(sso::list_grants).post(sso::grant).delete(sso::revoke_grant),
+            get(sso::list_grants)
+                .post(sso::grant)
+                .delete(sso::revoke_grant),
         )
         // Turning off password login for everybody but the break-glass account. A PUT
         // rather than a POST because it is a setting with two values, not an event.
@@ -225,10 +227,7 @@ pub fn router(state: AppState) -> Router {
         // somebody's equipment, and none of them sends one: `POST /runs` writes a row and
         // `uops-runner` picks it up. There is no PUT on a runbook, because editing writes
         // version n+1 — §2.1.
-        .route(
-            "/api/v1/runbooks",
-            get(runbooks::list).post(runbooks::save),
-        )
+        .route("/api/v1/runbooks", get(runbooks::list).post(runbooks::save))
         .route(
             "/api/v1/runbooks/{id}",
             get(runbooks::get).delete(runbooks::retire),
@@ -291,10 +290,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/sites", get(sites::list))
         // Address space — `docs/ipam.md`. Under Network in the UI, because a range is
         // inventory: what the estate is made of rather than what it is doing.
-        .route(
-            "/api/v1/subnets",
-            get(subnets::list).post(subnets::declare),
-        )
+        .route("/api/v1/subnets", get(subnets::list).post(subnets::declare))
         .route("/api/v1/subnets/{id}", delete(subnets::forget))
         .route("/api/v1/subnets/{id}/addresses", get(subnets::addresses))
         // Service level objectives — `docs/slo.md`. Under Observability in the UI, beside

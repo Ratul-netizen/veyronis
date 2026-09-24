@@ -30,18 +30,8 @@ use crate::model::{Action, Approvals, Rollback, Runbook, Step};
 /// Sorted, and kept that way, because the next person to add one should be able to see
 /// whether it is already here.
 pub const DESTRUCTIVE_WORDS: &[&str] = &[
-    "delete",
-    "erase",
-    "format",
-    "halt",
-    "mkfs",
-    "poweroff",
-    "reboot",
-    "reload",
-    "rm",
-    "shutdown",
-    "wipe",
-    "wr",
+    "delete", "erase", "format", "halt", "mkfs", "poweroff", "reboot", "reload", "rm", "shutdown",
+    "wipe", "wr",
 ];
 
 /// The longest a captured command may be.
@@ -119,7 +109,9 @@ pub fn validate(runbook: &Runbook) -> Vec<Problem> {
         ));
     }
     if runbook.concurrency == 0 {
-        problems.push(Problem::runbook("concurrency is 0, so a run would never start"));
+        problems.push(Problem::runbook(
+            "concurrency is 0, so a run would never start",
+        ));
     }
     if runbook.concurrency > runbook.max_targets {
         problems.push(Problem::runbook(format!(
@@ -406,7 +398,10 @@ mod tests {
     fn the_deny_list_matches_whole_words() {
         // `show interfaces description` contains "rm" as a substring and must not match,
         // because a guard with false positives is a guard somebody switches off.
-        assert_eq!(matched_destructive_word("show interfaces description"), None);
+        assert_eq!(
+            matched_destructive_word("show interfaces description"),
+            None
+        );
         assert_eq!(matched_destructive_word("show running-config"), None);
         assert_eq!(matched_destructive_word("show platform"), None);
         assert_eq!(matched_destructive_word("show formatting"), None);
@@ -439,7 +434,9 @@ mod tests {
         });
         let problems = validate(&runbook(vec![s]));
         assert!(
-            problems.iter().any(|p| p.because.contains("cannot change anything")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("cannot change anything")),
             "{problems:?}"
         );
     }
@@ -470,7 +467,9 @@ mod tests {
         s.destructive = true;
         let problems = validate(&runbook(vec![s]));
         assert!(
-            problems.iter().any(|p| p.because.contains("must declare a rollback")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("must declare a rollback")),
             "{problems:?}"
         );
     }
@@ -487,7 +486,9 @@ mod tests {
         });
         let problems = validate(&runbook(vec![s.clone()]));
         assert!(
-            problems.iter().any(|p| p.because.contains("needs a reason")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("needs a reason")),
             "{problems:?}"
         );
 
@@ -506,7 +507,9 @@ mod tests {
         });
         let problems = validate(&runbook(vec![s]));
         assert!(
-            problems.iter().any(|p| p.because.contains("cannot undo anything")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("cannot undo anything")),
             "{problems:?}"
         );
     }
@@ -519,7 +522,9 @@ mod tests {
         });
         let problems = validate(&runbook(vec![s]));
         assert!(
-            problems.iter().any(|p| p.because.contains("nothing to undo")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("nothing to undo")),
             "{problems:?}"
         );
     }
@@ -533,7 +538,9 @@ mod tests {
         book.approvals = Approvals::None;
         let problems = validate(&book);
         assert!(
-            problems.iter().any(|p| p.because.contains("requires no approval")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("requires no approval")),
             "{problems:?}"
         );
     }
@@ -574,7 +581,9 @@ mod tests {
         ]);
         let problems = validate(&book);
         assert!(
-            problems.iter().any(|p| p.because.contains("share this name")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("share this name")),
             "{problems:?}"
         );
     }
@@ -586,7 +595,9 @@ mod tests {
         book.concurrency = 40;
         let problems = validate(&book);
         assert!(
-            problems.iter().any(|p| p.because.contains("higher than max_targets")),
+            problems
+                .iter()
+                .any(|p| p.because.contains("higher than max_targets")),
             "{problems:?}"
         );
     }

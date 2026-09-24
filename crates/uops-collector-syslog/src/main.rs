@@ -104,8 +104,7 @@ async fn start() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .map(|b| (b.listener.tenant.clone(), b.tenant_id))
                 .collect();
-            uops_store_pg::check_assignment(&configured, &assigned)
-                .map_err(|e| format!("{e}"))?;
+            uops_store_pg::check_assignment(&configured, &assigned).map_err(|e| format!("{e}"))?;
 
             println!(
                 "uops-collector-syslog: enrolled as {}, assigned {} tenant(s)",
@@ -141,8 +140,15 @@ async fn start() -> Result<(), Box<dyn std::error::Error>> {
         })
     });
 
-    run::serve_with_metrics(store, telemetry, &config, bound, metrics, shutdown::signal())
-        .await?;
+    run::serve_with_metrics(
+        store,
+        telemetry,
+        &config,
+        bound,
+        metrics,
+        shutdown::signal(),
+    )
+    .await?;
 
     // After the drain, so the last heartbeat covers everything that was written.
     if let Some(heartbeat) = heartbeat {

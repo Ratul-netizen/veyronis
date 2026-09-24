@@ -296,24 +296,12 @@ mod tests {
         // Three fields, a grammar matched, and nothing that says what happened. This is
         // the case that separates "parsed" from "understood", and producing an event here
         // is how a count of denials acquires rows that are not denials.
-        assert!(
-            read(
-                "cpu=42 mem=1024 disk=88",
-                &none(),
-                ""
-            )
-            .is_none()
-        );
+        assert!(read("cpu=42 mem=1024 disk=88", &none(), "").is_none());
     }
 
     #[test]
     fn an_unrecognised_field_survives_into_the_event() {
-        let it = read(
-            "src=1.1.1.1 dst=2.2.2.2 act=deny wombat=17",
-            &none(),
-            "",
-        )
-        .expect("an event");
+        let it = read("src=1.1.1.1 dst=2.2.2.2 act=deny wombat=17", &none(), "").expect("an event");
         assert_eq!(it.attributes["vendor.wombat"], "17");
     }
 }

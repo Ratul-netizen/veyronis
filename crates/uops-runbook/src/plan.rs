@@ -331,6 +331,10 @@ mod tests {
         let plan = plan(&book, &targets, context_with_peer).unwrap();
         assert_eq!(plan.total_steps(), 6);
         assert_eq!(plan.destructive_steps(), 3);
-        assert!(plan.describe().contains("3 resources"), "{}", plan.describe());
+        assert!(
+            plan.describe().contains("3 resources"),
+            "{}",
+            plan.describe()
+        );
     }
 }

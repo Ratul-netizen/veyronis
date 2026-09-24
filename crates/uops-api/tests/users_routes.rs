@@ -94,7 +94,10 @@ impl World {
     /// A second administrator, so the last-admin guard does not refuse what a test is
     /// actually about.
     async fn second_admin(&self) -> (ActorId, String) {
-        let email = format!("second-{}@example.test", ActorId::new().into_uuid().simple());
+        let email = format!(
+            "second-{}@example.test",
+            ActorId::new().into_uuid().simple()
+        );
         let hash = password::hash(&Secret::new(ADMIN_PASSWORD.to_owned())).expect("hash");
         let user = self
             .store
@@ -217,7 +220,10 @@ async fn json(response: axum::response::Response) -> serde_json::Value {
 async fn an_administrator_adds_a_colleague_who_signs_in() {
     let w = World::new("adds").await;
     let admin = as_admin(&w).await;
-    let email = format!("newcomer-{}@example.test", ActorId::new().into_uuid().simple());
+    let email = format!(
+        "newcomer-{}@example.test",
+        ActorId::new().into_uuid().simple()
+    );
 
     // 1. Invite them.
     let response = app(&w.store)
@@ -260,8 +266,7 @@ async fn an_administrator_adds_a_colleague_who_signs_in() {
                 .uri(format!("/api/v1/invitations/{token}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "password": "a password of my own choosing" })
-                        .to_string(),
+                    serde_json::json!({ "password": "a password of my own choosing" }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -498,11 +503,7 @@ async fn a_withdrawn_invitation_stops_working() {
     let id = invited["invitation"].as_str().unwrap().to_owned();
 
     let response = app(&w.store)
-        .oneshot(admin.request(
-            "DELETE",
-            &format!("/api/v1/users/invitations/{id}"),
-            None,
-        ))
+        .oneshot(admin.request("DELETE", &format!("/api/v1/users/invitations/{id}"), None))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -549,11 +550,7 @@ async fn disabling_an_account_stops_a_session_that_was_working() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let response = app(&w.store)
-        .oneshot(admin.request(
-            "POST",
-            &format!("/api/v1/users/{leaver}/disable"),
-            None,
-        ))
+        .oneshot(admin.request("POST", &format!("/api/v1/users/{leaver}/disable"), None))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -577,11 +574,7 @@ async fn an_administrator_cannot_disable_themselves() {
     w.second_admin().await; // so the refusal is about self, not about the last admin
 
     let response = app(&w.store)
-        .oneshot(admin.request(
-            "POST",
-            &format!("/api/v1/users/{}/disable", w.admin),
-            None,
-        ))
+        .oneshot(admin.request("POST", &format!("/api/v1/users/{}/disable", w.admin), None))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -629,11 +622,7 @@ async fn a_suspension_is_lifted_and_they_sign_in_again() {
     let (person, email) = w.second_admin().await;
 
     app(&w.store)
-        .oneshot(admin.request(
-            "POST",
-            &format!("/api/v1/users/{person}/disable"),
-            None,
-        ))
+        .oneshot(admin.request("POST", &format!("/api/v1/users/{person}/disable"), None))
         .await
         .unwrap();
     assert!(
@@ -690,9 +679,13 @@ async fn changing_ones_own_password_needs_the_current_one() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     assert!(
-        sign_in(&w.store, &w.admin_email, "a replacement of sufficient length")
-            .await
-            .is_some()
+        sign_in(
+            &w.store,
+            &w.admin_email,
+            "a replacement of sufficient length"
+        )
+        .await
+        .is_some()
     );
     assert!(
         sign_in(&w.store, &w.admin_email, ADMIN_PASSWORD)
@@ -773,10 +766,7 @@ async fn an_operator_cannot_reach_the_user_administration_routes() {
 
     // `OrgAdmin` requires admin on every tenant, so an operator is refused with a 403 that
     // says what is required rather than a 404 that pretends the route is secret.
-    for uri in [
-        "/api/v1/users",
-        "/api/v1/users/invitations",
-    ] {
+    for uri in ["/api/v1/users", "/api/v1/users/invitations"] {
         let response = app(&w.store)
             .oneshot(theirs.request("GET", uri, None))
             .await

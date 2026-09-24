@@ -265,7 +265,9 @@ impl PgStore {
     }
 
     pub async fn revoke_role(&self, user: ActorId, tenant: TenantId) -> Result<()> {
-        Self::revoke_role_on(self.pool(), user, tenant).await.map(|_| ())
+        Self::revoke_role_on(self.pool(), user, tenant)
+            .await
+            .map(|_| ())
     }
 
     /// As [`Self::grant_role_on`]. Returns whether a grant was actually removed, which the

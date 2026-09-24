@@ -367,7 +367,10 @@ mod tests {
         let attribution = attribution();
 
         let row = to_row(&received, &attribution);
-        assert!(row.body.contains("act=deny"), "the log line keeps the raw body");
+        assert!(
+            row.body.contains("act=deny"),
+            "the log line keeps the raw body"
+        );
 
         let event = to_event(&received, &attribution, &row).expect("a security event");
         assert_eq!(event.event_category, "network");

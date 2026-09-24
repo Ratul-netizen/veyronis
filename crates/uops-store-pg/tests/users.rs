@@ -66,7 +66,10 @@ impl World {
 
     /// Somebody who already has a password, optionally an admin on the tenant.
     async fn person(&self, local: &str, role: Option<Role>) -> ActorId {
-        let email = format!("{local}-{}@example.test", ActorId::new().into_uuid().simple());
+        let email = format!(
+            "{local}-{}@example.test",
+            ActorId::new().into_uuid().simple()
+        );
         let user = self
             .store
             .create_user(self.org, &email, local, &hash("correct horse"))
@@ -139,7 +142,9 @@ async fn nobody_exists_until_they_accept() -> Result<()> {
     );
     let pending = w.store.pending_invitations(w.org).await?;
     assert!(
-        pending.iter().any(|i| i.email == email && i.invited_by == Some(by)),
+        pending
+            .iter()
+            .any(|i| i.email == email && i.invited_by == Some(by)),
         "{pending:?}"
     );
 
@@ -154,7 +159,11 @@ async fn nobody_exists_until_they_accept() -> Result<()> {
     assert!(listed.has_password, "the password is the one they chose");
     assert!(!listed.sso_linked);
     assert!(
-        w.store.pending_invitations(w.org).await?.iter().all(|i| i.email != email),
+        w.store
+            .pending_invitations(w.org)
+            .await?
+            .iter()
+            .all(|i| i.email != email),
         "an accepted invitation is no longer outstanding"
     );
     Ok(())
@@ -273,7 +282,12 @@ async fn re_inviting_invalidates_the_previous_link() -> Result<()> {
     assert_ne!(first.token, second.token);
 
     assert_eq!(
-        w.store.pending_invitations(w.org).await?.iter().filter(|i| i.email == email).count(),
+        w.store
+            .pending_invitations(w.org)
+            .await?
+            .iter()
+            .filter(|i| i.email == email)
+            .count(),
         1,
         "one live invitation per address, or two links race to make two accounts"
     );
@@ -313,7 +327,13 @@ async fn inviting_an_address_that_already_has_an_account_is_a_no_op() -> Result<
     // and two accounts differing only in case is an account-takeover vector.
     assert!(
         w.store
-            .invite_person(w.org, &email.to_uppercase(), "Again", admin, Duration::days(7))
+            .invite_person(
+                w.org,
+                &email.to_uppercase(),
+                "Again",
+                admin,
+                Duration::days(7)
+            )
             .await?
             .is_none()
     );
@@ -340,11 +360,21 @@ async fn an_invitation_only_creates_an_account_in_its_own_organization() -> Resu
         .expect("accepted");
 
     assert!(
-        theirs.store.users_in_org(theirs.org).await?.iter().any(|u| u.id == user),
+        theirs
+            .store
+            .users_in_org(theirs.org)
+            .await?
+            .iter()
+            .any(|u| u.id == user),
         "the account belongs to the organization that invited them"
     );
     assert!(
-        !mine.store.users_in_org(mine.org).await?.iter().any(|u| u.id == user),
+        !mine
+            .store
+            .users_in_org(mine.org)
+            .await?
+            .iter()
+            .any(|u| u.id == user),
         "and to no other, whatever the token holder does"
     );
     Ok(())
@@ -390,7 +420,10 @@ async fn the_last_administrator_cannot_be_disabled() -> Result<()> {
     // A second admin makes it allowed — the rule is about the tenant keeping one, not about
     // this person being special.
     w.person("second", Some(Role::Admin)).await;
-    assert_eq!(w.store.disable_user_in_org(w.org, only).await?, Change::Done);
+    assert_eq!(
+        w.store.disable_user_in_org(w.org, only).await?,
+        Change::Done
+    );
     Ok(())
 }
 
@@ -516,7 +549,10 @@ async fn a_spent_invitation_is_refused_even_with_no_account_in_the_way() -> Resu
     // `user_invitation_acceptance_is_whole`. Both constraints doing their job.
     sqlx::query("UPDATE app_user SET email = $2 WHERE id = $1")
         .bind(user.into_uuid())
-        .bind(format!("moved-{}@example.test", ActorId::new().into_uuid().simple()))
+        .bind(format!(
+            "moved-{}@example.test",
+            ActorId::new().into_uuid().simple()
+        ))
         .execute(w.store.pool())
         .await
         .expect("move the address");
@@ -573,7 +609,10 @@ async fn a_role_can_be_granted_changed_and_revoked() -> Result<()> {
             .await?,
         Change::Done
     );
-    assert_eq!(w.store.role_for(person, w.tenant).await?, Some(Role::Viewer));
+    assert_eq!(
+        w.store.role_for(person, w.tenant).await?,
+        Some(Role::Viewer)
+    );
 
     assert_eq!(
         w.store
@@ -700,7 +739,10 @@ async fn two_simultaneous_revocations_cannot_both_win() -> Result<()> {
         let (ra, rb) = (ra?, rb?);
 
         let won = [ra, rb].iter().filter(|c| **c == Change::Done).count();
-        assert_eq!(won, 1, "round {round}: exactly one may succeed — {ra:?} {rb:?}");
+        assert_eq!(
+            won, 1,
+            "round {round}: exactly one may succeed — {ra:?} {rb:?}"
+        );
         assert_eq!(
             [ra, rb]
                 .iter()
@@ -738,18 +780,20 @@ async fn changing_a_password_ends_the_other_sessions_and_keeps_this_one() -> Res
     w.open_session(me).await;
     assert_eq!(w.live_sessions(me).await, 3);
 
-    let ended = w.store.set_own_password(me, &hash("a new one"), mine).await?;
+    let ended = w
+        .store
+        .set_own_password(me, &hash("a new one"), mine)
+        .await?;
 
     assert_eq!(ended, 2, "the other two, and not the one doing the typing");
     assert_eq!(w.live_sessions(me).await, 1);
 
-    let survivor: uuid::Uuid = sqlx::query_scalar(
-        "SELECT id FROM session WHERE user_id = $1 AND revoked_at IS NULL",
-    )
-    .bind(me.into_uuid())
-    .fetch_one(w.store.pool())
-    .await
-    .expect("read");
+    let survivor: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM session WHERE user_id = $1 AND revoked_at IS NULL")
+            .bind(me.into_uuid())
+            .fetch_one(w.store.pool())
+            .await
+            .expect("read");
     assert_eq!(
         survivor,
         mine.into_uuid(),

@@ -120,10 +120,7 @@ pub enum Change {
 
 impl PgStore {
     /// Take the administrative lock for one organization, for the rest of this transaction.
-    async fn lock_admin(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        org: OrgId,
-    ) -> Result<()> {
+    async fn lock_admin(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, org: OrgId) -> Result<()> {
         // tenant-exempt: a lock acquires no rows. The organization is the scope precisely
         // because the invariant spans every tenant in it.
         sqlx::query!(

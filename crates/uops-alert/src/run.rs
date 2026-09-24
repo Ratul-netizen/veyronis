@@ -368,9 +368,7 @@ async fn settle_quiet_incidents(store: &PgStore) {
                         if n == 1 { "" } else { "s" }
                     ),
                     Ok(_) => {}
-                    Err(e) => eprintln!(
-                        "alerts: incidents could not be settled for {tenant}: {e}"
-                    ),
+                    Err(e) => eprintln!("alerts: incidents could not be settled for {tenant}: {e}"),
                 }
             }
         }

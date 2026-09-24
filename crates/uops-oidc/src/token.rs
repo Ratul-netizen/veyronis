@@ -161,7 +161,10 @@ impl IdToken {
             // See `Expected::issuer`.
             return Err(Error::Claim {
                 claim: "iss",
-                because: format!("the token says {issuer}, this provider is {}", expected.issuer),
+                because: format!(
+                    "the token says {issuer}, this provider is {}",
+                    expected.issuer
+                ),
             });
         }
 
@@ -390,7 +393,10 @@ mod tests {
         let mut other = expected();
         other.nonce = "a different login";
         let err = IdToken::validate(&payload(""), &other, now()).unwrap_err();
-        assert!(matches!(err, Error::Claim { claim: "nonce", .. }), "{err:?}");
+        assert!(
+            matches!(err, Error::Claim { claim: "nonce", .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -401,7 +407,10 @@ mod tests {
             .unwrap()
             .replace(r#""nonce":"n-0S6_WzA2Mj","#, "");
         let err = IdToken::validate(body.as_bytes(), &expected(), now()).unwrap_err();
-        assert!(matches!(err, Error::Claim { claim: "nonce", .. }), "{err:?}");
+        assert!(
+            matches!(err, Error::Claim { claim: "nonce", .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -471,9 +480,12 @@ mod tests {
     fn the_groups_claim_is_whichever_one_was_configured() {
         let mut roles = expected();
         roles.groups_claim = "roles";
-        let token =
-            IdToken::validate(&payload(r#""roles":["admin"],"groups":["ignored"]"#), &roles, now())
-                .unwrap();
+        let token = IdToken::validate(
+            &payload(r#""roles":["admin"],"groups":["ignored"]"#),
+            &roles,
+            now(),
+        )
+        .unwrap();
         assert_eq!(token.groups, ["admin"]);
     }
 

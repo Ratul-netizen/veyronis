@@ -804,7 +804,7 @@ async fn two_tenants_on_two_ports_do_not_mix() {
         tenant: second_slug,
         bind: second_addr,
         vendor: String::new(),
-            require_token: false,
+        require_token: false,
     });
     let bound = run::resolve_tenants(&store, &config)
         .await

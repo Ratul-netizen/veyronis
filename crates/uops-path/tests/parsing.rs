@@ -136,7 +136,11 @@ traceroute to 1.1.1.1 (1.1.1.1), 30 hops max, 60 byte packets
 
 #[test]
 fn nothing_parseable_yields_nothing_rather_than_a_guess() {
-    for junk in ["", "permission denied", "Unable to resolve target system name."] {
+    for junk in [
+        "",
+        "permission denied",
+        "Unable to resolve target system name.",
+    ] {
         assert!(parse_windows(junk).is_empty(), "{junk}");
         assert!(parse_unix(junk).is_empty(), "{junk}");
     }

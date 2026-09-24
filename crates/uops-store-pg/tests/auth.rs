@@ -378,6 +378,9 @@ async fn a_rehash_after_login_does_not_change_the_password() {
         .unwrap()
         .unwrap();
     let hash = found.password_hash.expect("a password account has a hash");
-    assert!(password::verify(&uops_core::Secret::new("pw".to_owned()), &hash));
+    assert!(password::verify(
+        &uops_core::Secret::new("pw".to_owned()),
+        &hash
+    ));
     assert!(!password::needs_rehash(&hash));
 }

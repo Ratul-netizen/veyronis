@@ -109,7 +109,15 @@ async fn start() -> Result<(), Box<dyn std::error::Error>> {
         })
     });
 
-    run::serve_with_metrics(store, telemetry, &config, bound, metrics, shutdown::signal()).await?;
+    run::serve_with_metrics(
+        store,
+        telemetry,
+        &config,
+        bound,
+        metrics,
+        shutdown::signal(),
+    )
+    .await?;
 
     if let Some(heartbeat) = heartbeat {
         heartbeat.abort();

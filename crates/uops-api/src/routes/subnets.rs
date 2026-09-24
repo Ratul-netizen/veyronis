@@ -91,7 +91,10 @@ pub struct AddressView {
 /// Every declared range with its counts. Not paginated, for the reason
 /// `routes::sites::list` gives about sites: an estate declares ranges in the tens, and the
 /// screen has to render in one round trip.
-pub async fn list(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<Vec<SubnetView>>> {
+pub async fn list(
+    State(state): State<AppState>,
+    caller: Caller,
+) -> ApiResult<Json<Vec<SubnetView>>> {
     caller.require(Role::Viewer)?;
 
     let rows = state.store.subnet_utilisation(caller.scope()).await?;

@@ -214,11 +214,7 @@ pub async fn revoke_token(
     Path(id): Path<uuid::Uuid>,
     _csrf: CsrfChecked,
 ) -> ApiResult<StatusCode> {
-    if !state
-        .store
-        .revoke_enrolment_token(admin.org_id, id)
-        .await?
-    {
+    if !state.store.revoke_enrolment_token(admin.org_id, id).await? {
         return Err(ApiError::NotFound);
     }
     state

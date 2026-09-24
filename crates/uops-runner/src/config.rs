@@ -114,9 +114,7 @@ impl Config {
         Ok(Self {
             postgres: PgConfig::from_env(),
             kek,
-            kek_id: KeyId(
-                std::env::var("UOPS_KEK_ID").unwrap_or_else(|_| "default".to_owned()),
-            ),
+            kek_id: KeyId(std::env::var("UOPS_KEK_ID").unwrap_or_else(|_| "default".to_owned())),
             state_dir,
             poll_every: Duration::from_secs(number("UOPS_RUNNER_POLL_SECS", 5)?),
             abandon_after: Duration::from_secs(number("UOPS_RUNNER_ABANDON_SECS", 3600)?),
@@ -191,7 +189,11 @@ mod tests {
             poll_every: Duration::from_secs(5),
             abandon_after: Duration::from_secs(3600),
         };
-        assert!(!config.summary().contains("hunter2"), "{}", config.summary());
+        assert!(
+            !config.summary().contains("hunter2"),
+            "{}",
+            config.summary()
+        );
     }
 
     #[test]

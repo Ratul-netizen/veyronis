@@ -52,8 +52,7 @@ pub fn decode(s: &str) -> Option<Vec<u8>> {
 /// Encode base64url with no padding.
 #[must_use]
 pub fn encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -78,9 +77,7 @@ pub fn encode(bytes: &[u8]) -> String {
 /// nobody reaches for the wrong one.
 #[must_use]
 pub fn encode_standard(bytes: &[u8]) -> String {
-    let mut out = encode(bytes)
-        .replace('-', "+")
-        .replace('_', "/");
+    let mut out = encode(bytes).replace('-', "+").replace('_', "/");
     while !out.len().is_multiple_of(4) {
         out.push('=');
     }
@@ -107,10 +104,16 @@ mod tests {
     #[test]
     fn round_trips_every_length_of_tail() {
         for n in 0..32 {
-            let bytes: Vec<u8> = (0..n).map(|i: u8| i.wrapping_mul(37).wrapping_add(11)).collect();
+            let bytes: Vec<u8> = (0..n)
+                .map(|i: u8| i.wrapping_mul(37).wrapping_add(11))
+                .collect();
             let encoded = encode(&bytes);
             assert!(!encoded.contains('='), "padding was emitted: {encoded}");
-            assert_eq!(decode(&encoded).as_deref(), Some(&bytes[..]), "at length {n}");
+            assert_eq!(
+                decode(&encoded).as_deref(),
+                Some(&bytes[..]),
+                "at length {n}"
+            );
         }
     }
 

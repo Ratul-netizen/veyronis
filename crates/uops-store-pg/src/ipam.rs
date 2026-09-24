@@ -46,8 +46,9 @@ fn range_from(text: &str) -> Result<Range> {
 /// IPv4 only, which is not a limitation here: migration 0028 refuses a non-IPv4 range, so
 /// an address inside one cannot be v6.
 fn address_from(text: &str) -> Result<Ipv4Addr> {
-    Ipv4Addr::from_str(text)
-        .map_err(|e| CoreError::Storage(format!("subnet holds an address that will not parse: {e}")))
+    Ipv4Addr::from_str(text).map_err(|e| {
+        CoreError::Storage(format!("subnet holds an address that will not parse: {e}"))
+    })
 }
 
 /// A declared range.

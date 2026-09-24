@@ -812,4 +812,3 @@ async fn the_agent_says_what_it_is_and_the_inventory_records_it() {
 
     scratch.drop_database().await;
 }
-

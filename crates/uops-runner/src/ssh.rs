@@ -99,7 +99,12 @@ impl Ssh {
     /// [`crate::transport::Transport`] itself: a transport that answered "this does not
     /// make HTTP requests" to half the trait would be a type whose shape lies about what
     /// it is for.
-    pub async fn command(&self, to: &Endpoint, command: &str, credential: CredentialRef) -> Outcome {
+    pub async fn command(
+        &self,
+        to: &Endpoint,
+        command: &str,
+        credential: CredentialRef,
+    ) -> Outcome {
         let context = crate::vault::step_context(to.resource, crate::vault::SSH_STEP);
         let opened = match self.vault.get(to.tenant, credential, &context) {
             Ok(material) => material,
@@ -263,33 +268,33 @@ async fn spawn(argv: &[String], address: &str) -> Outcome {
 #[must_use]
 fn argv(known_hosts: &Path, user: &str, address: &str, key: &Path, command: &str) -> Vec<String> {
     vec![
-            // Never prompt. Without this a missing key turns into a password prompt
-            // against a closed stdin, and the step hangs until the budget expires rather
-            // than failing with something an operator can read.
-            "-o".to_owned(),
-            "BatchMode=yes".to_owned(),
-            "-o".to_owned(),
-            "StrictHostKeyChecking=accept-new".to_owned(),
-            "-o".to_owned(),
-            format!("UserKnownHostsFile={}", known_hosts.display()),
-            // Use the key we were given and nothing else. Without it, `ssh` will offer
-            // every key in the invoking account's agent and `~/.ssh`, which means a run
-            // could succeed using a credential the product does not know it used — and
-            // the access log would say it opened one it did not need.
-            "-o".to_owned(),
-            "IdentitiesOnly=yes".to_owned(),
-            "-o".to_owned(),
-            format!("ConnectTimeout={}", CONNECT_TIMEOUT.as_secs()),
-            "-i".to_owned(),
-            key.display().to_string(),
-            "-l".to_owned(),
-            user.to_owned(),
-            address.to_owned(),
-            // The rendered command, as one argument. `--` first so an address or a
-            // command that begins with a dash cannot be read as an option.
-            "--".to_owned(),
-            command.to_owned(),
-        ]
+        // Never prompt. Without this a missing key turns into a password prompt
+        // against a closed stdin, and the step hangs until the budget expires rather
+        // than failing with something an operator can read.
+        "-o".to_owned(),
+        "BatchMode=yes".to_owned(),
+        "-o".to_owned(),
+        "StrictHostKeyChecking=accept-new".to_owned(),
+        "-o".to_owned(),
+        format!("UserKnownHostsFile={}", known_hosts.display()),
+        // Use the key we were given and nothing else. Without it, `ssh` will offer
+        // every key in the invoking account's agent and `~/.ssh`, which means a run
+        // could succeed using a credential the product does not know it used — and
+        // the access log would say it opened one it did not need.
+        "-o".to_owned(),
+        "IdentitiesOnly=yes".to_owned(),
+        "-o".to_owned(),
+        format!("ConnectTimeout={}", CONNECT_TIMEOUT.as_secs()),
+        "-i".to_owned(),
+        key.display().to_string(),
+        "-l".to_owned(),
+        user.to_owned(),
+        address.to_owned(),
+        // The rendered command, as one argument. `--` first so an address or a
+        // command that begins with a dash cannot be read as an option.
+        "--".to_owned(),
+        command.to_owned(),
+    ]
 }
 
 /// Write a private key where `ssh` can read it and nothing else can.

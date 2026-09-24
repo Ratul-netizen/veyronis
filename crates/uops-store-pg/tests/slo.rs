@@ -116,7 +116,10 @@ async fn one_service_may_have_several_windows_but_not_two_of_one() {
         .store
         .set_slo(&f.scope_a(), &objective(service, 0.995, 30))
         .await;
-    assert!(clash.is_err(), "a second objective over the same window is refused");
+    assert!(
+        clash.is_err(),
+        "a second objective over the same window is refused"
+    );
 
     assert_eq!(f.store.slos(&f.scope_a()).await.expect("list").len(), 2);
 }
@@ -128,7 +131,10 @@ async fn a_target_of_one_is_refused_because_it_leaves_no_budget() {
     // downstream cannot produce an infinity.
     let refused = f
         .store
-        .set_slo(&f.scope_a(), &objective(ResourceId::new().into_uuid(), 1.0, 30))
+        .set_slo(
+            &f.scope_a(),
+            &objective(ResourceId::new().into_uuid(), 1.0, 30),
+        )
         .await;
     assert!(refused.is_err());
 }
@@ -140,7 +146,10 @@ async fn a_percentage_entered_as_a_proportion_is_refused() {
     // with no CHECK it would define an objective nothing can ever miss.
     let refused = f
         .store
-        .set_slo(&f.scope_a(), &objective(ResourceId::new().into_uuid(), 99.0, 30))
+        .set_slo(
+            &f.scope_a(),
+            &objective(ResourceId::new().into_uuid(), 99.0, 30),
+        )
         .await;
     assert!(refused.is_err());
 }
@@ -150,7 +159,10 @@ async fn an_objective_below_half_is_refused_as_a_typo() {
     let f = fixture("half").await;
     let refused = f
         .store
-        .set_slo(&f.scope_a(), &objective(ResourceId::new().into_uuid(), 0.5, 30))
+        .set_slo(
+            &f.scope_a(),
+            &objective(ResourceId::new().into_uuid(), 0.5, 30),
+        )
         .await;
     assert!(refused.is_err());
 }
@@ -161,7 +173,10 @@ async fn a_window_outside_the_bounds_is_refused() {
     let service = ResourceId::new().into_uuid();
 
     for days in [0, 91, -1] {
-        let refused = f.store.set_slo(&f.scope_a(), &objective(service, 0.99, days)).await;
+        let refused = f
+            .store
+            .set_slo(&f.scope_a(), &objective(service, 0.99, days))
+            .await;
         assert!(refused.is_err(), "{days} days must be refused");
     }
 
@@ -183,7 +198,10 @@ async fn an_objective_may_name_a_service_the_inventory_has_not_catalogued() {
     // inventory row arrives separately. Refusing here would refuse to measure something
     // demonstrably running — which is exactly when somebody sets an objective.
     f.store
-        .set_slo(&f.scope_a(), &objective(ResourceId::new().into_uuid(), 0.99, 30))
+        .set_slo(
+            &f.scope_a(),
+            &objective(ResourceId::new().into_uuid(), 0.99, 30),
+        )
         .await
         .expect("a service with no resource row is allowed");
 }

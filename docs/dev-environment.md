@@ -21,7 +21,9 @@ of the five commands below take seconds; only the Rust suite is slow.
 # Rust. The long one. Both stores have to be reachable, or tests skip or fail for reasons
 # that have nothing to do with the change -- see the two sections below for the URLs.
 export DATABASE_URL=... CLICKHOUSE_URL=... SQLX_OFFLINE=true
-cargo clippy --workspace --all-targets     # CI denies warnings
+cargo fmt --all --check                    # CI's first step; see the note below
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --doc               # includes the compile_fail security invariants
 cargo test --workspace
 
 # The web app. Seconds, and the guards are the part that gets forgotten.
@@ -40,9 +42,16 @@ longer. Run it after changing the Content-Security-Policy in
 `crates/uops-server/src/headers.rs`, or after adding a web dependency that touches fonts,
 images, workers or wasm.
 
-**`cargo fmt --check` is not in the list either**, deliberately: it reports around 170
-pre-existing differences on this machine, which is toolchain skew rather than dirty code.
-Running it produces noise that hides anything real.
+**`cargo fmt --all --check` is in that list, and used not to be.** This section previously
+said it reported "around 170 pre-existing differences — toolchain skew rather than dirty
+code" and told the reader to skip it. That was wrong, and it was wrong in the expensive
+direction: CI's `check` job runs `cargo fmt --all --check` as its *first* step, so it failed
+there too, and the job never reached Clippy or the doctests on any push for months. 265 diff
+locations across 75 files, fixed 2026-09-25.
+
+The lesson is not about formatting. A local number was explained away instead of checked
+against CI, and because `check` died at step one, `clippy -D warnings` had not run either —
+which is how a test grew past `too_many_lines` without anybody hearing about it.
 
 ---
 

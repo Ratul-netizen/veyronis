@@ -90,9 +90,12 @@ impl<A: AeadProvider> Envelope<A> {
             .aead
             .seal(dek.expose(), &nonce, aad, secret.expose().as_bytes())?;
 
-        let wrapped_dek =
-            self.aead
-                .seal(self.keks.active()?, &dek_nonce, aad, dek.expose().as_bytes())?;
+        let wrapped_dek = self.aead.seal(
+            self.keks.active()?,
+            &dek_nonce,
+            aad,
+            dek.expose().as_bytes(),
+        )?;
 
         Ok(SealedValue {
             kek_id: self.keks.active_id().clone(),
@@ -203,7 +206,10 @@ mod tests {
         let sealed = e
             .seal(CONTEXT, Secret::new("the client secret".to_owned()))
             .unwrap();
-        assert_eq!(e.open(CONTEXT, &sealed).unwrap().expose(), "the client secret");
+        assert_eq!(
+            e.open(CONTEXT, &sealed).unwrap().expose(),
+            "the client secret"
+        );
     }
 
     #[test]
@@ -216,12 +222,7 @@ mod tests {
             .unwrap();
         let haystack = format!("{sealed:?}");
         assert!(!haystack.contains("hunter2"), "{haystack}");
-        assert!(
-            !sealed
-                .ciphertext
-                .windows(7)
-                .any(|w| w == b"hunter2")
-        );
+        assert!(!sealed.ciphertext.windows(7).any(|w| w == b"hunter2"));
     }
 
     #[test]

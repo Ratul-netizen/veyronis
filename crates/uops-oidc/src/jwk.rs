@@ -248,14 +248,19 @@ mod tests {
             rsa_key("k1")
         );
         let set = Jwks::parse(&body).unwrap();
-        assert_eq!(set.len(), 1, "the unusable key should be skipped, not fatal");
+        assert_eq!(
+            set.len(),
+            1,
+            "the unusable key should be skipped, not fatal"
+        );
     }
 
     #[test]
     fn a_set_with_nothing_usable_is_an_error() {
         // The distinction that matters: skipping every key leaves nothing to verify
         // with, and continuing from there would mean accepting a token unverified.
-        let err = Jwks::parse(r#"{"keys":[{"kty":"OKP","crv":"Ed25519","x":"AAAA"}]}"#).unwrap_err();
+        let err =
+            Jwks::parse(r#"{"keys":[{"kty":"OKP","crv":"Ed25519","x":"AAAA"}]}"#).unwrap_err();
         assert!(matches!(err, Error::Jwks(_)), "{err}");
     }
 

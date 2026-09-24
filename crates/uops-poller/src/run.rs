@@ -30,11 +30,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::sync::atomic::AtomicU64;
 use tokio::sync::Mutex;
 use uops_core::{ResourceId, ResourceStatus, TenantScope};
 use uops_poll::plan::Device;
 use uops_poll::poller::{JobKey, Schedule, Task, run_tick, tasks, tick_instant};
-use std::sync::atomic::AtomicU64;
 
 use uops_poll::{Executor, TickReport};
 use uops_profile::Profile;

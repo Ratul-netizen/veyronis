@@ -79,7 +79,10 @@ pub async fn run<T: Transport + ?Sized>(
 ) -> uops_core::Result<Report> {
     let scope = claimed.scope();
     let addresses = store
-        .resource_addresses(&scope, &claimed.targets.iter().map(|t| t.id).collect::<Vec<_>>())
+        .resource_addresses(
+            &scope,
+            &claimed.targets.iter().map(|t| t.id).collect::<Vec<_>>(),
+        )
         .await?;
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -210,8 +213,16 @@ async fn one_target<T: Transport + ?Sized>(
             Err(e) => {
                 store
                     .record_step(
-                        scope, claimed.id, resource, position, &step.name, "", step.destructive,
-                        FAILED, Some(&e.to_string()), None,
+                        scope,
+                        claimed.id,
+                        resource,
+                        position,
+                        &step.name,
+                        "",
+                        step.destructive,
+                        FAILED,
+                        Some(&e.to_string()),
+                        None,
                     )
                     .await?;
                 out.failure = Some((
@@ -233,8 +244,10 @@ async fn one_target<T: Transport + ?Sized>(
                     resource,
                     position,
                     &step.name,
-                    &rendered.join("
-"),
+                    &rendered.join(
+                        "
+",
+                    ),
                     step.destructive,
                     SKIPPED,
                     Some("not run: this is a dry run, and this step changes something"),
@@ -247,8 +260,10 @@ async fn one_target<T: Transport + ?Sized>(
 
         // What the transcript records as having been sent. One line per template, so an
         // http.request step's body is in the record beside its URL rather than lost.
-        let transcript = rendered.join("
-");
+        let transcript = rendered.join(
+            "
+",
+        );
 
         let outcome = execute_step(transport, &endpoint, step, &rendered).await;
         out.run += 1;
@@ -321,7 +336,10 @@ fn context_for(endpoint: &Endpoint) -> BTreeMap<String, String> {
 }
 
 /// Every template in a step, rendered in the order [`Action::templates`] gives them.
-fn render_step(step: &Step, context: &BTreeMap<String, String>) -> uops_runbook::Result<Vec<String>> {
+fn render_step(
+    step: &Step,
+    context: &BTreeMap<String, String>,
+) -> uops_runbook::Result<Vec<String>> {
     step.action
         .templates()
         .into_iter()
@@ -460,7 +478,10 @@ mod tests {
             }),
         ] {
             let verdict = check_expectation(&step(expectation.clone()), &unreachable);
-            assert!(verdict.is_err(), "{expectation:?} passed on an unreachable device");
+            assert!(
+                verdict.is_err(),
+                "{expectation:?} passed on an unreachable device"
+            );
         }
     }
 
@@ -525,7 +546,10 @@ mod tests {
         let mut s = step(None);
         s.rollback = Some(uops_runbook::Rollback::Unknown);
         let described = describe_rollback(&s).expect("unknown must still be described");
-        assert!(described.contains("did not come through the API"), "{described}");
+        assert!(
+            described.contains("did not come through the API"),
+            "{described}"
+        );
     }
 
     #[test]

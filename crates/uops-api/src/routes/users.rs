@@ -76,7 +76,10 @@ pub struct InvitationView {
 /// Everybody with an account, including suspended ones — an admin who cannot see a
 /// suspension cannot lift it. People who have only been invited are **not** here; they have
 /// no account yet, which is migration 0030's decision. See [`invitations`].
-pub async fn list(State(state): State<AppState>, admin: OrgAdmin) -> ApiResult<Json<Vec<UserView>>> {
+pub async fn list(
+    State(state): State<AppState>,
+    admin: OrgAdmin,
+) -> ApiResult<Json<Vec<UserView>>> {
     let rows = state.store.users_in_org(admin.org_id).await?;
 
     state
@@ -296,7 +299,12 @@ pub async fn accept(
 
     let hash = password::hash(&chosen).map_err(|_| stored_badly())?;
 
-    if state.store.accept_invitation(&token, &hash).await?.is_none() {
+    if state
+        .store
+        .accept_invitation(&token, &hash)
+        .await?
+        .is_none()
+    {
         return Err(ApiError::BadRequest(
             "this invitation cannot be used. It may have been used already, withdrawn, or \
              expired — ask whoever invited you for another"
@@ -333,7 +341,11 @@ pub async fn disable(
         ));
     }
 
-    match state.store.disable_user_in_org(admin.org_id, target).await? {
+    match state
+        .store
+        .disable_user_in_org(admin.org_id, target)
+        .await?
+    {
         Change::Done => {}
         Change::NoSuchUser => return Err(ApiError::NotFound),
         Change::WouldLeaveNoAdmin => {
@@ -531,7 +543,9 @@ pub async fn revoke(
         Change::WouldLeaveNoAdmin => return Err(last_admin()),
     }
 
-    caller.audit().wrote("user.role.revoke", id.to_string(), None, None);
+    caller
+        .audit()
+        .wrote("user.role.revoke", id.to_string(), None, None);
     Ok(StatusCode::NO_CONTENT)
 }
 

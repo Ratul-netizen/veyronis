@@ -40,7 +40,9 @@
 
 use std::sync::Arc;
 
-use uops_core::{ActorId, CredentialMaterial, CredentialRef, OrgId, ResourceId, Secret, TenantId, TenantScope};
+use uops_core::{
+    ActorId, CredentialMaterial, CredentialRef, OrgId, ResourceId, Secret, TenantId, TenantScope,
+};
 use uops_query::ast::ResourceSelector;
 use uops_runbook::{Action, Approvals, Expect, Rollback, Runbook, Step};
 use uops_secrets::{CredentialMeta, KekRing, LocalVault};
@@ -162,7 +164,12 @@ async fn fixture(slug: &str, t: &Target) -> Fixture {
     let hash =
         uops_secrets::password::hash(&Secret::new("correct horse".to_owned())).expect("hash");
     let starter = store
-        .create_user(org, &format!("starter-{tag}@test.invalid"), "starter", &hash)
+        .create_user(
+            org,
+            &format!("starter-{tag}@test.invalid"),
+            "starter",
+            &hash,
+        )
         .await
         .expect("user");
 
@@ -295,7 +302,10 @@ async fn queue(fixture: &Fixture, runbook: &Runbook, dry_run: bool) -> uuid::Uui
         .expect("create run")
 }
 
-async fn steps_of(fixture: &Fixture, run: uuid::Uuid) -> Vec<(i32, String, String, Option<String>)> {
+async fn steps_of(
+    fixture: &Fixture,
+    run: uuid::Uuid,
+) -> Vec<(i32, String, String, Option<String>)> {
     sqlx::query_as::<_, (i32, String, String, Option<String>)>(
         "SELECT step_index, name, state::text, output
            FROM runbook_run_step
@@ -390,7 +400,11 @@ async fn a_dry_run_reaches_a_real_device_runs_the_read_only_step_and_sends_nothi
     //    claiming success.
     assert_eq!(steps[1].2, "skipped", "{steps:?}");
     assert!(
-        steps[1].3.as_deref().unwrap_or_default().contains("dry run"),
+        steps[1]
+            .3
+            .as_deref()
+            .unwrap_or_default()
+            .contains("dry run"),
         "a skipped step says it was a dry run: {steps:?}"
     );
 

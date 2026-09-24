@@ -253,7 +253,11 @@ mod tests {
         let me = actor();
         let r = request(me, Approvals::Two);
         assert_eq!(
-            decide(&r, &[approval(actor(), now()), approval(actor(), now())], now()),
+            decide(
+                &r,
+                &[approval(actor(), now()), approval(actor(), now())],
+                now()
+            ),
             Decision::Approved
         );
     }
@@ -263,7 +267,10 @@ mod tests {
         let me = actor();
         let r = request(me, Approvals::One);
         let stale = approval(actor(), now() - APPROVAL_WINDOW - Duration::seconds(1));
-        assert_eq!(decide(&r, &[stale], now()), Decision::Pending(Pending::Expired));
+        assert_eq!(
+            decide(&r, &[stale], now()),
+            Decision::Pending(Pending::Expired)
+        );
 
         // And the boundary holds the other way, so a colleague who approved exactly at
         // the limit is not told to start over.
@@ -295,7 +302,10 @@ mod tests {
         let mut r = request(me, Approvals::One);
         r.targets_fingerprint = "sha:different".to_owned();
         let stale = approval(actor(), now() - Duration::hours(2));
-        assert_eq!(decide(&r, &[stale], now()), Decision::Pending(Pending::Expired));
+        assert_eq!(
+            decide(&r, &[stale], now()),
+            Decision::Pending(Pending::Expired)
+        );
     }
 
     #[test]

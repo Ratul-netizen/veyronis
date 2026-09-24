@@ -178,7 +178,14 @@ async fn the_run_loop_settles_an_incident_whose_alerts_have_all_resolved() {
 
     let incident = scratch
         .store
-        .open_incident(&scope, alert, "warning", "core-sw-01 stopped answering", Utc::now(), None)
+        .open_incident(
+            &scope,
+            alert,
+            "warning",
+            "core-sw-01 stopped answering",
+            Utc::now(),
+            None,
+        )
         .await
         .expect("open an incident");
 
@@ -186,7 +193,11 @@ async fn the_run_loop_settles_an_incident_whose_alerts_have_all_resolved() {
     // do it, and for a milestone it did not.
     run_briefly(&scratch.store).await;
 
-    let rows = scratch.store.incidents(&scope, 10).await.expect("read back");
+    let rows = scratch
+        .store
+        .incidents(&scope, 10)
+        .await
+        .expect("read back");
     let found = rows
         .iter()
         .find(|r| r.id == incident)
@@ -225,7 +236,11 @@ async fn an_incident_with_an_alert_still_firing_is_left_open() {
 
     run_briefly(&scratch.store).await;
 
-    let rows = scratch.store.incidents(&scope, 10).await.expect("read back");
+    let rows = scratch
+        .store
+        .incidents(&scope, 10)
+        .await
+        .expect("read back");
     let found = rows.iter().find(|r| r.id == incident).expect("present");
     assert_eq!(found.state, "open", "an alert is still firing");
     assert!(found.quiet_at.is_none());

@@ -48,6 +48,5 @@ pub use error::{Error, Result};
 pub use rows::{Column, EventRow, FlowRow, LogRow, MetricRow, ResultSet, SpanRow, StateRow};
 pub use store::{
     ChStore, EventStore, FlowStore, LogStore, MetricStore, StateStore, StoreHealth, TelemetryStore,
-    TraceStore,
-    fingerprint,
+    TraceStore, fingerprint,
 };

@@ -233,7 +233,10 @@ pub async fn serve(
 /// The scale test needs them mid-flight — a throughput figure computed after the process
 /// has drained is a figure for a system that was allowed to catch up, which is not the
 /// number SPEC asks for.
-#[allow(clippy::too_many_lines, reason = "the order the daemon starts things in")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the order the daemon starts things in"
+)]
 pub async fn serve_with_metrics(
     store: PgStore,
     telemetry: ChStore,

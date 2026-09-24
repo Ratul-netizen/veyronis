@@ -42,7 +42,12 @@ fn two_weak_signals_that_agree_are_worth_more_than_either() {
     });
     assert_eq!(it.role, Role::Printer);
     assert_eq!(it.confidence, Confidence::Likely);
-    assert_eq!(it.because.len(), 2, "both signals are shown: {:?}", it.because);
+    assert_eq!(
+        it.because.len(),
+        2,
+        "both signals are shown: {:?}",
+        it.because
+    );
 }
 
 #[test]
@@ -86,7 +91,10 @@ fn a_vendor_that_makes_everything_contributes_nothing_to_the_role() {
         ..Evidence::default()
     });
     assert_eq!(it.role, Role::Unknown);
-    assert!(it.vendor.is_some(), "the manufacturer is still worth showing");
+    assert!(
+        it.vendor.is_some(),
+        "the manufacturer is still worth showing"
+    );
     assert!(it.worth_showing());
     assert_eq!(it.because.len(), 1);
 }
@@ -169,6 +177,10 @@ fn every_role_has_a_label_fit_for_a_screen() {
     ] {
         let label = role.label();
         assert!(!label.is_empty());
-        assert_eq!(label, label.to_lowercase(), "labels are sentence-cased by the UI");
+        assert_eq!(
+            label,
+            label.to_lowercase(),
+            "labels are sentence-cased by the UI"
+        );
     }
 }

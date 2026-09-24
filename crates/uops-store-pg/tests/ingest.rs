@@ -160,7 +160,11 @@ async fn a_token_is_scoped_to_one_tenant() -> Result<()> {
         "and the other tenant cannot even see it"
     );
     // And it cannot be revoked from the other tenant, so an id from a URL proves nothing.
-    assert!(!w.store.revoke_ingest_token(&scope(theirs), issued.id).await?);
+    assert!(
+        !w.store
+            .revoke_ingest_token(&scope(theirs), issued.id)
+            .await?
+    );
     assert_eq!(
         w.store.tenant_for_ingest_token(&issued.token).await?,
         Some(mine),
@@ -199,7 +203,11 @@ async fn revocation_is_immediate() -> Result<()> {
             .is_some()
     );
 
-    assert!(w.store.revoke_ingest_token(&scope(tenant), issued.id).await?);
+    assert!(
+        w.store
+            .revoke_ingest_token(&scope(tenant), issued.id)
+            .await?
+    );
     assert_eq!(
         w.store.tenant_for_ingest_token(&issued.token).await?,
         None,
@@ -207,7 +215,9 @@ async fn revocation_is_immediate() -> Result<()> {
     );
 
     assert!(
-        !w.store.revoke_ingest_token(&scope(tenant), issued.id).await?,
+        !w.store
+            .revoke_ingest_token(&scope(tenant), issued.id)
+            .await?,
         "revoking twice changed nothing, and says so"
     );
 
