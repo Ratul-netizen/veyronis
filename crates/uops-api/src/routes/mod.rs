@@ -8,6 +8,7 @@
 //! There is one path to telemetry, and this is it.
 
 pub mod alerts;
+pub mod audit_log;
 pub mod auth;
 pub mod channels;
 pub mod collectors;
@@ -295,6 +296,11 @@ pub fn router(state: AppState) -> Router {
         // The path to a target — `docs/traceroute.md`. A POST because it sends packets:
         // every other read here asks the database what it already knows.
         .route("/api/v1/path", post(path::run))
+        // The two logs — SPEC §M0.8. Written since M1 by every handler and, until now,
+        // readable only through psql: `audit_entries` and `access_entries` were called
+        // from tests alone. Admin, because an audit log names people.
+        .route("/api/v1/audit/changes", get(audit_log::changes))
+        .route("/api/v1/audit/reads", get(audit_log::reads))
         .route("/api/v1/sites/{id}/location", put(sites::place))
         .route("/api/v1/query", post(query::run))
         // The tail is its own route rather than a flag on the one above, because it is

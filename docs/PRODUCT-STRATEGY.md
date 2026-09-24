@@ -92,7 +92,7 @@ in §10; per instruction it has not been edited here.
 | Runbook automation (typed, approved, dry-run) | **Implemented** | `uops-runbook`, `uops-runner`, M10 12/13 |
 | Multi-tenancy | **Implemented, type-enforced** | `TenantScope`, 68 routes in `isolation.rs` |
 | SSO/OIDC + break-glass | **Implemented** | `uops-oidc`, M12 |
-| Leases/HA, rehearsed restore, read audit | **Implemented** | M12, `docs/restore-drill.md` |
+| Leases/HA, rehearsed restore, read audit | **Implemented** | M12, `docs/restore-drill.md`; the audit log became *readable* on 24 Sep — see §14 |
 | Self-monitoring | **Partial** | sign-ins done; collector/lease/run events open |
 | **NCCM config backup/diff** | **Absent** — "out of scope" in M10 | — |
 | **IPAM** | **Implemented** (23 Sep) | migration 0028, `uops_store_pg::ipam`, `/api/v1/subnets`, Addresses screen |
@@ -309,7 +309,7 @@ plus modules Veyronis lacks. Beating it needs specifics, not a better adjective.
 | **One identity, one query path** | Motadata's APM, RUM, SLO, NCCM are documented as *modules*. Veyronis's signals share one resource identity and one query AST — correlation is structural, not an integration | **True today.** The strongest claim available |
 | **Provable isolation** | Type-enforced tenant scope, adversarial test across all 68 routes | **True today.** Ask them to show theirs |
 | **Automation you can put in a change window** | Expiring approvals, dry runs that execute only read-only steps, rollback *offered* with the honest caveat, credentials absent from transcripts | **True today.** "Auto-remediation" is usually a script runner — make the comparison concrete |
-| **Evidence for assessors** | Rehearsed restore, read auditing, break-glass, self-monitoring | **True today.** Not established for Motadata |
+| **Evidence for assessors** | Rehearsed restore, read auditing, break-glass, self-monitoring | **True today — but read auditing was only half true when this was written.** The rows existed and nothing could read them; corrected 24 Sep, see §14 |
 | **AI** | Their claims lack documented mechanism | **Do not fight here.** Reframe to topology-backed causality |
 | **Breadth** | They have RUM, SLO, NCCM, ITSM, MSP portals | **They win today.** Stage 1 closes the two that matter to the network buyer |
 
@@ -682,3 +682,52 @@ unexplainable number on a contract instead of a dashboard.
 **Still open:** NCM — the last of OpManager's five add-ons and the expensive one — plus
 burn-rate alerting, availability SLOs, and the Gate 1 interviews, which now matter *more*
 rather than less, because three modules have been built on inference.
+
+
+---
+
+## 15. A claim in this document was wrong, and how it was found
+
+Added 24 September 2026.
+
+§3 and §6 of this document both offered **read auditing** as an advantage — §6 marked it
+"true today" in a table comparing the product against Motadata. It was true of the database
+and false of the product.
+
+`audit_log` and `access_log` have been written since M1 by every mutating handler and every
+read of a resource, a credential or a telemetry query. The writes are real and tested.
+**Nothing could read them back**: `PgStore::audit_entries` and `PgStore::access_entries`
+were called from test files only, so answering *"who saw this customer's telemetry"* meant
+opening `psql`. There was no route and no screen.
+
+That is a worse kind of gap than an unbuilt feature, because it was **sold**. SPEC §M0.8
+asks for read auditing on the grounds that defence and law-enforcement buyers audit who saw
+something rather than only who changed it; `docs/security-overview.md` offers it to buyers;
+and this document listed it as hard for a competitor to copy. A buyer who asked for a
+demonstration would have got a database console.
+
+**How it was found, and the part worth keeping.** Not by another lab failure — by grepping
+the codebase for public functions that only tests reference. Five defects of that shape had
+already turned up in two days (`built-tested-never-called`), so the sixth was found by
+looking for the pattern rather than waiting for it:
+
+```
+public functions referenced by tests and by no production file
+   5  audit_entries       crates/uops-store-pg/src/audit.rs
+   3  access_entries      crates/uops-store-pg/src/audit.rs
+```
+
+The audit is crude and produced about fifty candidates, most of them noise — trait methods,
+re-exports, generic names. It does not need to be precise to be useful: reading fifty names
+takes minutes and it surfaced a sold capability that did not work.
+
+**Fixed the same day.** `GET /api/v1/audit/changes` and `GET /api/v1/audit/reads`, admin
+only, plus an Audit screen under Operations. Reading the access log is itself recorded in
+the access log, which is correct — the first question about a log is who else has been
+through it.
+
+**What this says about the roadmap.** Thirteen milestones are marked built and six
+capabilities have been reached by nothing that runs. The count matters less than the
+reason: acceptance criteria describe what a component *does*, tests supply their own
+inputs, and neither asks whether anything calls it. Before the Gate 1 interviews in §9,
+the cheaper win is to finish reading that fifty-candidate list.

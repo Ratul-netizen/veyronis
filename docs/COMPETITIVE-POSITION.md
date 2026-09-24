@@ -50,7 +50,9 @@ matters most and is the part not yet done.
 3. **The genuine differentiator is not a feature, it is deployability and provability.**
    One resource identity across five signals, one query AST, on-premise and air-gap as
    first-class rather than a downgrade, tenant isolation enforced by the type system, a
-   restore somebody has actually rehearsed, read auditing, and runbook automation that is
+   restore somebody has actually rehearsed, read auditing — **which the product could not
+   show anybody until 24 September 2026, see `PRODUCT-STRATEGY.md` §15** — and runbook
+   automation that is
    typed, approved, dry-runnable and refuses to invent a rollback. For a regulated,
    air-gapped or sovereignty-constrained buyer that combination is rare; for a mid-market
    commercial buyer it is close to irrelevant. **The buyer choice is the strategy.**

@@ -435,6 +435,22 @@ const CASES: &[RouteCase] = &[
     // Tracing sends packets from the product at an address a caller names. It is
     // tenant-scoped like everything else, and an operator of one tenant must not be able
     // to use another's session to do it.
+    // The two logs. Tenant-scoped like everything else: one customer's auditor must not
+    // be able to read another customer's reads, which in an MSP is the whole point.
+    RouteCase {
+        path: "/api/v1/audit/changes",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/audit/reads",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/path",
         probe: None,
