@@ -222,4 +222,29 @@ mod tests {
         let file: File = serde_yaml_ng::from_str(text).unwrap();
         assert_eq!(file.listeners, vec![listener("acme", "0.0.0.0:2055")]);
     }
+
+    /// The file this product ships, parsed by the code that will read it.
+    ///
+    /// Nothing else checked it. `deploy/docker-compose.yml` mounts it and the daemon fails at
+    /// start-up naming the file, which is right at run time and far too late in a repository:
+    /// until CI grew a step asserting the collectors are still running, a malformed file here
+    /// would have exited its container a second after `compose up` and the build would have
+    /// gone green. `include_str!` moves the failure to `cargo test`.
+    #[test]
+    fn the_shipped_listener_file_parses() {
+        let text = include_str!("../../../deploy/flow/listeners.yaml");
+        let file: File = serde_yaml_ng::from_str(text).expect("deploy/flow/listeners.yaml");
+
+        assert!(
+            !file.listeners.is_empty(),
+            "a shipped file with no listeners would start a daemon that ingests nothing"
+        );
+        // The tenant the rest of the compose stack uses. A slug no tenant has fails at
+        // start-up, which is the one error this file can hold that parsing cannot catch.
+        assert!(
+            file.listeners.iter().any(|l| l.tenant == "example"),
+            "{:?}",
+            file.listeners
+        );
+    }
 }

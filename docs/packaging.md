@@ -265,11 +265,22 @@ whose buyers are defence ministries is a question that will be asked.
       neither — the check `uops-collector-flow` and `uops-runner` would have failed. The
       discovery reads `crates/*/Cargo.toml` and `src/bin/*.rs`, verified locally to find
       exactly the eight binaries including `uops-pg-migrate` from its `src/bin/`
-- [~] `uops-collector-flow` and `uops-runner` are in the image — the copy is by glob now, so
-      they are, **pending CI building it**: there is no Docker here. Neither has a compose
-      service yet, so the stack CI brings up still cannot collect a flow or execute a run.
-      Flow needs a `deploy/flow/listeners.yaml`; the runner needs the KEK volume that already
-      exists for the server and poller
+- [x] `uops-collector-flow` and `uops-runner` are in the image, and each has a compose
+      service, so the stack CI brings up can collect a flow and execute a run —
+      `deploy/flow/listeners.yaml` with one listener per tenant on 2055/udp, and the runner
+      with the KEK volume the server and poller already use plus a named volume for
+      `known_hosts`, which it refuses to start without. **The image build itself is still
+      confirmed by CI rather than locally**: there is no Docker on this machine.
+      > **Two guards came with them, because a service being declared is not a service that
+      > runs.** CI waited only for `server` to be healthy, so any collector could have exited a
+      > second after `compose up` — a bad tenant slug, a bound socket, a missing variable — and
+      > the build would have gone green. Now *"Every long-running service is still running"*
+      > derives the set from `restart: unless-stopped`, which is how a service in that file
+      > declares it is meant to stay up, and prints the tail of its log when one is not. And
+      > `the_shipped_listener_file_parses` reads `deploy/flow/listeners.yaml` through
+      > `include_str!` and the type that will parse it, so a malformed shipped config fails
+      > `cargo test` rather than a container exit nobody was watching. Verified by breaking the
+      > file two ways and watching it fail.
 
 - [ ] A tagged release publishes a multi-architecture image, and the tag's version is what
       `/api/v1/health` reports

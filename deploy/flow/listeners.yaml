@@ -1,0 +1,32 @@
+# Which tenant a flow record belongs to.
+#
+# The same answer as syslog and OTLP, and for the reason `uops-collector-flow`'s config module
+# records: a flow datagram **carries no tenant and cannot be made to**. It carries an exporter
+# address, an observation domain and some counters, every one of them chosen by the sender.
+#
+# So the tenant comes from *where the datagram arrived* — one listener per tenant, on its own
+# address or port. The binding is the one thing a sender cannot influence.
+#
+# The alternative is rejected and not as a matter of taste: resolving the exporter's address to
+# a resource and taking that resource's tenant would let an unauthenticated packet select its
+# own tenant by choosing a source address. For an MSP that is a cross-tenant write triggered by
+# a spoofed UDP datagram, which is the class of bug `TenantScope` and the composite foreign keys
+# exist to make impossible.
+#
+# An unknown exporter inside a listener's tenant is *not* refused. It is resolved like any other
+# sender — matched, or given a provisional resource and a review item — because SPEC §M0.2 rule
+# 1 is never block ingestion, and an allow-list loses the data of every device somebody forgot
+# to register, which are disproportionately the devices involved in an incident.
+
+listeners:
+  # The slug in PostgreSQL, not a uuid. A mistyped slug fails at startup with a message that
+  # names it; a mistyped uuid would be a plausible-looking id that never matches, and flow would
+  # be attributed to nothing while the process looked healthy.
+  - tenant: example
+    # 2055 is the port NetFlow uses by convention, and sFlow's 6343 and IPFIX's 4739 arrive here
+    # too: one socket, not one per protocol, because all four arrive over UDP and the first bytes
+    # say which it is. A collector that insisted on a port per protocol would make an operator
+    # configure their exporters around an implementation detail.
+    #
+    # Above 1024, so this needs no capability — the compose file maps 2055 straight through.
+    udp: 0.0.0.0:2055

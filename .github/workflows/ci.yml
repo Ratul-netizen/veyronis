@@ -1406,6 +1406,46 @@ jobs:
           docker compose -f deploy/docker-compose.yml logs migrate | grep -q "schema is up to date"
           docker compose -f deploy/docker-compose.yml logs migrate | grep -qE "applied [0-9]+ migration"
 
+      # A container that exited is not a container that failed loudly.
+      #
+      # Until this step, the only process this job waited for was `server`. Every collector
+      # could have exited one second after start-up — a listener file naming a tenant slug that
+      # does not exist, a socket already bound, a missing configuration variable — and this job
+      # would have gone green, because nothing asked. `uops-collector-flow` and `uops-runner`
+      # were added to the compose file on 2026-09-24 and this is what makes their being there
+      # mean something.
+      #
+      # The set is derived from `restart: unless-stopped`, which is exactly how a service in
+      # this file declares that it is meant to stay up: `migrate` says `restart: "no"` because
+      # it exits, and the two databases are the images' own business. A service added next year
+      # is checked without anybody remembering to.
+      - name: Every long-running service is still running
+        run: |
+          LONG=$(awk '
+            /^  [a-z][a-z-]*:$/ { svc = $1; sub(/:$/, "", svc) }
+            /^    restart: unless-stopped$/ { print svc }
+          ' deploy/docker-compose.yml)
+
+          if [ -z "$LONG" ]; then
+            echo "::error::no long-running services found; this guard is not guarding anything"
+            exit 1
+          fi
+
+          RUNNING=$(docker compose -f deploy/docker-compose.yml ps --services --status running)
+          echo "running: $(echo "$RUNNING" | tr '\n' ' ')"
+
+          STOPPED=0
+          for SVC in $LONG; do
+            if echo "$RUNNING" | grep -qx "$SVC"; then
+              echo "ok: $SVC"
+            else
+              echo "::error::$SVC is meant to stay up and is not running"
+              docker compose -f deploy/docker-compose.yml logs --tail 40 "$SVC" || true
+              STOPPED=1
+            fi
+          done
+          exit $STOPPED
+
       - name: The stack answers, and answers as itself
         run: |
           set -e

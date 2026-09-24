@@ -348,6 +348,86 @@ services:
     entrypoint: ["/usr/local/bin/uops-collector-otlp"]
     restart: unless-stopped
 
+  flow:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: uops:dev
+    container_name: uops-flow
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    ports:
+      # One UDP socket for all four protocols — NetFlow v5 and v9, IPFIX and sFlow — because
+      # every one of them arrives over UDP and the first bytes say which it is. 2055 is
+      # NetFlow's conventional port and is above 1024, so this needs no capability.
+      #
+      # An exporter configured for 6343 or 4739 is pointed here instead. That is one line in
+      # the exporter's configuration and it is the right trade: the alternative is three
+      # published ports and three sockets to hold a burst in, sized independently.
+      - "2055:2055/udp"
+    environment:
+      DATABASE_URL: postgres://uops:uops@postgres:5432/uops
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: uops
+      CLICKHOUSE_USER: uops
+      CLICKHOUSE_PASSWORD: uops
+      UOPS_FLOW_CONFIG: /srv/flow/listeners.yaml
+      # No spill volume, unlike syslog and OTLP. Those two buffer to disk because a log line
+      # is the record of something that happened once and cannot be asked for again. A flow
+      # record is a counter sample: the exporter is still sending, the next datagram carries
+      # the next interval, and a bounded in-memory queue that counts its drops is the honest
+      # shape. `uops_collector_flow::config::DEFAULT_QUEUE` is that bound.
+      #
+      # No UOPS_COLLECTOR_TOKEN and no UOPS_KEK_FILE, for the reasons the syslog and OTLP
+      # services give: one collector on one machine needs no enrolment, and a receiver that
+      # opens no credentials is not handed the key that decrypts every credential.
+    volumes:
+      # Read-only, and a bind mount rather than a named volume: this is configuration a human
+      # edits and puts in a change ticket, not state the container owns.
+      - ./flow:/srv/flow:ro
+    entrypoint: ["/usr/local/bin/uops-collector-flow"]
+    restart: unless-stopped
+
+  # The runner — M10. Absent from this file until 2026-09-24, together with its binary being
+  # absent from the image, which meant a stack brought up from this repository accepted runbook
+  # runs and executed none: the API queues a run as `ready` and this is the only thing that
+  # claims one. A queue with no consumer, reporting nothing anywhere. `docs/packaging.md` §2.
+  runner:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: uops:dev
+    container_name: uops-runner
+    depends_on:
+      # On migrate for the schema, and on nothing else. It does not call the API and the API
+      # does not call it — they meet at the `runbook_run` table and the run lease.
+      migrate: { condition: service_completed_successfully }
+    environment:
+      DATABASE_URL: postgres://uops:uops@postgres:5432/uops
+      # A runner with no KEK runs nothing, and says so before opening anything else: every
+      # step that reaches a device opens a sealed credential, so the key is not optional the
+      # way it is for a receiver.
+      UOPS_KEK_FILE: /srv/kek/kek.hex
+      # No default, deliberately, and the runner refuses to start without it. It holds
+      # `known_hosts` — the record of which devices this deployment has decided to trust — and
+      # a default of /tmp would mean a restart silently discarding every host key it had
+      # learned, turning `accept-new` back into trust-on-every-use.
+      UOPS_RUNNER_STATE_DIR: /srv/state
+      # No CLICKHOUSE_*. A run writes to PostgreSQL and nowhere else, and the config module
+      # says that if it ever changes it should change as a decision rather than by a variable
+      # appearing here.
+    volumes:
+      - kek:/srv/kek:ro
+      # Named, so `docker compose down` keeps it. A host key learned on first connection and
+      # thrown away on shutdown is the same as never having learned it.
+      - runner-state:/srv/state
+    # No ports. Nothing connects *to* a runner; it claims from a queue.
+    #
+    # It executes nothing until somebody creates a runbook and starts a run. An empty queue is
+    # not an error.
+    entrypoint: ["/usr/local/bin/uops-runner"]
+    restart: unless-stopped
+
 volumes:
   pg-data:
   ch-data:
@@ -358,6 +438,8 @@ volumes:
   # The syslog write-ahead spill. Holds rows ClickHouse would not take, and is replayed
   # on the next start -- so it must survive a restart, which is the whole reason it is a
   # named volume rather than a tmpfs.
+  # The runner's known_hosts, which must survive a restart — see the service.
+  runner-state:
   syslog-spill:
   # The same, for OTLP. Separate from syslog's because the two processes have separate
   # spills and a segment does not record which collector wrote it.
