@@ -1351,6 +1351,52 @@ jobs:
           done
           exit $MISSING
 
+      # The other direction, and the one that was missing.
+      #
+      # The check above verifies that everything the compose file *names* is in the image.
+      # It cannot see a binary that is in neither — nothing names it, so nothing asks why.
+      # `uops-collector-flow` and `uops-runner` were exactly that: built by
+      # `cargo build --workspace --bins`, never copied into the final stage, and named by no
+      # service, so a deployment built from this repository's only artefact could not collect
+      # a flow or execute a runbook run. The runner is the sharper of the two — the API
+      # queues a run and nothing claims it, which reports nothing anywhere.
+      #
+      # So: every binary the workspace produces must be in the image, or be listed below as
+      # deliberately absent with a reason. `docs/packaging.md` §2.
+      - name: Every binary the workspace builds is in the image
+        run: |
+          # Deliberately absent, with the reason. Empty today: everything ships.
+          EXCLUDED=""
+
+          MISSING=0
+          # Read from the manifests rather than from a list here, so a crate added next year
+          # is checked without anybody remembering to.
+          BINS=$(for m in crates/*/Cargo.toml; do
+                   c=$(dirname "$m")
+                   if [ -f "$c/src/main.rs" ]; then basename "$c"; fi
+                   for b in "$c"/src/bin/*.rs; do
+                     [ -e "$b" ] && basename "$b" .rs
+                   done
+                 done | sort -u)
+
+          if [ -z "$BINS" ]; then
+            echo "::error::found no binaries; this guard is not guarding anything"
+            exit 1
+          fi
+
+          for BIN in $BINS; do
+            case " $EXCLUDED " in
+              *" $BIN "*) echo "skipped, deliberately: $BIN"; continue ;;
+            esac
+            if docker run --rm --entrypoint test uops:dev -x "/usr/local/bin/$BIN"; then
+              echo "ok: $BIN"
+            else
+              echo "::error::$BIN is built by the workspace and is not in the image"
+              MISSING=1
+            fi
+          done
+          exit $MISSING
+
       # Migrations are a separate service that must run to completion. If it did not,
       # `server` would not have started at all — but a green `up` with a silently
       # skipped migration is exactly the failure this criterion is about.

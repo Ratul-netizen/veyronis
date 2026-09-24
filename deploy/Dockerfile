@@ -54,9 +54,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release --workspace --bins && \
     # Out of the cache mount, which does not survive this layer.
-    cp target/release/uops-server target/release/uops-poller \
-       target/release/uops-collector-syslog target/release/uops-collector-otlp \
-       target/release/uops-ch-migrate target/release/uops-pg-migrate /usr/local/bin/
+    #
+    # By pattern rather than by name, because the comment above was right and the list that
+    # used to be here was not: `uops-collector-flow` and `uops-runner` arrived with M7 and
+    # M10 and never reached this line. The only artefact this repository has could not
+    # collect a flow or execute a runbook run — and the runner is a queue with no consumer,
+    # which reports nothing anywhere. `docs/packaging.md` §2.
+    #
+    # A glob and a delete, rather than `find` with predicates BusyBox may not have: cargo
+    # writes a `.d` dependency file beside each binary, and those are the only other
+    # `uops-*` in that directory. A binary added next year ships by existing.
+    cp target/release/uops-* /usr/local/bin/ && \
+    rm -f /usr/local/bin/*.d
 
 
 # --- what actually ships ----------------------------------------------------------
@@ -74,9 +83,9 @@ RUN addgroup -S uops && adduser -S -G uops uops
 # docker-compose.yml, where the poller is the same image with a different command. Two
 # images would be two builds, two pushes and two chances for the poller to be a version
 # behind the API that wrote the credentials it reads.
-COPY --from=server /usr/local/bin/uops-server /usr/local/bin/uops-poller \
-     /usr/local/bin/uops-collector-syslog /usr/local/bin/uops-collector-otlp \
-     /usr/local/bin/uops-ch-migrate /usr/local/bin/uops-pg-migrate /usr/local/bin/
+# The whole directory, for the same reason the `find` above exists: a list of names here
+# is the same staleness one layer later.
+COPY --from=server /usr/local/bin/ /usr/local/bin/
 COPY --from=web /build/dist /srv/web
 COPY migrations/ /srv/migrations/
 COPY ch-migrations/ /srv/ch-migrations/
