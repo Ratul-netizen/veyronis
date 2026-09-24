@@ -18,6 +18,7 @@ pub mod discovery;
 pub mod groups;
 pub mod health;
 pub mod incidents;
+pub mod ingest;
 pub mod maintenance;
 pub mod query;
 pub mod resources;
@@ -321,6 +322,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/users/{id}/disable", post(users::disable))
         .route("/api/v1/users/{id}/enable", post(users::enable))
         .route("/api/v1/users/{id}/break-glass", post(users::break_glass))
+        // Ingest tokens — `docs/packaging.md` §4.2. Tenant-scoped and admin, unlike the
+        // collector *enrolment* tokens above: an enrolment token brings up a collector that
+        // holds database credentials and may serve several tenants, so it is an
+        // organization's decision; an ingest token authorises writing into one tenant, so it
+        // is that tenant's own.
+        .route(
+            "/api/v1/ingest/tokens",
+            get(ingest::list).post(ingest::mint),
+        )
+        .route("/api/v1/ingest/tokens/{id}", delete(ingest::revoke))
         .route("/api/v1/tenants/roles", get(users::roles))
         // The customers this installation carries — `docs/tenant-lifecycle.md`. Until these
         // existed, `bootstrap_first_run` held the only `INSERT INTO tenant` outside tests and

@@ -286,11 +286,24 @@ whose buyers are defence ministries is a question that will be asked.
       `/api/v1/health` reports
 - [ ] A tarball installs the server on a host with no container runtime, and the smoke test
       that CI runs against compose passes against it
-- [~] An ingest token authorises writing into exactly one tenant, is shown once, is revocable
-      with immediate effect, and a request carrying no token or another tenant's is refused.
-      **The store half is built** — migration 0032, `uops_store_pg::ingest`, 9 tests, four
-      guards mutation-verified. The *request* half is not: no listener asks for a token yet, so
-      "a request carrying no token is refused" has nothing to refuse it
+- [x] An ingest token authorises writing into exactly one tenant, is shown once, is revocable
+      with immediate effect, and a request carrying no token or another tenant's is refused —
+      all five cases over a real socket in
+      `uops-collector-otlp/tests/live::a_listener_that_requires_a_token_refuses_everything_else`:
+      no header, an unknown token, another tenant's token, the right token, and the right token
+      after revocation
+- [x] A listener can be declared as requiring a token or not; an existing unauthenticated
+      listener keeps working after the migration that adds this — `require_token` defaults to
+      `false` for that reason, and a listener without it prints a warning naming the tenant and
+      the address, the `UOPS_INSECURE_COOKIES` posture. `deploy/otlp/listeners.yaml` sets it
+- [x] An ingest token does not let a sender assert which resource it is — it authorises writing
+      into a tenant and nothing else; identity resolution still decides the resource from what
+      the payload says about itself, and an unknown emitter still becomes a provisional resource
+      and a review item
+- [x] The Install screen issues both token kinds, shows each once, and says to convey it out of
+      band — `/ingest` mints, lists and revokes, shows the token once with the OTel exporter
+      block to paste on the host, and 14 web tests cover the rules. Enrolment tokens keep their
+      own screen under Collectors, which `docs/collectors.md` documents
       > **One thing the build added that §4.2 did not think of.** A retired tenant's tokens have
       > to stop working, and the cascade does not do it: since migration 0031 a tenant is
       > *retired* rather than deleted, so `ON DELETE CASCADE` almost never fires. The
@@ -304,12 +317,6 @@ whose buyers are defence ministries is a question that will be asked.
       > the first column anybody asks for, and it is a write on the hottest path this product
       > has to record a fact that is stale when read. The collector registry already reports
       > throughput, which answers the operator's actual question.
-- [ ] A listener can be declared as requiring a token or not; an existing unauthenticated
-      listener keeps working after the migration that adds this
-- [ ] An ingest token does not let a sender assert which resource it is — an unknown emitter
-      still becomes a provisional resource and a review item
-- [ ] The Install screen issues both token kinds, shows each once, and says to convey it out of
-      band
 - [ ] A custom OTel Collector distribution reports host metrics into a tenant using only an
       ingest token and the endpoint, with no database credentials anywhere on the host
 - [ ] A collector one minor version behind the server still works, asserted by the stack test

@@ -71,6 +71,10 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       // question rather than an inventory one — and the answer is often that a process
       // died rather than that a device did.
       { to: "/collectors", label: "Collectors" },
+      // How telemetry gets in from a host nobody here administers — `docs/packaging.md` §4.2.
+      // Beside Collectors because they are the two halves of ingress: a collector is a process
+      // an operator runs, an ingest token is what lets somebody else's machine reach it.
+      { to: "/ingest", label: "Ingest" },
       // Who changed the estate and who saw it — SPEC §M0.8. Under Operations rather than
       // behind a settings page: an audit log nobody can find is one nobody checks, and
       // this is the evidence a regulated buyer asks for. Admin-only, and the screen says

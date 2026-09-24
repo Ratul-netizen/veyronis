@@ -50,6 +50,20 @@ pub struct Listener {
     /// What `source_vendor` says for rows from here when the resource does not know.
     #[serde(default)]
     pub vendor: String,
+    /// Refuse a request that carries no valid ingest token for this tenant.
+    ///
+    /// `docs/packaging.md` §4.2. **Defaults to `false`, and that is not the recommendation.**
+    /// An installation whose OTLP port is on a trusted segment closed this hole with a
+    /// firewall years ago, and a release that broke every one of those collectors to close it
+    /// again would be a worse trade than leaving the choice to the operator. So an existing
+    /// listener file keeps working unchanged.
+    ///
+    /// What stops that being a silent default is the line `run::serve` prints at start-up for
+    /// every listener without it — the same posture as `UOPS_INSECURE_COOKIES`, which is
+    /// *"named to be visible in a diff, and announced to be visible in a log"*. The shipped
+    /// `deploy/otlp/listeners.yaml` sets it.
+    #[serde(default)]
+    pub require_token: bool,
 }
 
 /// The whole file.

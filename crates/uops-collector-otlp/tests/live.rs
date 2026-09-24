@@ -104,6 +104,7 @@ fn config(slug: &str, bind: SocketAddr) -> Config {
             tenant: slug.to_owned(),
             bind,
             vendor: String::new(),
+            require_token: false,
         }],
         postgres: PgConfig {
             url: database_url(),
@@ -179,6 +180,58 @@ async fn post(address: SocketAddr, path: &str, body: Vec<u8>) -> (u16, Vec<u8>) 
         .split_whitespace()
         .nth(1)
         .and_then(|s| s.parse().ok())
+        .expect("a status line");
+
+    (status, raw[split + 4..].to_vec())
+}
+
+/// The end of an HTTP head, as bytes.
+///
+/// A named constant rather than a literal, because a `b"..."` escape written by a generator is
+/// exactly the sort of thing that silently becomes two bytes instead of four — which is what it
+/// did, and the symptom was a parser that found no terminator in a perfectly good response.
+const CRLF_CRLF: &[u8] = &[13, 10, 13, 10];
+
+/// As [`post`], carrying an `Authorization: Bearer` header — what an `otlphttp` exporter sends
+/// when its `headers:` block has one.
+async fn post_with_token(
+    address: SocketAddr,
+    path: &str,
+    token: &str,
+    body: Vec<u8>,
+) -> (u16, Vec<u8>) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let mut socket = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect");
+    // Built from a vector rather than one format string with eight escapes in it: the
+    // escapes are the part that goes wrong, and a line here is a line on the wire.
+    let lines = [
+        format!("POST {path} HTTP/1.1"),
+        "Host: localhost".to_owned(),
+        "Content-Type: application/x-protobuf".to_owned(),
+        format!("Authorization: Bearer {token}"),
+        format!("Content-Length: {}", body.len()),
+        "Connection: close".to_owned(),
+    ];
+    let mut head = lines.join("\r\n");
+    head.push_str("\r\n\r\n");
+    socket.write_all(head.as_bytes()).await.expect("head");
+    socket.write_all(&body).await.expect("body");
+    socket.flush().await.expect("flush");
+
+    let mut raw = Vec::new();
+    socket.read_to_end(&mut raw).await.expect("read");
+
+    let split = raw
+        .windows(4)
+        .position(|w| w == CRLF_CRLF)
+        .expect("a header terminator");
+    let status: u16 = String::from_utf8_lossy(&raw[..split])
+        .split_whitespace()
+        .nth(1)
+        .and_then(|v| v.parse().ok())
         .expect("a status line");
 
     (status, raw[split + 4..].to_vec())
@@ -751,6 +804,7 @@ async fn two_tenants_on_two_ports_do_not_mix() {
         tenant: second_slug,
         bind: second_addr,
         vendor: String::new(),
+            require_token: false,
     });
     let bound = run::resolve_tenants(&store, &config)
         .await
@@ -999,4 +1053,107 @@ async fn wait_for_rows(
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     last.expect("at least one attempt")
+}
+
+// ---------------------------------------------------------------------------
+// Ingest tokens — `docs/packaging.md` §4.2
+// ---------------------------------------------------------------------------
+
+/// The refusal, end to end, over a real socket.
+///
+/// The store half is tested in `uops-store-pg/tests/ingest.rs`. What that cannot show is whether
+/// the *listener* asks — and a token nothing checks is the same defect as a component nothing
+/// calls, which is the shape this repository keeps producing. So this starts a listener with
+/// `require_token` set and posts at it five ways.
+///
+/// One sentence for every failure is the property being protected, so the assertions are all on
+/// the same status: a response that distinguished *expired* from *never existed* would confirm
+/// that a token had once been real, and one that distinguished *another tenant's* would say this
+/// endpoint serves a tenant somebody else holds a credential for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_listener_that_requires_a_token_refuses_everything_else() {
+    let store = infra_or_skip!(
+        PgStore::connect(&PgConfig {
+            url: database_url(),
+            ..PgConfig::default()
+        })
+        .await
+        .map_err(|e| e.to_string())
+    );
+    let telemetry = ChStore::new(ChClient::new(uops_store_ch::ChConfig::from_env()));
+    infra_or_skip!(telemetry.health().await.map_err(|e| e.to_string()));
+
+    let (tenant_id, slug) = tenant(&store, "tok").await;
+
+    // A listener that requires a token, unlike `start`'s.
+    let address = free_port();
+    let mut config = config(&slug, address);
+    config.listeners[0].require_token = true;
+    let bound = run::resolve_tenants(&store, &config)
+        .await
+        .expect("resolve the slug");
+
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let serving = tokio::spawn({
+        let store = store.clone();
+        let telemetry = telemetry.clone();
+        async move {
+            run::serve(store, telemetry, &config, bound, async move {
+                let _ = stop_rx.await;
+            })
+            .await
+        }
+    });
+    // The same settling `start` relies on: the socket is bound inside `serve`.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let body = ExportLogsServiceRequest::default().encode_to_vec();
+    let scope = uops_core::TenantScope::system(tenant_id);
+
+    // 1. No header at all.
+    let (status, _) = post(address, "/v1/logs", body.clone()).await;
+    assert_eq!(status, 401, "a request with no token was accepted");
+
+    // 2. A token nobody minted.
+    let (status, _) = post_with_token(address, "/v1/logs", "not-a-token", body.clone()).await;
+    assert_eq!(status, 401);
+
+    // 3. Another tenant's token. Refused rather than quietly written into *its* tenant, which
+    //    would make this listener's binding a suggestion.
+    let (other_id, _) = tenant(&store, "oth").await;
+    let theirs = store
+        .issue_ingest_token(
+            &uops_core::TenantScope::system(other_id),
+            "theirs",
+            None,
+            None,
+        )
+        .await
+        .expect("mint");
+    let (status, _) = post_with_token(address, "/v1/logs", &theirs.token, body.clone()).await;
+    assert_eq!(status, 401, "another tenant's token was accepted here");
+
+    // 4. This tenant's own token — the one that must work.
+    let mine = store
+        .issue_ingest_token(&scope, "mine", None, None)
+        .await
+        .expect("mint");
+    let (status, _) = post_with_token(address, "/v1/logs", &mine.token, body.clone()).await;
+    assert_eq!(status, 200, "a valid token was refused");
+
+    // 5. Revocation takes effect on the next export, because the listener holds no cache.
+    assert!(
+        store
+            .revoke_ingest_token(&scope, mine.id)
+            .await
+            .expect("revoke")
+    );
+    let (status, _) = post_with_token(address, "/v1/logs", &mine.token, body).await;
+    assert_eq!(
+        status, 401,
+        "a revoked token still worked, so \"revocation is immediate\" is not true of the listener"
+    );
+
+    let _ = stop_tx.send(());
+    let _ = serving.await;
 }

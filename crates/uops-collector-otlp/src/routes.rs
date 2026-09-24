@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use opentelemetry_proto::tonic::collector::logs::v1::{
     ExportLogsPartialSuccess, ExportLogsServiceRequest, ExportLogsServiceResponse,
@@ -83,8 +83,87 @@ fn unavailable() -> Response {
         .into_response()
 }
 
+/// Whether this request may write into this listener's tenant.
+///
+/// `docs/packaging.md` §4.2. Returns the refusal to send back, or `None` to carry on.
+///
+/// # One sentence for every failure
+///
+/// A missing header, a malformed one, a wrong token, a revoked one, an expired one, and a
+/// token for a *different* tenant all get the same 401. Telling an exporter which would
+/// confirm that a token was once real, or that it is real but for somewhere else — and the
+/// second is worse, because it says this endpoint serves a tenant somebody else has a
+/// credential for. The server log gets the distinction; the wire does not.
+///
+/// # Why the token must match *this* listener's tenant
+///
+/// A token authorises writing into one tenant, and a listener is already bound to one. §4.2
+/// describes an eventual single endpoint where the token picks the tenant; that is a larger
+/// change to the listener model and this is the step before it. Until then, presenting tenant
+/// A's token to tenant B's port is refused rather than quietly writing into A — which would
+/// make the binding a suggestion.
+async fn may_write(listener: &Listener, headers: &HeaderMap) -> Option<Response> {
+    if !listener.require_token {
+        return None;
+    }
+
+    let refused = || -> Option<Response> {
+        Some(
+            (
+                StatusCode::UNAUTHORIZED,
+                "this endpoint requires an ingest token for the tenant it serves",
+            )
+                .into_response(),
+        )
+    };
+
+    let Some(presented) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        eprintln!("uops-collector-otlp: a request arrived with no bearer token");
+        return refused();
+    };
+
+    match listener.store.tenant_for_ingest_token(presented).await {
+        Ok(Some(tenant)) if tenant == listener.tenant_id => None,
+        Ok(Some(_)) => {
+            eprintln!(
+                "uops-collector-otlp: a token for another tenant was presented to the listener \
+                 for {}",
+                listener.tenant_id
+            );
+            refused()
+        }
+        Ok(None) => {
+            eprintln!("uops-collector-otlp: an unknown, revoked or expired token was presented");
+            refused()
+        }
+        // The store is unreachable, which is not the sender's fault and must not read as one:
+        // a 401 would have an exporter drop the batch and, worse, have an operator revoking
+        // tokens that were never the problem. 503 is what the exporter retries.
+        Err(e) => {
+            eprintln!("uops-collector-otlp: cannot check an ingest token: {e}");
+            Some(unavailable())
+        }
+    }
+}
+
 /// `POST /v1/logs`
-pub async fn logs(State(listener): State<Arc<Listener>>, body: Bytes) -> Response {
+pub async fn logs(
+    State(listener): State<Arc<Listener>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    // Before decoding: a body from an unauthorised sender is not worth parsing, and
+    // parsing it first would make the endpoint a decoder for anyone who can reach it.
+    if let Some(refusal) = may_write(&listener, &headers).await {
+        return refusal;
+    }
+
     let request = match ExportLogsServiceRequest::decode(body) {
         Ok(r) => r,
         Err(e) => return undecodable("logs", &e),
@@ -102,7 +181,17 @@ pub async fn logs(State(listener): State<Arc<Listener>>, body: Bytes) -> Respons
 }
 
 /// `POST /v1/metrics`
-pub async fn metrics(State(listener): State<Arc<Listener>>, body: Bytes) -> Response {
+pub async fn metrics(
+    State(listener): State<Arc<Listener>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    // Before decoding: a body from an unauthorised sender is not worth parsing, and
+    // parsing it first would make the endpoint a decoder for anyone who can reach it.
+    if let Some(refusal) = may_write(&listener, &headers).await {
+        return refusal;
+    }
+
     let request = match ExportMetricsServiceRequest::decode(body) {
         Ok(r) => r,
         Err(e) => return undecodable("metrics", &e),
@@ -131,7 +220,17 @@ pub async fn metrics(State(listener): State<Arc<Listener>>, body: Bytes) -> Resp
 /// were rejected would be right to stop sending them, and a `partial_success` that
 /// outlives the thing it was reporting is worse than none at all — it is a receiver
 /// lying about itself in the other direction.
-pub async fn traces(State(listener): State<Arc<Listener>>, body: Bytes) -> Response {
+pub async fn traces(
+    State(listener): State<Arc<Listener>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    // Before decoding: a body from an unauthorised sender is not worth parsing, and
+    // parsing it first would make the endpoint a decoder for anyone who can reach it.
+    if let Some(refusal) = may_write(&listener, &headers).await {
+        return refusal;
+    }
+
     let request = match ExportTraceServiceRequest::decode(body) {
         Ok(r) => r,
         Err(e) => return undecodable("trace", &e),

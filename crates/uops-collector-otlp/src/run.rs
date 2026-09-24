@@ -116,6 +116,20 @@ impl Metrics {
 pub struct Listener {
     pub tenant_id: TenantId,
     pub vendor: String,
+    /// Refuse a request with no valid ingest token for this tenant — `docs/packaging.md` §4.2.
+    pub require_token: bool,
+    /// Asked once per request when `require_token` is set.
+    ///
+    /// **No cache, deliberately.** It is one probe on a unique index, and the OpenTelemetry
+    /// Collector batches — which is why the body limit above it is "generous rather than
+    /// tight" — so the request rate here is a handful per emitter per interval rather than per
+    /// span. Caching would buy little and would cost the thing §4.2 promises: *revocation is
+    /// immediate*. A cache with a sixty-second TTL makes that sentence false for a minute, and
+    /// a revoked token is revoked because somebody wants it to stop now.
+    ///
+    /// If it ever does need one, the shape is a short positive-only TTL and the sentence in
+    /// §4.2 has to change with it.
+    pub store: PgStore,
     pipeline: Arc<Pipeline<PgStore, PgEnricher>>,
     logs: mpsc::Sender<LogRow>,
     metrics: mpsc::Sender<MetricRow>,
@@ -384,7 +398,7 @@ pub async fn serve_with_metrics(
 ) -> Result<(), String> {
     let pipeline = Arc::new(Pipeline::new(
         Resolver::new(store.clone()),
-        Enrichment::new(PgEnricher::new(store)),
+        Enrichment::new(PgEnricher::new(store.clone())),
     ));
 
     // Separate subdirectories. A segment does not record its row type, so one directory
@@ -469,6 +483,8 @@ pub async fn serve_with_metrics(
         let listener = Arc::new(Listener {
             tenant_id: bound.tenant_id,
             vendor: bound.listener.vendor.clone(),
+            require_token: bound.listener.require_token,
+            store: store.clone(),
             pipeline: Arc::clone(&pipeline),
             logs: logs_tx.clone(),
             metrics: metrics_tx.clone(),
@@ -489,9 +505,24 @@ pub async fn serve_with_metrics(
             .await
             .map_err(|e| format!("cannot bind {}: {e}", bound.listener.bind))?;
         println!(
-            "uops-collector-otlp: {} on {} (/v1/logs, /v1/metrics, /v1/traces)",
-            bound.listener.tenant, bound.listener.bind
+            "uops-collector-otlp: {} on {} (/v1/logs, /v1/metrics, /v1/traces){}",
+            bound.listener.tenant,
+            bound.listener.bind,
+            if bound.listener.require_token {
+                ", ingest token required"
+            } else {
+                ""
+            }
         );
+        if !bound.listener.require_token {
+            // Announced rather than left to a reader of the YAML. The same posture as
+            // `UOPS_INSECURE_COOKIES`: a deployment that has this open has it open for a
+            // reason somebody can now find, and an operator who did not mean to is told.
+            eprintln!(
+                "warning: {} on {} accepts telemetry from anything that can reach it.                  Whatever reaches this port writes into that tenant, as any resource it                  names. Set `require_token: true` and mint one in the interface —                  docs/packaging.md §4.2",
+                bound.listener.tenant, bound.listener.bind
+            );
+        }
 
         let mut stop = stop_tx.subscribe();
         servers.push(tokio::spawn(async move {

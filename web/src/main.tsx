@@ -45,6 +45,7 @@ import { SubnetsPage } from "./subnetspage";
 import { TracePage } from "./tracepage";
 import { IncidentsPage } from "./incidentspage";
 import { OverviewPage } from "./overview";
+import { IngestPage } from "./ingestpage";
 import { LoginPage } from "./pages";
 import { TenantsPage } from "./tenantspage";
 import { UsersPage } from "./userspage";
@@ -267,6 +268,12 @@ const usersRoute = createRoute({
   component: UsersPage,
 });
 
+const ingestRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/ingest",
+  component: IngestPage,
+});
+
 const tenantsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/tenants",
@@ -354,6 +361,7 @@ const routeTree = rootRoute.addChildren([
     auditRoute,
     usersRoute,
     tenantsRoute,
+    ingestRoute,
     accountRoute,
     incidentsRoute,
     exploreRoute,

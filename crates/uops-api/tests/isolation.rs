@@ -558,6 +558,30 @@ const CASES: &[RouteCase] = &[
         expectation: Expectation::Unscoped,
         body: None,
     },
+    // Ingest tokens — `docs/packaging.md` §4.2. Scoped, and they have to be: a token
+    // authorises writing into one tenant, so an admin of another tenant must not be able to
+    // mint one here, list what was handed out, or revoke somebody else's emitters.
+    RouteCase {
+        path: "/api/v1/ingest/tokens",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/ingest/tokens",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Scoped,
+        body: Some(r#"{"label":"nobody"}"#),
+    },
+    RouteCase {
+        path: "/api/v1/ingest/tokens/{id}",
+        probe: Some("/api/v1/ingest/tokens/018f0000-0000-7000-8000-0000000000da"),
+        method: "DELETE",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/tenants/roles",
         probe: None,

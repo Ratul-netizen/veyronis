@@ -5,11 +5,16 @@
 # and nothing that says which customer it belongs to. Anything that did would be a field
 # the sender controls.
 #
-# The alternative is stronger here than it was for syslog and is still not taken: OTLP
-# exporters send arbitrary headers, so a per-tenant token would be idiomatic and would let
-# one endpoint serve every tenant. It is deferred because it is a new credential type --
-# something to mint, show once, rotate, revoke and audit -- and uops-secrets already owns
-# those decisions.
+# The alternative was deferred for a long time and is now taken, though not yet in the form
+# this paragraph imagined. OTLP exporters send arbitrary headers, so a per-tenant token is
+# idiomatic; it was deferred because it is a new credential type, something to mint, show once,
+# rotate, revoke and audit. Migration 0032 and `uops_store_pg::ingest` are that type, and
+# `require_token` below turns it on.
+#
+# What has *not* changed is one listener per tenant. A token authorises writing into one tenant
+# and the listener is still bound to one, so presenting tenant A's token here is refused rather
+# than writing into A. The single endpoint where the token picks the tenant is a larger change
+# to this file's model -- docs/packaging.md §4.2.
 #
 # An unknown emitter inside a listener's tenant is not rejected. The resolver creates a
 # provisional resource and a review item, so an application that starts reporting before
@@ -25,3 +30,15 @@ listeners:
     # What source_vendor says when the resource itself does not know. A fallback, never an
     # override.
     vendor: ""
+    # Refuse anything that does not present a valid ingest token for this tenant --
+    # docs/packaging.md §4.2. The comment above about a per-tenant token being "deferred" is
+    # what this replaces.
+    #
+    # Set here, on the shipped file, and defaulting to false in the code: an installation whose
+    # OTLP port is on a trusted segment closed this hole with a firewall long ago, and a release
+    # that broke every one of those collectors to close it again would be the worse trade. A
+    # listener without it starts with a warning naming the tenant and the address.
+    #
+    # Mint one in the interface under Ingest. The token goes in the exporter's
+    # `Authorization: Bearer` header, which every OTel exporter already sends.
+    require_token: true
