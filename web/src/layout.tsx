@@ -83,6 +83,11 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       // had exactly one user forever. Admin-only, and the screen says so — see Audit above
       // for why that is not the sidebar's job.
       { to: "/users", label: "People" },
+      // The customers this installation carries. Beside People because they are the two
+      // halves of one question — who may see what — and because a role is granted *on* a
+      // tenant, so a screen for one without the other is half an answer. Until this existed
+      // an installation had exactly one tenant, permanently.
+      { to: "/tenants", label: "Customers" },
       // Under Operations, and next to the things it is used during. A runbook is not part
       // of the inventory — it is what somebody does to the inventory at 3 a.m.
       { to: "/runbooks", label: "Runbooks" },

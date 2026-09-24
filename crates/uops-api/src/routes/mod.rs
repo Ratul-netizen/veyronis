@@ -26,6 +26,7 @@ pub mod servicemap;
 pub mod sites;
 pub mod slos;
 pub mod subnets;
+pub mod tenants;
 pub mod sso;
 pub mod runbooks;
 pub mod topology;
@@ -321,6 +322,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/users/{id}/enable", post(users::enable))
         .route("/api/v1/users/{id}/break-glass", post(users::break_glass))
         .route("/api/v1/tenants/roles", get(users::roles))
+        // The customers this installation carries — `docs/tenant-lifecycle.md`. Until these
+        // existed, `bootstrap_first_run` held the only `INSERT INTO tenant` outside tests and
+        // runs once, so an installation had exactly one tenant permanently — and the boundary
+        // `TenantScope` enforces had only one side in production.
+        //
+        // Organization-level, with no tenant header: creating one has no tenant for the
+        // request to be about. Registered after `/tenants/roles` because axum matches the
+        // literal segment before `{id}`, and `roles` would otherwise be read as an id.
+        .route("/api/v1/tenants", get(tenants::list).post(tenants::create))
+        .route("/api/v1/tenants/{id}", patch(tenants::rename))
+        .route("/api/v1/tenants/{id}/retire", post(tenants::retire))
+        .route("/api/v1/tenants/{id}/restore", post(tenants::restore))
         .route(
             "/api/v1/users/{id}/role",
             put(users::grant).delete(users::revoke),

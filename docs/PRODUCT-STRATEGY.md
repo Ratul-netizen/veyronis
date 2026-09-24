@@ -118,7 +118,7 @@ sequencing of *buyers* matters more than the sequencing of features.
 | Buyer | Problem | Veyronis fit today |
 |---|---|---|
 | **Network operations in regulated/disconnected estates** | Multi-vendor estate, no SaaS permitted, must prove what happened | **Strong.** Nearly everything they need exists; NCM is the notable hole |
-| **MSP / shared-services** | Many estates, one console, per-client isolation and proof | **Good substrate, no packaging** — isolation exists, branded portal does not |
+| **MSP / shared-services** | Many estates, one console, per-client isolation and proof | **Good substrate, no packaging** — isolation exists and since 2026-09-24 a second estate can actually be created (`docs/tenant-lifecycle.md`); branded portal and cross-client reporting do not exist |
 | **Mid-market general IT** | One tool for everything, cheap, easy | **Weak.** This is Motadata/ManageEngine's home ground; breadth is the entry ticket |
 | **Cloud-native platform teams** | Kubernetes, ephemeral workloads, SLOs | **Weak, and a different product.** Datadog/Grafana own it |
 

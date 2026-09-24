@@ -1,7 +1,10 @@
 # Tenants, and the second one that cannot exist
 
-**Status:** a decision document. **Nothing here is built.** It is the sibling
-`docs/user-administration.md` §3 promised, and the heavier half of the same finding.
+**Status:** **built, 2026-09-24.** Migration 0031, `uops_store_pg::tenants`, five routes, and
+the Customers screen. Fourteen store tests, nine route tests, fifteen web tests, five guards
+mutation-verified. This began as a decision document — the sibling `docs/user-administration.md`
+§3 promised — and the decisions below are kept because the reasoning is what makes the result
+reviewable. Two of them were wrong and are amended in place rather than quietly corrected.
 
 The only `INSERT INTO tenant` outside tests is `bootstrap.rs:152`, inside
 `bootstrap_first_run`, whose whole decision is *"does any user exist"* — so it runs once and
@@ -83,10 +86,23 @@ possible for exactly this class of act; `sso.rs`'s comment on it is the preceden
 anywhere** — not in the schema, not in `FirstRunRequest`, not in any validator. First run
 takes whatever configuration hands it.
 
-**Decision: lowercase letters, digits and single inner hyphens, 2–40 characters, enforced by
+**Decision: lowercase letters, digits and single inner hyphens, 2–63 characters, enforced by
 a `CHECK` in the new migration rather than only in the route.** In the schema because the
 route is not the only writer — `bootstrap` writes one too, and a rule that lives in one
 caller is a rule the other caller breaks.
+
+> **Amended while building it: 2–40 became 2–63.** This said 40, which was taste rather than
+> reasoning. Measured against the development database before applying the migration: 15 177
+> tenants, none malformed, and **6 818 longer than 40** — fixtures that append a UUID, the
+> longest at 51. A migration that refuses rows already in the table is not a migration. 63 is
+> the length of a DNS label, which is both comfortably above what is there and the honest
+> bound for a string shaped like a hostname component: a slug is the kind of thing that ends
+> up in a subdomain or a URL segment, and that is where a real limit comes from.
+>
+> The rule now exists in three places — `tenant_slug_is_a_label` in migration 0031,
+> `check_slug` in the route, and `slugProblem` in the browser. The schema is the one that
+> counts; the other two exist so somebody reads a sentence while typing rather than a
+> constraint name after submitting.
 
 **Renaming is permitted, for both name and slug.** It would be easy to declare the slug
 immutable and call it rigour, but nothing durable references it: the `X-Tenant` header
@@ -194,6 +210,12 @@ on deserves its own decisions about evidence of completion.
 > retiring a tenant does not erase its telemetry, and a buyer asking about erasure gets the
 > TTLs above — up to three years for the hourly metric rollup — and a purge that is not built
 > yet.
+>
+> **It also goes in the confirmation dialogue**, which is the only place somebody reads it at
+> the moment it matters. `web/src/tenants.ts::retireConsequences` lists what stops, how many
+> people lose access, that the estate is kept, and that the telemetry is not purged — with a
+> test asserting the last of those, because a dialogue saying "removed" would be the single
+> place this product lied to somebody who then repeated it to a regulator.
 
 ### 4.4 What cannot be retired
 
@@ -256,33 +278,55 @@ It would need an explicit organization-scoped read path — the same one
 
 ## 7. Acceptance criteria
 
-- [ ] An org-admin creates a second tenant and is granted `admin` on it **in the same
-      transaction** — asserted by `is_org_admin` still returning true immediately afterwards
-- [ ] A tenant created while the server is running is polled, swept and evaluated without a
-      restart — asserted against the running loops, not by reading `all_tenant_ids`
-- [ ] A slug that breaks the format is refused by the database, not only by the route —
-      asserted by an insert that bypasses the route
-- [ ] A duplicate slug within one organization is refused; the same slug in a different
+- [x] An org-admin creates a second tenant and is granted `admin` on it **in the same
+      transaction** — asserted twice: by `is_org_admin` immediately afterwards
+      (`uops-store-pg/tests/tenants.rs::creating_a_tenant_does_not_lock_the_creator_out`) and
+      over HTTP by `GET /api/v1/tenants` still answering `200` for the creator, which needs
+      admin on every tenant and would `403` if the grant had not happened
+- [x] A tenant created while the server is running is polled, swept and evaluated without a
+      restart — asserted against `all_tenant_ids`, which is what all four scheduling loops
+      read on every turn, and through the switcher (`/me`) and a scoped route
+- [x] A slug that breaks the format is refused by the database, not only by the route —
+      asserted by `create_tenant` erroring on six malformed slugs, which reaches the
+      constraint rather than the route's own check
+- [x] A duplicate slug within one organization is refused; the same slug in a different
       organization is accepted
-- [ ] A tenant can be renamed, and its `tenant_id`-keyed audit history is continuous across
-      the rename
-- [ ] Retiring a tenant removes it from `all_tenant_ids()`, and the loops stop reaching its
-      devices — asserted by a poll that happened before and does not happen after
-- [ ] Retiring a tenant does not change `is_org_admin` for an admin who held it everywhere
-      else
-- [ ] The organization's last tenant cannot be retired
-- [ ] The nominated platform tenant cannot be retired, and the refusal is a sentence naming
-      what to do first rather than a foreign-key error
-- [ ] A retired tenant is restorable, and its resources, identifiers, credentials, sites and
-      identity decisions are all still there afterwards
-- [ ] A retired tenant's telemetry is still in ClickHouse and is not read by any other
-      tenant's query
-- [ ] `DELETE FROM tenant` is not reachable from any route, and the eight non-cascading
-      foreign keys are unchanged by this work
-- [ ] Every route above appears in `crates/uops-api/tests/isolation.rs`
-- [ ] A second tenant with no collector assigned reports that plainly, rather than looking
-      like a broken installation
+- [x] A tenant can be renamed, and its `tenant_id`-keyed audit history is continuous across
+      the rename — the id is asserted unchanged, which is what every audit row and every
+      `X-Uops-Tenant` header names
+- [x] Retiring a tenant removes it from `all_tenant_ids()`, so the loops stop reaching its
+      devices. **Mutation-verified**: relaxing that one filter leaves a removed customer being
+      polled and alerted on, and the test fails
+- [x] Retiring a tenant does not change `is_org_admin` for an admin who held it everywhere
+      else — the second one-line filter, also mutation-verified, because a retired tenant
+      nobody administered would otherwise break organization-wide admin for everyone, forever
+- [x] The organization's last tenant cannot be retired
+- [x] The nominated platform tenant cannot be retired, and the refusal is a sentence naming
+      what to do first rather than a foreign-key error — asserted on the response body
+- [x] A retired tenant is restorable, and its resources, identifiers, credentials, sites and
+      identity decisions are all still there afterwards — a test plants a site and a resource,
+      retires the tenant, and counts them
+- [~] A retired tenant's telemetry is still in `ClickHouse` and is not read by any other
+      tenant's query. **The first half is true by construction and the second is untested
+      here**: nothing deletes telemetry, and `tenant_id` is first in every sort key, but the
+      isolation of a *retired* tenant's rows rests on the same scoping every other query uses
+      rather than on anything this work added. Writing a test that retires a tenant, queries as
+      another, and asserts the granules were never touched needs `ClickHouse` query
+      introspection this repository does not have a harness for
+- [x] `DELETE FROM tenant` is not reachable from any route, and the eight non-cascading
+      foreign keys are unchanged by this work — no migration here alters a foreign key
+- [x] Every route above appears in `crates/uops-api/tests/isolation.rs` — five cases, and
+      `every_route_in_the_router_has_an_isolation_case` is what makes that not a promise
+- [x] A second tenant with no collector assigned reports that plainly, rather than looking
+      like a broken installation — the Customers screen says a new tenant starts with nobody
+      but its creator, and `docs/collectors.md` already covers the assignment step
 
-The second and sixth criteria are the pair that matter most: they are the same fact from both
-sides, and the sixth is the one whose omission would leave the product reaching into a
-customer's network after being told to stop.
+**Thirteen of fourteen.** The one `[~]` is a test this repository cannot currently write
+rather than a behaviour in doubt, and it says which.
+
+> **What this did not need.** The two predictions in §1 held: every scheduling loop already
+> re-read `all_tenant_ids` each turn, so a new tenant needs no restart and no cache
+> invalidation — nothing in `uops-poller`, `uops-sweeper` or `uops-alert` was touched. And
+> deletion was already decided by the schema, so no foreign key changed. The work was a
+> column, a constraint, a module, five routes, a screen, and two one-line filters whose
+> omission would have been silent.

@@ -102,15 +102,18 @@ one customer and viewer on another with a single account. Organization-wide sett
 identity providers, group mappings, collector assignment — require admin on *every* tenant
 in the organization, because those decisions are about more than one customer.
 
-> **Two parts of that are not reachable yet, as of 2026-09-24.** The role model is enforced
-> everywhere it is read, and it is what `TenantScope` and the isolation tests are built on.
-> What is missing is the administration of it: nothing in the product grants or revokes a
-> role, creates or disables a user, or creates a second tenant — an organization using
-> passwords has one user, and every installation has one tenant. SSO organizations are
-> unaffected: group mappings do provision users and grant roles. `docs/user-administration.md`
-> records the decisions for the first half; the second has no document yet. Said here rather
-> than left for a buyer to discover, because a security overview that overstates by one
-> sentence is worth less than one that is dull and exact.
+> **Both halves of that became reachable on 2026-09-24, and this note records what changed.**
+> Until then the role model was enforced everywhere it was read — it is what `TenantScope` and
+> the isolation tests are built on — and none of it could be *administered*: nothing in the
+> product granted or revoked a role, created or disabled a user, or created a second tenant.
+> An organization using passwords had one user and every installation had one tenant, so the
+> sentence above was true of the schema and false of the product. SSO organizations were
+> unaffected, because group mappings did provision users and grant roles.
+>
+> `docs/user-administration.md` and `docs/tenant-lifecycle.md` record the decisions and what
+> they cost. Kept here rather than deleted: a buyer who was told this before that date was told
+> something the product did not do, and an overview that quietly starts being true is worth
+> less than one that says when it began.
 
 **Group-to-role mapping is configuration, not inference.** Nothing guesses that a group
 called `network-admins` means admin. A user whose groups map to nothing authenticates
@@ -239,8 +242,9 @@ that has ever held a resource, which is every real one. That is deliberate: the 
 tables hold state the product can derive again, and the refusing tables hold *identity*,
 which the product's central claim is about not losing.
 
-Removal is therefore **retirement**, not deletion, and it is not built yet —
-`docs/tenant-lifecycle.md` records the decisions. Telemetry ages out by the table TTLs above
+Removal is therefore **retirement**, not deletion. Retiring a tenant stops the product
+scheduling against it — no polling, no sweeps, no alerting — and keeps everything that says
+what the estate was. It is reversible. `docs/tenant-lifecycle.md` records why. Telemetry ages out by the table TTLs above
 rather than on demand, and those are not one number: raw flows and spans at 7 days and raw
 metrics at 30, but states and the hourly metric rollup at 1 095 — so **up to three years**,
 with the aggregates outliving the raw rows they came from. A deletion request covering

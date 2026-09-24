@@ -46,6 +46,7 @@ import { TracePage } from "./tracepage";
 import { IncidentsPage } from "./incidentspage";
 import { OverviewPage } from "./overview";
 import { LoginPage } from "./pages";
+import { TenantsPage } from "./tenantspage";
 import { UsersPage } from "./userspage";
 import { AlertsPage, ChannelsPage, RulesPage } from "./alerts";
 import { DashboardPage, DashboardsPage } from "./dashboard";
@@ -266,6 +267,12 @@ const usersRoute = createRoute({
   component: UsersPage,
 });
 
+const tenantsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/tenants",
+  component: TenantsPage,
+});
+
 const accountRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/account",
@@ -346,6 +353,7 @@ const routeTree = rootRoute.addChildren([
     slosRoute,
     auditRoute,
     usersRoute,
+    tenantsRoute,
     accountRoute,
     incidentsRoute,
     exploreRoute,

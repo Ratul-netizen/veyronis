@@ -517,6 +517,47 @@ const CASES: &[RouteCase] = &[
     },
     // These three are one tenant's membership list, so a caller holding a session on another
     // tenant must get a 404 — the same contract as every other scoped route.
+    // The customers this installation carries — `docs/tenant-lifecycle.md`. All `Unscoped`,
+    // and for the sharpest version of the reason the SSO configuration routes are: creating a
+    // tenant has no tenant for the request to be *about*, and the others act on one named in
+    // the path rather than in the header. The cross-*organization* property — an admin of one
+    // organization cannot retire another's tenant — is asserted in
+    // `crates/uops-store-pg/tests/tenants.rs`, which drives two organizations directly.
+    RouteCase {
+        path: "/api/v1/tenants",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/tenants",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"name":"Nobody","slug":"nobody-at-all"}"#),
+    },
+    RouteCase {
+        path: "/api/v1/tenants/{id}",
+        probe: Some("/api/v1/tenants/018f0000-0000-7000-8000-0000000000ca"),
+        method: "PATCH",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"name":"Renamed","slug":"renamed-by-nobody"}"#),
+    },
+    RouteCase {
+        path: "/api/v1/tenants/{id}/retire",
+        probe: Some("/api/v1/tenants/018f0000-0000-7000-8000-0000000000ca/retire"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/tenants/{id}/restore",
+        probe: Some("/api/v1/tenants/018f0000-0000-7000-8000-0000000000ca/restore"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/tenants/roles",
         probe: None,

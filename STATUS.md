@@ -85,7 +85,7 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > reachable. `TenantScope` is enforced by the type system and asserted across every route in
 > `isolation.rs`; production can currently only ever have one side of that boundary.
 >
-> **User administration is built; tenant creation is decided and not built.**
+> **Both are built, as of 2026-09-24.**
 > `docs/user-administration.md` covers users, roles and the account lifecycle, including why
 > an admin never sets another person's password and why the last admin cannot be removed —
 > and as of 2026-09-24 the store and the eleven routes exist, with a test that invites
@@ -96,19 +96,28 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > covered by M12 §2.2 and not asserted together with this) and one is `[ ]`, amended as the
 > wrong criterion rather than met: `unreached.py` asks whether a *name* has a production
 > caller, and the honest question is whether a *capability* does. §7 of that document says why.
-> `docs/tenant-lifecycle.md` covers creating and retiring a tenant, and found the thing that
-> would have made the first successful use of the feature a lockout: creating a tenant raises
-> the denominator in `is_org_admin`, so the admin who creates one loses organization-wide
-> admin the instant it commits unless the same transaction grants them a role on it — and
-> tenant creation requires that admin, so nothing inside the product could repair it.
+> `docs/tenant-lifecycle.md` covers creating and retiring a tenant — migration 0031,
+> `uops_store_pg::tenants`, five routes and the Customers screen, with **thirteen of fourteen
+> criteria met**. It found the thing that would have made the first successful use of the
+> feature a lockout: creating a tenant raises the denominator in `is_org_admin`, so the admin
+> who creates one loses organization-wide admin the instant it commits unless the same
+> transaction grants them a role on it — and tenant creation requires that admin, so nothing
+> inside the product could have repaired it.
 >
-> It also found that the runtime was already built for this — every scheduling loop re-reads
-> `all_tenant_ids()` each turn, so a new tenant needs no restart — and that deletion was
-> already decided by the schema: of the twenty-seven foreign keys referencing `tenant`,
-> nineteen cascade and eight refuse, and the eight are the identity tables. `DELETE FROM
-> tenant` already fails on any tenant that ever had a resource. Removal is retirement.
+> Two predictions in it held, and both saved work. The runtime was already built for this:
+> every scheduling loop re-reads `all_tenant_ids()` each turn, so a new tenant needs no
+> restart and nothing in `uops-poller`, `uops-sweeper` or `uops-alert` was touched. And
+> deletion was already decided by the schema — of the twenty-seven foreign keys referencing
+> `tenant`, nineteen cascade and eight refuse, and the eight are the identity tables, so
+> `DELETE FROM tenant` already fails on any tenant that ever had a resource. Removal is
+> retirement, and no foreign key changed.
 >
-> **This is an open gap against M12, which is otherwise complete.**
+> The two one-line filters are the whole risk of it, and both are mutation-verified:
+> `all_tenant_ids` must exclude retired tenants or the loops keep reaching a removed
+> customer's devices, and `is_org_admin` must too or a retired tenant nobody administers
+> breaks organization-wide admin for everyone, forever.
+>
+> **M12 is now complete with no open gap.**
 
 **One criterion across all thirteen is not met**, and it is not hidden: M12's cross-tenant
 isolation, which reopens with every surface a later milestone adds and is currently
@@ -121,11 +130,12 @@ closed on 2026-09-24; M12's two-poller sample count was measured and closed earl
 recorded above. They were not failed criteria — they are things every criterion about them
 would have passed, which is the point.
 
-One is closed: **user administration** has a store layer, eleven routes, three screens and
-52 tests, and an installation can now add a second person, suspend a departing one, and let
-anybody change their own password. The other is open: **there is still no way to create a second tenant**, so the MSP
-shape `docs/security-overview.md` describes remains unreachable, and `docs/tenant-lifecycle.md`
-is the plan for it.
+Both are now closed. **User administration** has a store layer, eleven routes, three screens
+and 52 tests: an installation can add a second person, suspend a departing one, and let anybody
+change their own password. **Tenant creation** has migration 0031, five routes, a screen and 38
+tests — so the MSP shape `docs/security-overview.md` describes, *"admin on one customer and
+viewer on another with a single account"*, is reachable for the first time. That sentence was
+true of the schema and false of the product for thirteen milestones.
 
 M12 is the one that changed what the product *is* rather than what it does: it now
 survives losing a process, authenticates the way an organisation already does, knows what
