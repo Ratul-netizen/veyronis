@@ -82,7 +82,11 @@ ninety route entries in `crates/uops-api/tests/isolation.rs`, sold in
 production can only ever have one side of.
 
 **Decision: tenant creation is a sibling document, not a section of this one, and this one
-does not wait for it.** The three reasons:
+does not wait for it.** That document is now written — `docs/tenant-lifecycle.md` — and it
+found a lockout this one would have walked into: creating a tenant raises the denominator in
+`is_org_admin`, so an admin who creates one without being granted a role on it loses
+`OrgAdmin` the moment it commits, and cannot get it back. The three reasons for separating
+them:
 
 1. Disabling a departing employee and letting somebody change their own password are useful
    on a single-tenant installation today. They should not be held behind a larger change.
@@ -90,6 +94,8 @@ does not wait for it.** The three reasons:
    happens to a tenant's telemetry when it is removed, whether `retired` is a state or a
    deletion, and whether the platform resource in `self-monitoring.md` §4 is per tenant or
    per organization. Mixing them in would produce a document that decides neither well.
+   (Answers, for the record: immutability is refused, telemetry is left to its TTL,
+   retirement is a state, and the platform resource stays per organization.)
 3. The role surface designed here is per `(user, tenant)` whether there are one or fifty, so
    nothing built from this document has to be revisited when the second tenant arrives.
 

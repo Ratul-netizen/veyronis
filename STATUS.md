@@ -85,12 +85,22 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > reachable. `TenantScope` is enforced by the type system and asserted across every route in
 > `isolation.rs`; production can currently only ever have one side of that boundary.
 >
-> **Decided, not yet built** — `docs/user-administration.md` covers users, roles and the
-> account lifecycle, including why an admin never sets another person's password and why
-> the last admin cannot be removed. Tenant creation is its own document and has not been
-> written: its decisions are about slug immutability, what happens to a removed tenant's
-> telemetry, and whether the platform resource in `self-monitoring.md` §4 is per tenant or
-> per organization. **This is an open gap against M12, which is otherwise complete.**
+> **Decided, not yet built** — both halves now have a document.
+> `docs/user-administration.md` covers users, roles and the account lifecycle, including why
+> an admin never sets another person's password and why the last admin cannot be removed.
+> `docs/tenant-lifecycle.md` covers creating and retiring a tenant, and found the thing that
+> would have made the first successful use of the feature a lockout: creating a tenant raises
+> the denominator in `is_org_admin`, so the admin who creates one loses organization-wide
+> admin the instant it commits unless the same transaction grants them a role on it — and
+> tenant creation requires that admin, so nothing inside the product could repair it.
+>
+> It also found that the runtime was already built for this — every scheduling loop re-reads
+> `all_tenant_ids()` each turn, so a new tenant needs no restart — and that deletion was
+> already decided by the schema: of the twenty-seven foreign keys referencing `tenant`,
+> nineteen cascade and eight refuse, and the eight are the identity tables. `DELETE FROM
+> tenant` already fails on any tenant that ever had a resource. Removal is retirement.
+>
+> **This is an open gap against M12, which is otherwise complete.**
 
 **One criterion across all thirteen is not met**, and it is not hidden: M12's cross-tenant
 isolation, which reopens with every surface a later milestone adds and is currently

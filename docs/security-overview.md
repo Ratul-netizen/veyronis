@@ -230,9 +230,22 @@ The aggregates outliving their raw rows is deliberate and has a consequence wort
 for restores: rebuilding an aggregate from raw data loses everything older than the raw
 retention.
 
-**Deletion.** Deleting a tenant removes its control-plane rows by cascade. Telemetry ages
-out by the table TTLs above rather than on demand; a deletion request covering telemetry is
-not a feature today, and saying so is better than implying it is.
+**Deletion.** This paragraph said that deleting a tenant removes its control-plane rows by
+cascade. **That was wrong in both halves and is corrected here as of 2026-09-24.** Of the
+twenty-seven foreign keys referencing `tenant`, nineteen cascade and eight refuse — the
+resource, identifier, relationship, credential, identity-decision, monitoring-profile and
+site tables, plus the platform-resource nomination. So a `DELETE` already fails on any tenant
+that has ever held a resource, which is every real one. That is deliberate: the cascading
+tables hold state the product can derive again, and the refusing tables hold *identity*,
+which the product's central claim is about not losing.
+
+Removal is therefore **retirement**, not deletion, and it is not built yet —
+`docs/tenant-lifecycle.md` records the decisions. Telemetry ages out by the table TTLs above
+rather than on demand, and those are not one number: raw flows and spans at 7 days and raw
+metrics at 30, but states and the hourly metric rollup at 1 095 — so **up to three years**,
+with the aggregates outliving the raw rows they came from. A deletion request covering
+telemetry is not a feature today. Saying all of that plainly is better than a sentence that
+implied a cascade which does not run.
 
 ---
 
