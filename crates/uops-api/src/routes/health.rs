@@ -36,6 +36,20 @@ use crate::state::AppState;
 pub struct Health {
     /// True only when every store answered.
     pub ok: bool,
+    /// This product's version — `docs/packaging.md` §4.5.
+    ///
+    /// Reported here, on the one endpoint outside authentication, because the people who need
+    /// it cannot authenticate: an operator checking what a host is running mid-upgrade, and a
+    /// load balancer deciding whether to send it traffic. Since no artefact was published there
+    /// was nothing to ask about; the moment a release exists, "which version is this" becomes
+    /// the first question of every upgrade and every bug report.
+    ///
+    /// It is a version disclosure on an unauthenticated endpoint, which a security review will
+    /// note. The trade is taken deliberately and the precedent was already here — the response
+    /// has reported `ClickHouse`'s version, unauthenticated, since M1, and a dependency's
+    /// version is the more targetable of the two. An installation that wants neither behind a
+    /// proxy can strip the field; what it cannot do is operate a fleet it cannot ask.
+    pub version: &'static str,
     pub control_plane: ComponentHealth,
     pub telemetry: ComponentHealth,
 }
@@ -70,7 +84,72 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
 
     Json(Health {
         ok: control_plane.reachable && telemetry.reachable,
+        // The workspace version, which is what a release tag sets — so this is the tag, and a
+        // build from an untagged working tree says so by carrying the last one.
+        version: env!("CARGO_PKG_VERSION"),
         control_plane,
         telemetry,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The field is in the JSON, under that name, with that value.
+    ///
+    /// Near-tautological about the constant and not about the wire: what this catches is a
+    /// `#[serde(skip_serializing_if)]` or a rename arriving on the struct and quietly removing
+    /// the one thing every upgrade and every bug report starts by asking. The neighbouring
+    /// `ComponentHealth::version` already carries a `skip_serializing_if`, so that is not a
+    /// hypothetical mistake in this file.
+    #[test]
+    fn health_reports_the_products_own_version() {
+        let body = serde_json::to_string(&Health {
+            ok: true,
+            version: env!("CARGO_PKG_VERSION"),
+            control_plane: ComponentHealth {
+                reachable: true,
+                version: None,
+            },
+            telemetry: ComponentHealth {
+                reachable: true,
+                version: Some("26.8.9.10".to_owned()),
+            },
+        })
+        .expect("serialise");
+
+        assert!(
+            body.contains(&format!(r#""version":"{}""#, env!("CARGO_PKG_VERSION"))),
+            "the product version is not in the response: {body}"
+        );
+        assert!(
+            !env!("CARGO_PKG_VERSION").is_empty(),
+            "a build with no version would report an empty string as though it meant something"
+        );
+    }
+
+    /// A dependency that did not answer carries no version, and the field disappears rather
+    /// than reporting `null` — which a chart or a check would render as a version.
+    #[test]
+    fn an_unreachable_dependency_reports_no_version_at_all() {
+        let body = serde_json::to_string(&Health {
+            ok: false,
+            version: env!("CARGO_PKG_VERSION"),
+            control_plane: ComponentHealth {
+                reachable: false,
+                version: None,
+            },
+            telemetry: ComponentHealth {
+                reachable: false,
+                version: None,
+            },
+        })
+        .expect("serialise");
+
+        assert!(!body.contains("null"), "{body}");
+        // The product's own version is still there: this process answered, whatever its
+        // dependencies did, and an upgrade needs to know which one is refusing to start.
+        assert!(body.contains(env!("CARGO_PKG_VERSION")), "{body}");
+    }
 }

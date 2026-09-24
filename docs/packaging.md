@@ -282,10 +282,24 @@ whose buyers are defence ministries is a question that will be asked.
       > `cargo test` rather than a container exit nobody was watching. Verified by breaking the
       > file two ways and watching it fail.
 
-- [ ] A tagged release publishes a multi-architecture image, and the tag's version is what
-      `/api/v1/health` reports
-- [ ] A tarball installs the server on a host with no container runtime, and the smoke test
-      that CI runs against compose passes against it
+- [~] A tagged release publishes a multi-architecture image, and the tag's version is what
+      `/api/v1/health` reports.
+      > **The half that is verified**: the version is 0.1.0 rather than 0.0.1, `/api/v1/health`
+      > reports it, two unit tests hold the field in the JSON, and the `stack` job reads the
+      > version out of `Cargo.toml` and asserts the running server agrees — so the check cannot
+      > drift from the number it checks. The `release-artefacts` job refuses to publish when the
+      > tag and the workspace disagree, which is verified by simulating both branches locally.
+      >
+      > **The half that is not**: nothing has been published, because that needs a tag, and the
+      > image build itself has never run on this machine — there is no Docker here. The job is
+      > written and its YAML and shell are checked; whether `ghcr.io` accepts the push is
+      > knowable only by pushing. Saying it is built would be the claim this document exists to
+      > stop somebody making.
+- [~] A tarball installs the server on a host with no container runtime, and the smoke test that
+      CI runs against compose passes against it. **Built, not proven**: the job assembles a musl
+      tarball with every binary, the migrations, the profiles and the web assets, and asserts it
+      carries every binary the workspace builds — the same check the image now has, because the
+      tarball would otherwise be that bug in a different wrapper. Nothing has installed from it
 - [x] An ingest token authorises writing into exactly one tenant, is shown once, is revocable
       with immediate effect, and a request carrying no token or another tenant's is refused —
       all five cases over a real socket in

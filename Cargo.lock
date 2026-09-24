@@ -2591,7 +2591,7 @@ checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "uops-alert"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde_json",
@@ -2609,7 +2609,7 @@ dependencies = [
 
 [[package]]
 name = "uops-api"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2639,7 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "uops-bus"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "uops-ch-migrate"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "sha2",
@@ -2663,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "uops-collector-flow"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2683,7 +2683,7 @@ dependencies = [
 
 [[package]]
 name = "uops-collector-otlp"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "axum",
  "bytes",
@@ -2708,7 +2708,7 @@ dependencies = [
 
 [[package]]
 name = "uops-collector-syslog"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2727,7 +2727,7 @@ dependencies = [
 
 [[package]]
 name = "uops-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -2741,7 +2741,7 @@ dependencies = [
 
 [[package]]
 name = "uops-discover"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2754,7 +2754,7 @@ dependencies = [
 
 [[package]]
 name = "uops-flow"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "thiserror 2.0.20",
@@ -2762,7 +2762,7 @@ dependencies = [
 
 [[package]]
 name = "uops-guess"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde",
  "uops-oui",
@@ -2770,7 +2770,7 @@ dependencies = [
 
 [[package]]
 name = "uops-identity"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2784,7 +2784,7 @@ dependencies = [
 
 [[package]]
 name = "uops-incident"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "uops-core",
@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "uops-notify"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2811,7 +2811,7 @@ dependencies = [
 
 [[package]]
 name = "uops-oidc"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "getrandom 0.3.4",
@@ -2827,7 +2827,7 @@ dependencies = [
 
 [[package]]
 name = "uops-otlp"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "opentelemetry-proto",
@@ -2839,11 +2839,11 @@ dependencies = [
 
 [[package]]
 name = "uops-oui"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "uops-path"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde",
  "tokio",
@@ -2852,7 +2852,7 @@ dependencies = [
 
 [[package]]
 name = "uops-pipeline"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "uops-platform-events"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "sqlx",
@@ -2881,7 +2881,7 @@ dependencies = [
 
 [[package]]
 name = "uops-poll"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2896,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "uops-poller"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2918,7 +2918,7 @@ dependencies = [
 
 [[package]]
 name = "uops-profile"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2929,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "uops-query"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "uops-runbook"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "uops-runner"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2975,7 +2975,7 @@ dependencies = [
 
 [[package]]
 name = "uops-secrets"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2991,14 +2991,14 @@ dependencies = [
 
 [[package]]
 name = "uops-security"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "uops-server"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "axum",
  "serde_json",
@@ -3017,7 +3017,7 @@ dependencies = [
 
 [[package]]
 name = "uops-snmp"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "snmp2",
@@ -3030,7 +3030,7 @@ dependencies = [
 
 [[package]]
 name = "uops-store-ch"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3048,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "uops-store-pg"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3075,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "uops-sweeper"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "sqlx",
@@ -3091,7 +3091,7 @@ dependencies = [
 
 [[package]]
 name = "uops-syslog"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "socket2",

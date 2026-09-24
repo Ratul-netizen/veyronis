@@ -1,8 +1,16 @@
 # uops — Unified Infrastructure Observability Platform
 
-> **Status: pre-v0**, and no longer only documents. M0, M1 and M2 are implemented and
-> tested; `docker compose up` gives an API, a web UI and an SNMP poller that fills them.
-> See [Try it](#try-it).
+> **Status: 0.1.0 — thirteen of fourteen milestones built, and not yet installable.**
+> Everything through M12 is implemented and tested: SNMP polling, logs, metrics, traces,
+> flows, discovery, topology, incidents, runbooks, security analytics and multi-tenancy, on
+> one resource identity. M13 (AI) is not started, deliberately — `PLAN.md` puts it after the
+> data model and correlation actually work.
+>
+> **What you cannot do yet is install it.** There is no published image, no packages and no
+> per-host agent; `docker compose up` from a clone is the only way to run it. That gap is the
+> current work — see [`docs/packaging.md`](./docs/packaging.md).
+>
+> **→ [STATUS.md](./STATUS.md) is where we are.** Read it before anything else here.
 
 Network monitoring, infrastructure monitoring, logs, metrics, traces, flows, topology,
 events and automation on **one resource identity and one correlation model** — rather than
@@ -26,9 +34,17 @@ all six resolve to one `resource_id`. Everything downstream — correlation, bla
 
 | | |
 |---|---|
+| **[STATUS.md](./STATUS.md)** | **Where we are.** The living document — start here |
 | **[PLAN.md](./PLAN.md)** | Strategy, frozen architecture decisions, roadmap M0–M13, open questions |
-| **[SPEC.md](./SPEC.md)** | Implementation specification for M0–M4: DDL, Rust types, API surface, acceptance criteria |
+| **[SPEC.md](./SPEC.md)** | Implementation specification for M0–M4 |
+| **[docs/](./docs/)** | One document per milestone past M4, and per decision |
 | **[bench/](./bench/)** | W1 storage benchmark — the go/no-go on the ClickHouse decision |
+
+**`PLAN.md` and `SPEC.md` look frozen because they are.** SPEC stops at M4 on purpose and
+PLAN says so — *"M0–M4 are specified in SPEC.md. M5+ are direction, not commitments."* Every
+milestone past M4 has its own document in `docs/`, written before the code and amended when it
+turned out wrong. Neither file being old is a sign of staleness; reading either as *current
+state* is the mistake, and STATUS.md is the answer to that question.
 
 ## Architecture, briefly
 
@@ -53,28 +69,29 @@ React · TypeScript · Vite
 
 ## Current state
 
-**→ [STATUS.md](./STATUS.md) — start here on a new machine.**
+**→ [STATUS.md](./STATUS.md) — start here on a new machine.** It carries the milestone
+criteria, what is measured, and what is open.
 
-- [x] Architecture decisions frozen for M0–M4
-- [x] M0–M4 implementation specification
-- [x] W1 storage benchmark **executed — architecture validated**
-- [x] **M0** — primitives: envelope, identity, query AST, secrets, migrations, bus
-- [x] **M1** — core platform: API, auth, inventory, telemetry, web shell, first run
-- [x] **M2** — NMS: SNMP polling, profiles, discovery, rates, availability. All six
-      acceptance criteria met and measured
-- [ ] **M3** — logs ← in progress. Both syslog wire formats, RFC 6587 framing, UDP and
-      TCP receivers, the shared pipeline, batched inserts and **the daemon** are done: a
-      datagram on port 514 becomes a row you can query, an unknown sender becomes a
-      resource rather than a dropped message, and a ClickHouse outage spills to disk and
-      replays rather than dropping — and it sustains **50 000 msg/s from 1 000 senders
-      with nothing dropped**, measured, with roughly twice that as headroom. OTLP/HTTP
-      receives logs, metrics and traces on the same pipeline. The Log Explorer has a
-      histogram, a field sidebar and **"show all signals for this resource"**. Live tail
-      and saved searches are not built. TLS is terminated at a proxy by decision, not built in — see STATUS.md
-- [ ] M4 — dashboards and alerting
+| | |
+|---|---|
+| **M0–M4** | primitives, core platform, NMS, logs, metrics and alerting |
+| **M5–M8** | discovery, topology, flow, observability — traces, APM, service map, correlation |
+| **M9–M12** | incidents, runbooks, security analytics, enterprise: SSO, leases, multi-tenancy |
+| M13 | AI — not started. `PLAN.md` §10 calls it *direction, not commitments* |
 
-Taken out of order because they were asked for: MAC vendor lookup, device make/model/
-serial from a profile, and a site map.
+All five telemetry signals — metrics, logs, events and state, flows, traces — land on **one**
+resource identity and are read through **one** query AST, which was the whole bet.
+
+**What is honestly not done**, because a README that only lists wins is an advertisement:
+
+* **It cannot be installed.** No published image, no `.deb` or `.rpm`, no tarball, no per-host
+  agent. A clone and `docker compose up` is the only path — [`docs/packaging.md`](./docs/packaging.md).
+* **Nobody outside this repository has used it.** The EVE-NG estate in
+  [`docs/lab.md`](./docs/lab.md) is the only network it has ever monitored, and it found two
+  milestone-level defects in its first hours.
+* **Two open criteria say so in place** rather than being quietly dropped: M12's cross-tenant
+  isolation reopens with every new surface, and M9's timeline measurement does not beat W1's
+  number and explains why.
 
 ## Try it
 

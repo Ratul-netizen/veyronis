@@ -1455,6 +1455,15 @@ jobs:
           echo "$health"
           echo "$health" | grep -q '"ok":true'
 
+          # And reporting which version this is — `docs/packaging.md` §4.5. Read out of
+          # Cargo.toml rather than hard-coded, so bumping the version does not also mean
+          # remembering to bump a string in CI. On a release the tag sets that version, which is
+          # what makes this the check that the artefact says what it is.
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          test -n "$version"
+          echo "workspace version: $version"
+          echo "$health" | grep -q "\"version\":\"$version\""
+
           # The web app, from the same origin as the API. That is the property the
           # session cookie depends on, and here it is structural rather than configured.
           curl -fsS http://localhost:8080/ | grep -qi "<title>"
@@ -1498,3 +1507,117 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f deploy/docker-compose.yml down -v
+
+  # ---------------------------------------------------------------------------
+  # What a release actually produces — `docs/packaging.md` §4.3 and §4.5
+  # ---------------------------------------------------------------------------
+  #
+  # Until this job existed, a release attached an SBOM and a licence report: evidence about
+  # software nobody could download. Thirteen milestones were built and there was no artefact.
+  #
+  # Runs only on a published release, because these are the artefacts *of* a release. The
+  # `stack` job already builds the same image on every push, so a broken Dockerfile fails long
+  # before anybody tags anything — this job publishes rather than discovers.
+  release-artefacts:
+    name: publish the image and the tarball
+    if: github.event_name == 'release'
+    needs: [check, stack, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach the tarball to the release
+      packages: write   # push the image to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tag is the version. A release whose tag disagrees with the workspace is a release
+      # that would report one version and be named another, and `/api/v1/health` reports the
+      # workspace one — so the disagreement has to stop the release rather than ship.
+      - name: The tag and the workspace agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          echo "tag=$tag workspace=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version. \
+            Bump Cargo.toml in the commit you are tagging."
+            exit 1
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # amd64 and arm64: `PLAN`'s buyers include appliance-class hardware, and an image that
+      # only runs on x86 is one a whole class of them cannot use. arm64 is emulated here, which
+      # is slow and is the right trade for a per-release job.
+      - name: Build and push the image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha,scope=release
+          cache-to: type=gha,scope=release,mode=max
+
+      # The digest, not just the tag. A tag can be moved and a digest cannot, so this is what an
+      # air-gapped operator pins and what a procurement reviewer asks for.
+      - name: Record the digest
+        run: |
+          echo "image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}" > image.txt
+          echo "digest: ${{ steps.image.outputs.digest }}" >> image.txt
+          cat image.txt
+
+      # For the on-premise installation that does not run containers — §4.3 item 2. Nearly free:
+      # the image build already produces exactly these static binaries and throws them away.
+      - name: Build the tarball
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --workspace --bins --target x86_64-unknown-linux-musl
+
+          cd web && npm ci && npm run build && cd ..
+
+          out="uops-${GITHUB_REF_NAME}-x86_64-linux-musl"
+          mkdir -p "$out/bin"
+          # By pattern, for the reason deploy/Dockerfile now copies by pattern: a list of names
+          # here is the same staleness one artefact later. `docs/packaging.md` §2.
+          cp target/x86_64-unknown-linux-musl/release/uops-* "$out/bin/"
+          rm -f "$out"/bin/*.d
+          cp -r migrations ch-migrations profiles "$out/"
+          cp -r web/dist "$out/web"
+          cp README.md SECURITY.md docs/dev-environment.md "$out/" 2>/dev/null || true
+          tar czf "$out.tar.gz" "$out"
+          sha256sum "$out.tar.gz" > "$out.tar.gz.sha256"
+          ls -la "$out.tar.gz"*
+
+          # Every binary the workspace builds is in it, or the tarball is the image's bug again
+          # in a different wrapper.
+          for m in crates/*/Cargo.toml; do
+            c=$(dirname "$m")
+            if [ -f "$c/src/main.rs" ]; then echo "$(basename "$c")"; fi
+            for b in "$c"/src/bin/*.rs; do [ -e "$b" ] && basename "$b" .rs; done
+          done | sort -u > expected.txt
+          ls "$out/bin" | sort > shipped.txt
+          if ! diff -u expected.txt shipped.txt; then
+            echo "::error::the tarball does not carry every binary the workspace builds"
+            exit 1
+          fi
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            uops-*.tar.gz
+            uops-*.tar.gz.sha256
+            image.txt

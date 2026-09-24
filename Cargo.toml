@@ -7,7 +7,18 @@ members = ["crates/*"]
 exclude = ["bench/gen"]
 
 [workspace.package]
-version = "0.0.1"
+# 0.1.0, not 1.0.0 and no longer 0.0.1 — `docs/packaging.md` §4.5.
+#
+# It was 0.0.1 from M0, which was honest while nothing shipped and stops being honest the moment
+# something does. 0.1.0 is the first version that could plausibly be released: thirteen of
+# fourteen milestones built, and no external installation yet. 1.0.0 would claim a stability
+# nothing has tested — no published artefact, no upgrade anybody has performed, no user outside
+# this repository.
+#
+# What the number promises is about process order rather than API surface, since nothing here is
+# a published crate: a collector of version N works against a server of N or N+1, and the
+# migration set is forward-only.
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
 license = "AGPL-3.0-only"
