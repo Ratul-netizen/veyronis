@@ -201,6 +201,48 @@ collectors dial out.
 crash reporting, and no licence check. The product does not contact any host that is not
 in the table above.
 
+That is checked rather than asserted, in three places, because a promise of this shape is
+one a single careless dependency breaks:
+
+* `scripts/no-phone-home.py` fails the build on a routable destination written into
+  non-test source or shipped configuration, and on any dependency whose purpose is
+  telemetry or self-update — `sentry`, `posthog`, `self_update` and the rest, by name.
+* `web/scripts/no-remote-assets.mjs` fails the build on a third-party hostname in the
+  **built** web bundle, which is where such a thing arrives without anyone typing it.
+* The browser is told to refuse one. See below.
+
+Each check carries an allow-list of the hostnames that appear as text rather than as a
+destination — an XML namespace, a documentation link in an error message — with the reason
+written next to each. There are no exemptions to the first check, and the count is asserted,
+so adding one is a reviewable change rather than an edit nobody sees.
+
+### Browser-facing response headers
+
+Every response from the server carries:
+
+| Header | Value |
+|---|---|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; worker-src 'none'` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `no-referrer` |
+| `X-Frame-Options` | `DENY` |
+
+`connect-src 'self'` is the one that carries the no-phone-home promise into the browser: it
+is what makes a request to a third party *fail* rather than merely be absent from a scan of
+the source. Fonts are self-hosted and the world map is a vendored outline, so nothing in the
+console needs an exception to it.
+
+`style-src` permits `'unsafe-inline'`, and that is deliberate: components set style
+attributes from data — a meter's width, a status colour. It does not permit inline or
+evaluated **script**; `script-src` has neither `'unsafe-inline'` nor `'unsafe-eval'`.
+`docs/packaging.md` §6.2 records the alternatives considered and why each was rejected.
+
+**There is no `Strict-Transport-Security`, on purpose.** TLS is terminated at your reverse
+proxy, so this process cannot know whether it is reachable over HTTPS — and an HSTS header
+sent from an installation served over plain HTTP on a closed management network makes that
+installation unreachable for as long as the `max-age` nobody chose. It belongs in your proxy
+configuration, and it is listed under Shared responsibility below.
+
 **Bundled data.** The IEEE OUI registries are embedded in the binary so that MAC-address
 vendor lookup needs no network call. They are redistributed widely — Wireshark, nmap and
 Debian's `ieee-data` all ship them. IEEE attaches no SPDX identifier and `cargo deny`
@@ -256,7 +298,8 @@ implied a cascade which does not run.
 ## Shared responsibility
 
 **On-premise — yours:** the hosts, the operating systems, disk encryption, network
-segmentation, TLS termination and certificates, database credentials, backups and the
+segmentation, TLS termination and certificates — including `Strict-Transport-Security`,
+which only your proxy knows enough to send — database credentials, backups and the
 rehearsal of them, the KEK and wherever it lives, patching this product when a release
 comes out, and who you give accounts to.
 

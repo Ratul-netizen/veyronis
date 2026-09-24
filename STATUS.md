@@ -72,9 +72,59 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > locally** — there is no Docker on this machine — so CI's `stack` job is what confirms it.
 >
 > **There is still no way to install this product**, and `docs/packaging.md` is the decision
-> document for that: no published image, no packages, no per-host agent, and a version that has
-> been `0.0.1` since M0. The blocker for handing out an agent is named there — the OTLP listener
-> authenticates nobody, so per-tenant ingest tokens come first.
+> document for that. What has closed since: the version is `0.1.0` and `/api/v1/health` reports
+> it; per-tenant ingest tokens exist, which was the named blocker for handing out an agent;
+> `release-artefacts` builds a multi-architecture image and a musl tarball. What has not: none
+> of it has ever been published, because that needs a tag, and no image has been built on this
+> machine — there is no Docker here. Seven of eleven criteria are met, two are `[~]` for
+> exactly that reason, and two are open: a custom OTel Collector distribution, and a collector
+> one minor version behind still working.
+
+> **Found 2026-09-24, and it had already been pushed: the `web` job was red on `main`.**
+> `scripts/css-classes.mjs` fails when the markup names a class no stylesheet defines. Two
+> of mine did — `.centred` in `acceptinvite.tsx` (commit `7a5a243`) and `.audit` in
+> `auditpage.tsx` (`b8607bf`) — four occurrences between them. The guard existed, was written
+> for exactly this, and I never ran it against either commit.
+>
+> `.audit` was cosmetic: the cells already carry `.mono`, `.dim` and `.num`, so the table
+> rendered correctly with the class doing nothing. It now constrains the query-fingerprint
+> column, which is the one thing that table needs and the reason the class was reached for.
+>
+> **`.centred` was not cosmetic.** It is on the `<main>` of the invitation-acceptance page,
+> so that page — the first thing a new colleague ever sees of this product — rendered edge
+> to edge with no measure at all. Nobody saw it because nobody has accepted an invitation
+> outside a test. The class is the general case of `.login`, and is now defined as one.
+>
+> The lesson is not about CSS. A guard that is only run by CI is a guard that reports a
+> failure one push too late, and both of these were pushed. `web/` has four checks that run
+> in seconds — `tsc`, `eslint`, `vitest`, and the two `.mjs` scripts — and running them
+> before a commit that touches `web/` costs less than the round trip of finding out.
+
+> **Found 2026-09-24 while closing packaging's last mechanical criterion: the no-phone-home
+> promise was half-enforced, and the enforced half was not the important one.** `PLAN` line 86
+> — *"No phone-home, ever"* — had `no-remote-assets.mjs` scanning the built bundle for remote
+> hostnames, which is a real guard and has been there since the 3D explorer. Nothing covered
+> the rest: `uops-poller` resolving a name, a shipped YAML pointing off-box, a crate whose
+> purpose is to report crashes somewhere. And nothing covered what a static scan structurally
+> cannot see — a destination a dependency assembles at run time, which is the shape an
+> *accidental* phone-home actually has.
+>
+> Both halves now exist. The web UI carries `default-src 'self'; connect-src 'self'` and the
+> rest of `docs/packaging.md` §6.2, so such a request fails in the browser rather than being
+> absent by luck; `scripts/no-phone-home.py` covers manifests, non-test Rust and shipped
+> configuration, and runs `--self-test` first because three checks that report nothing look
+> exactly like three checks whose regular expression is broken.
+>
+> **The build reproduced the defect shape for the sixth time.** The header layer went into
+> `main.rs`; `boot.rs` builds its own router, so no test in the repository could have observed
+> it — passing unit tests for a policy no response carried. The router assembly is now
+> `uops_server::application`, shared by the binary and the test, and the assertion is on a real
+> 401 over a real socket. Verified by deleting the layer and watching the test fail.
+>
+> Writing it also found a duplicate: the first draft re-implemented the bundle scan with a
+> worse allow-list. `docs/packaging.md` §6 is amended to say so, because the version of that
+> document that claimed *"nothing enforced it"* was wrong in the direction that flatters the
+> work.
 
 > **Found and fixed 2026-09-24 by the EVE-NG lab: nothing walked LLDP.** `uops_discover::neighbours`
 > and `PgStore::record_neighbours` are both implemented and tested, and **no running

@@ -139,7 +139,7 @@ axum = { version = "0.8", default-features = false, features = [
 tower = "0.5"
 # "fs" is for uops-server serving the web build from the same origin as the API — see
 # crates/uops-server/src/web.rs for why that is one process rather than two containers.
-tower-http = { version = "0.6", default-features = false, features = ["trace", "limit", "fs"] }
+tower-http = { version = "0.6", default-features = false, features = ["trace", "limit", "fs", "set-header"] }
 
 # --- ClickHouse client (M1) -----------------------------------------------------
 # hyper rather than a new HTTP stack: axum already pulls exactly these, so this adds

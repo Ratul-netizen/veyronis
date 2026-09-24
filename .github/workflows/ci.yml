@@ -149,6 +149,29 @@ jobs:
           fi
           echo "ok: public-key verification only"
 
+      # PLAN line 86: "No phone-home, ever. No auto-update check, no crash reporting, no
+      # license callback." Until this step existed that promise was true only by habit.
+      #
+      # A script rather than four greps in YAML, for two reasons that both come from what
+      # it has to know: which URL literals are unroutable by design (RFC 2606/6761 names,
+      # loopback, compose service names) and where a `#[cfg(test)]` module ends. The second
+      # needs brace-counting — most of this repository's URL literals live in a `mod tests`
+      # inside the file they test, so excluding by path would report nothing but fixtures.
+      #
+      # `--self-test` first, and that ordering is the point. Three of these checks report
+      # nothing on a clean tree, which is indistinguishable from a broken regex; the
+      # self-test plants a violation for each and requires it to be found. It also checks
+      # the test-module stripper in both directions, since over-stripping makes the whole
+      # check pass while reading nothing.
+      #
+      # The built web bundle is not scanned here. web/scripts/no-remote-assets.mjs does
+      # that in the `web` job, with an allow-list that says why each hostname in the output
+      # is text rather than a request.
+      - name: Nothing reaches a destination the operator did not configure
+        run: |
+          python3 scripts/no-phone-home.py --self-test
+          python3 scripts/no-phone-home.py
+
       # M10 §2.4's last paragraph, and the acceptance criterion that names this job: "a
       # rendered command and a captured output never reach a log line — by the same kind of
       # CI grep that keeps crypto in uops-secrets".
@@ -1454,6 +1477,33 @@ jobs:
           health=$(curl -fsS http://localhost:8080/api/v1/health)
           echo "$health"
           echo "$health" | grep -q '"ok":true'
+
+          # The security headers, on the response the container actually serves —
+          # `docs/packaging.md` §6.2. `boot.rs` asserts these over a socket against the
+          # shared router assembly; this asserts it of the *image*, where a missing
+          # UOPS_WEB_ROOT or a reverse proxy someone adds later could strip them.
+          #
+          # `connect-src 'self'` by name rather than the header's presence: a policy of
+          # `default-src *` would satisfy a grep for the header and forbid nothing.
+          headers=$(curl -fsS -D - -o /dev/null http://localhost:8080/api/v1/health | tr 'A-Z' 'a-z')
+          echo "$headers"
+          echo "$headers" | grep -q "content-security-policy:"
+          echo "$headers" | grep -q "connect-src 'self'"
+          echo "$headers" | grep -q "x-content-type-options: nosniff"
+          echo "$headers" | grep -q "referrer-policy: no-referrer"
+          echo "$headers" | grep -q "x-frame-options: deny"
+
+          # And on the page, which is a separate assertion rather than a thorough one. The
+          # file service replaces the router's fallback, so a layer attached in the wrong
+          # order leaves the *page* as the one response with no policy while every API
+          # response still carries it — which is exactly what the API check above would
+          # miss. The image sets UOPS_WEB_ROOT, so there is a page here to ask.
+          page=$(curl -fsS -D - -o /dev/null http://localhost:8080/ | tr 'A-Z' 'a-z')
+          echo "$page" | grep -q "connect-src 'self'" || {
+            echo "::error::the web app page carries no policy"
+            exit 1
+          }
+          echo "ok: the image serves the security headers, on the API and on the page"
 
           # And reporting which version this is — `docs/packaging.md` §4.5. Read out of
           # Cargo.toml rather than hard-coded, so bumping the version does not also mean

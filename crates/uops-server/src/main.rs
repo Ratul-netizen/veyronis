@@ -38,7 +38,6 @@ use std::net::SocketAddr;
 use std::process::ExitCode;
 
 use uops_api::AppState;
-use uops_api::routes::router;
 use uops_secrets::{KekRing, LocalVault, MemoryAccessLog, RustCryptoAead};
 use uops_store_ch::{ChClient, ChStore, TelemetryStore};
 use uops_store_pg::{PgSealedStore, PgStore};
@@ -178,9 +177,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )))
     };
 
-    let mut app = router(state);
-    if let Some(root) = web::root_from_env() {
-        app = web::serve(app, &root)?;
+    // One assembly, shared with the boot test — see `uops_server::application`. The
+    // security headers come from there and not from here, so that a test can observe them.
+    let web_root = web::root_from_env();
+    let app = uops_server::application(state, web_root.as_deref())?;
+    if let Some(root) = &web_root {
         println!("serving the web app from {}", root.display());
     }
 

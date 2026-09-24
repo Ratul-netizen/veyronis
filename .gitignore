@@ -41,3 +41,7 @@ target-linux/
 # Cookie jars from curl when driving the API by hand. Two have been committed by accident;
 # the pattern is cheaper than remembering.
 /[a-z].txt
+
+# Python bytecode, from scripts/ being imported rather than run
+__pycache__/
+*.pyc

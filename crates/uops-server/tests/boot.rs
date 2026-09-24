@@ -10,12 +10,18 @@
 //! `main.rs`, which is process-shaped and would want a subprocess to test; it goes
 //! through the same functions in the same order.
 //!
+//! It builds its router with `uops_server::application`, which is what `main.rs` calls.
+//! That used to be `router(state)` here and three lines there, and the difference was
+//! invisible until the security headers needed testing: a layer added in `main` would
+//! have been covered by nothing. Sharing the assembly is what makes
+//! `every_response_carries_the_security_headers` below a statement about the product
+//! rather than about this file.
+//!
 //! Like the bootstrap tests in `uops-store-pg`, each case gets a database of its own:
 //! "is this installation empty" is a property of the whole installation, and the shared
 //! test database is one where the answer is always no.
 
 use uops_api::AppState;
-use uops_api::routes::router;
 use uops_core::OrgId;
 use uops_server::config::FirstRunNames;
 use uops_server::firstrun;
@@ -107,8 +113,12 @@ async fn serve(state: AppState) -> std::net::SocketAddr {
         .await
         .expect("bind an ephemeral port");
     let addr = listener.local_addr().expect("local address");
+    // `application`, not `router`: the same assembly main.rs serves, so the security
+    // headers are in front of this test rather than beside it. No web root — there is no
+    // build in a test run, and `web::serve` is right to refuse a directory without one.
+    let app = uops_server::application(state, None).expect("assemble the application");
     tokio::spawn(async move {
-        let _ = axum::serve(listener, router(state)).await;
+        let _ = axum::serve(listener, app).await;
     });
     addr
 }
@@ -201,6 +211,130 @@ async fn a_second_boot_announces_nothing() {
     );
 
     scratch.drop_database().await;
+}
+
+/// The security headers are on a real response, from the router the binary serves.
+///
+/// `docs/packaging.md` §6.2. The unit tests in `uops_server::headers` assert what the
+/// policy *says*; nothing there can tell whether any response carries it, and a policy
+/// that is only a constant is the failure this repository keeps finding — built, tested,
+/// never called.
+///
+/// Asserted on a 401 deliberately. A rejected login is the response most likely to be
+/// produced by a path that returns early, and an error response without a CSP is a page
+/// an injected script would run on. Every response, not the happy one.
+#[tokio::test]
+async fn every_response_carries_the_security_headers() {
+    let scratch = Scratch::new().await;
+    let names = names();
+
+    firstrun::run(&scratch.store, &names)
+        .await
+        .expect("first run");
+
+    let state = AppState::new(scratch.store.clone(), telemetry());
+    let addr = serve(state).await;
+
+    let response = post(
+        &addr,
+        "/api/v1/auth/login",
+        r#"{"email":"nobody@example.invalid","password":"wrong"}"#,
+    )
+    .await;
+
+    assert!(
+        response.starts_with("HTTP/1.1 401"),
+        "expected the refusal this test is inspecting the headers of, got: {response}"
+    );
+
+    // Header names are case-insensitive on the wire and hyper lowercases what it writes,
+    // so the comparison is lowercased rather than trusting a spelling.
+    let lower = response.to_lowercase();
+    for header in [
+        "content-security-policy:",
+        "x-content-type-options: nosniff",
+        "referrer-policy: no-referrer",
+        "x-frame-options: deny",
+    ] {
+        assert!(
+            lower.contains(header),
+            "no `{header}`: the layer is not applied to what the binary serves: {response}"
+        );
+    }
+
+    // And the directive that carries the promise, not merely the header's presence: a
+    // policy of `default-src *` would satisfy the check above and forbid nothing.
+    assert!(
+        lower.contains("connect-src 'self'"),
+        "the policy is present but does not restrict where the page may connect: {response}"
+    );
+
+    scratch.drop_database().await;
+}
+
+/// The web app's own page carries the policy too, not just the API.
+///
+/// This is the ordering claim `uops_server::application` is written around, and it is not
+/// obvious enough to leave to reasoning: a layer applies to the fallback registered when it
+/// is added, and `web::serve` replaces the fallback. Attach the headers first and the *page*
+/// is the one response without a policy — which is the only response where a policy does
+/// anything, because the page is what a browser executes script in.
+///
+/// Served from a directory made here rather than from `web/dist`, so the test does not
+/// depend on anybody having run `npm run build`.
+#[tokio::test]
+async fn the_web_app_page_carries_the_policy_as_well() {
+    let scratch = Scratch::new().await;
+
+    let root = std::env::temp_dir().join(format!("uops-web-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("create a web root");
+    std::fs::write(root.join("index.html"), "<!doctype html><title>x</title>")
+        .expect("write index.html");
+
+    let state = AppState::new(scratch.store.clone(), telemetry());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind an ephemeral port");
+    let addr = listener.local_addr().expect("local address");
+    let app = uops_server::application(state, Some(root.as_path())).expect("assemble");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    // A deep link, so this goes through the SPA fallback rather than hitting a real file —
+    // the path that `web::serve` exists for and the one a reload actually takes.
+    let response = get(&addr, "/resources/some-id").await;
+    assert!(
+        response.starts_with("HTTP/1.1 200"),
+        "the SPA fallback did not serve the page: {response}"
+    );
+    assert!(
+        response.to_lowercase().contains("content-security-policy:"),
+        "the page has no policy, so the layer was attached before the file service: {response}"
+    );
+
+    std::fs::remove_dir_all(&root).ok();
+    scratch.drop_database().await;
+}
+
+/// A minimal HTTP/1.1 GET, returning the raw response.
+async fn get(addr: &std::net::SocketAddr, path: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("write request");
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .expect("read response");
+    String::from_utf8_lossy(&response).into_owned()
 }
 
 /// A minimal HTTP/1.1 POST, returning the raw response.
