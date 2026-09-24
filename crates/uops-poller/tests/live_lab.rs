@@ -171,6 +171,57 @@ async fn links(store: &PgStore, scope: &TenantScope) -> BTreeSet<(String, String
         .collect()
 }
 
+/// Onboard every address, walk its neighbours with the product's own code, and record what
+/// came back.
+///
+/// Returns the resources by address, how many devices answered a walk at all — the one thing
+/// that distinguishes an empty graph from an unreachable estate — and how many adjacencies each
+/// reported.
+async fn walk_estate(
+    store: &PgStore,
+    scope: &TenantScope,
+    tenant: TenantId,
+    transport: &UdpTransport,
+    addresses: &[String],
+) -> (BTreeMap<String, ResourceId>, usize, BTreeMap<String, usize>) {
+    let mut by_address: BTreeMap<String, ResourceId> = BTreeMap::new();
+    let mut answered = 0usize;
+    let mut walked: BTreeMap<String, usize> = BTreeMap::new();
+
+    for address in addresses {
+        let target = Target {
+            address: format!("{address}:161").parse().expect("an address and port"),
+        };
+        let named = sys_name(transport, &target).await;
+        let resource = onboard(store, tenant, address, named.as_deref()).await;
+        by_address.insert(address.clone(), resource);
+
+        let mut tuning = Tuning::default();
+
+        // The product's own walk, not a fixture of its output.
+        let found = neighbours(transport, &target, &mut tuning).await;
+        if found.lldp.len() + found.cdp.len() + found.arp.len() > 0 {
+            answered += 1;
+        }
+        walked.insert(address.clone(), found.lldp.len());
+
+        // `merged()` is what the poller passes: one list, deduplicated across protocols.
+        let outcome = store
+            .record_neighbours(scope, resource, &found.merged(), SweepContext::default())
+            .await
+            .expect("record what the walk found");
+        println!(
+            "  {address:16} {:22} lldp={:2} -> edges {:2} candidates {:2}",
+            named.as_deref().unwrap_or("(no sysName)"),
+            found.lldp.len(),
+            outcome.edges,
+            outcome.candidates
+        );
+    }
+
+    (by_address, answered, walked)
+}
+
 #[tokio::test]
 async fn the_lab_estate_becomes_a_topology_graph() {
     let Some(addresses) = lab() else {
@@ -190,47 +241,8 @@ async fn the_lab_estate_becomes_a_topology_graph() {
         COMMUNITY.to_owned(),
     )));
 
-    let mut by_address: BTreeMap<String, ResourceId> = BTreeMap::new();
-    let mut answered: Vec<String> = Vec::new();
-    let mut walked: BTreeMap<String, usize> = BTreeMap::new();
-
-    for address in &addresses {
-        let target = Target {
-            address: format!("{address}:161").parse().expect("an address and port"),
-        };
-        let named = sys_name(&transport, &target).await;
-        let resource = onboard(&store, tenant, address, named.as_deref()).await;
-        by_address.insert(address.clone(), resource);
-
-        let mut tuning = Tuning::default();
-
-        // The product's own walk, not a fixture of its output.
-        let found = neighbours(&transport, &target, &mut tuning).await;
-        let total = found.lldp.len() + found.cdp.len() + found.arp.len();
-        if total > 0 {
-            answered.push(address.clone());
-        }
-        walked.insert(address.clone(), found.lldp.len());
-
-        // `merged()` is what the poller passes: one list, deduplicated across protocols.
-        let all = found.merged();
-        let outcome = store
-            .record_neighbours(
-                &scope,
-                resource,
-                &all,
-                SweepContext::default(),
-            )
-            .await
-            .expect("record what the walk found");
-        println!(
-            "  {address:16} {:22} lldp={:2} -> edges {:2} candidates {:2}",
-            named.as_deref().unwrap_or("(no sysName)"),
-            found.lldp.len(),
-            outcome.edges,
-            outcome.candidates
-        );
-    }
+    let (by_address, answered, walked) =
+        walk_estate(&store, &scope, tenant, &transport, &addresses).await;
 
     let after_one = links(&store, &scope).await;
 
@@ -265,7 +277,7 @@ async fn the_lab_estate_becomes_a_topology_graph() {
     );
 
     assert!(
-        !answered.is_empty(),
+        answered > 0,
         "no device answered a neighbour walk. Check the community and that lldpd is handing \
          its MIB to snmpd over AgentX — without `-x` there is no LLDP in SNMP at all"
     );
@@ -349,7 +361,7 @@ async fn the_lab_estate_becomes_a_topology_graph() {
     let reported: usize = walked.values().sum();
     println!(
         "\n  {reported} adjacencies reported by {} devices, {} distinct links in the graph",
-        answered.len(),
+        answered,
         adjacency.len()
     );
     assert!(
