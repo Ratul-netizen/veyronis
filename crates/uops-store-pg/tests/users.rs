@@ -663,6 +663,68 @@ async fn the_membership_list_names_roles_and_suspensions() -> Result<()> {
     Ok(())
 }
 
+/// The test that distinguishes the advisory lock from a comment claiming there is one.
+///
+/// `docs/user-administration.md` §4.3 first said the rule would be enforced "inside the
+/// statement that performs the change". It cannot be: two statements removing *different*
+/// administrators contend for no row, so nothing blocks and both commit, leaving a tenant
+/// with nobody who can appoint anybody. Two admins, two simultaneous revokes, exactly one
+/// wins.
+///
+/// # Why it races eight times
+///
+/// Removing the lock and running this once fails about four times in five — the window is
+/// wide but not certain, and a guard that reports a real defect 80% of the time is a guard
+/// that will eventually be dismissed as flaky by whoever is unlucky. Eight rounds takes the
+/// chance of missing it to roughly two in a million while still finishing in under a second.
+/// A race can only be tested by racing; it can be tested often.
+#[tokio::test]
+async fn two_simultaneous_revocations_cannot_both_win() -> Result<()> {
+    // Separate stores, so each call takes its own pool connection and the two really are in
+    // flight together. One store would serialise them by connection availability and the
+    // test would pass whether the lock existed or not.
+    let (a, b) = (store().await, store().await);
+
+    for round in 0..8 {
+        // A fresh organization each round: after one revoke the previous tenant has a single
+        // administrator, and the guard would refuse on that alone rather than on the race.
+        let w = World::new(&format!("race{round}")).await;
+        let first = w.person("first", Some(Role::Admin)).await;
+        let second = w.person("second", Some(Role::Admin)).await;
+        let (scope_a, scope_b) = (w.scope(), w.scope());
+
+        let (ra, rb) = tokio::join!(
+            a.revoke_role_guarded(&scope_a, first),
+            b.revoke_role_guarded(&scope_b, second),
+        );
+        let (ra, rb) = (ra?, rb?);
+
+        let won = [ra, rb].iter().filter(|c| **c == Change::Done).count();
+        assert_eq!(won, 1, "round {round}: exactly one may succeed — {ra:?} {rb:?}");
+        assert_eq!(
+            [ra, rb]
+                .iter()
+                .filter(|c| **c == Change::WouldLeaveNoAdmin)
+                .count(),
+            1,
+            "round {round}: and the other must be told why — {ra:?} {rb:?}"
+        );
+
+        let admins = w
+            .store
+            .tenant_members(&w.scope())
+            .await?
+            .into_iter()
+            .filter(|m| m.role == Role::Admin && !m.disabled)
+            .count();
+        assert_eq!(
+            admins, 1,
+            "round {round}: the tenant keeps somebody who can appoint the next administrator"
+        );
+    }
+    Ok(())
+}
+
 // ---- one's own password -----------------------------------------------------------
 
 #[tokio::test]

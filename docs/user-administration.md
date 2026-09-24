@@ -339,12 +339,15 @@ somebody is shown are still open.
 - [x] Disabling an account ends its live sessions within the same request — asserted by a
       session that answered `200` before the call and `401` after it
 - [x] A disabled account can be re-enabled, and signs in again afterwards
-- [~] The last enabled admin on a tenant cannot be disabled, demoted or revoked — **and the
-      refusal holds under two concurrent attempts, which is not yet tested.** The mechanism is
-      there: every operation that changes the set of enabled administrators takes a
-      transaction-scoped advisory lock on the organization first (§4.3). What is missing is a
-      test that runs two of them at once, which is the only thing that can distinguish a lock
-      from a comment claiming there is one
+- [x] The last enabled admin on a tenant cannot be disabled, demoted or revoked, **and the
+      refusal holds under two concurrent attempts** —
+      `two_simultaneous_revocations_cannot_both_win`, which races two revokes on separate pool
+      connections and asserts exactly one wins.
+      > Removing the advisory lock and racing **once** fails about four times in five. A guard
+      > that reports a real defect 80% of the time is one that gets dismissed as flaky by
+      > whoever is unlucky, so it races eight rounds — missing the defect then runs at roughly
+      > two in a million, and the mutation is now caught on every attempt. A race can only be
+      > tested by racing; it can be tested often.
 - [x] An admin cannot disable their own account
 - [~] Designating a break-glass account is audited and at most one is held per organization
       (migration 0024's partial unique index, asserted in `uops-store-pg/tests/users.rs`).
