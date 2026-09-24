@@ -4,30 +4,57 @@ Last updated: 2026-09-25 · repo: `github.com/Ratul-netizen/veyronis`
 
 ## Pick up here — 2026-09-25
 
-**Three threads are open. The first is code, the other two are not.**
+### First: read the CI run. It has been the missing signal all along.
 
-1. **KEK rotation has no operator path** — the top finding of
-   [`docs/unreached-triage.md`](./docs/unreached-triage.md) §1. Five functions
-   (`rotate_kek`, `add_retired`, `promote_kek`, `rewrap`, `get_latest`), one subsystem,
-   every caller a test, and a configuration surface that cannot express a retired key. The
-   agreed next step is a **decision document before code**, because the config surface for
-   retired keys and what triggers the re-wrap — an admin route, a CLI subcommand, a startup
-   flag — are real choices with different operational consequences.
-2. **`v0.1.0` is not published.** The tag does not exist and nothing has ever been released.
-   It needs a GitHub **Release**, published from
-   `github.com/Ratul-netizen/veyronis/releases/new` with the tag `v0.1.0` — `ci.yml`
-   triggers on `release: types: [published]`, so a bare `git push --tags` and a saved draft
-   both fire nothing. `release-artefacts` has never executed, which is why two of
-   `docs/packaging.md`'s criteria are `[~]`; publishing is what turns them into facts.
-3. **The repository is still public**, and making it private starts metering Actions
-   minutes — this CI builds a Docker image and brings up a compose stack on every push, and
-   the release job emulates arm64.
+`gh` is installed now (`C:\Program Files\GitHub CLI\gh.exe`, authenticated with `repo`), which
+is what made the rest of this possible. One command answers where things stand:
 
-**One verification is outstanding**: the full workspace suite has not run since the
-`alertable` fix in `43f3500`. `cargo check --workspace --all-targets` is clean and the three
-crates it touches pass 271 tests, but the local full run was killed by memory pressure — the
-suite competes with the ClickHouse guest for RAM, so run it with nothing else heavy open.
-CI is the better environment for it and has it.
+```bash
+gh run list --limit 3
+gh run view <id> --log-failed     # the logs need auth; unauthenticated curl gets 403
+```
+
+**Run `36070873817` on `e201483` was still in flight when this was written.** Four jobs were
+pending: `check`, `integration`, `crypto-builds` and `stack`.
+
+**CI had failed on every push for months, with the same four jobs**, and I repeatedly cited it
+as verification while it had never run the workspace test suite at all — `integration` died
+at step 9 of ~30. Four red jobs stop being a signal and become scenery. Fixed in order, each
+one uncovering the next:
+
+| fix | commit | what it unblocked |
+|---|---|---|
+| five foreign keys with no index | `4b19a39` | `Schema invariants`, confirmed green in CI |
+| `cargo fmt --all` (265 locations, 75 files) | `d54162d` | `Format`, confirmed green in CI; Clippy then ran for the first time and found a 110-line test |
+| the IEEE MAC table was never committed | `43fcc2a` | three jobs compiling past `uops-oui` |
+| OpenSSL in the Alpine builder | `43fcc2a` | `Build the image`, which got past it |
+| one unused `cfg(unix)` import; the compose tenant slug | `e201483` | unverified — this is the run that was pending |
+
+### What is still open, in order
+
+1. **Finish CI.** Whatever `36070873817` says. Expect more layers: `-D warnings` stops at the
+   first error, so Linux-only warnings behind `ssh.rs` have never been seen. **Nothing on
+   Windows can find them** — the `#[cfg(unix)]` blocks are never compiled here, and
+   cross-checking to `x86_64-unknown-linux-gnu` fails because `openssl-sys` needs a Linux
+   OpenSSL to run its build script. Read the log instead of guessing.
+2. **KEK rotation has no operator path** — the top finding of
+   [`docs/unreached-triage.md`](./docs/unreached-triage.md) §1. Five functions, one subsystem,
+   every caller a test, and a config surface that cannot express a retired key. Agreed next
+   step is a decision document before code.
+3. **`v0.1.0` is not published.** Needs a GitHub *Release* from
+   `github.com/Ratul-netizen/veyronis/releases/new` with tag `v0.1.0` — `ci.yml` triggers on
+   `release: types: [published]`, so a bare `git push --tags` and a saved draft both fire
+   nothing. `release-artefacts` has never run. Now that `gh` is here: `gh release create v0.1.0`.
+4. **The repository is still public.** Making it private starts metering Actions minutes, and
+   this CI builds an image and a compose stack on every push.
+
+### One verification still outstanding
+
+The full workspace suite has not run locally since the `alertable` fix in `43f3500`. `cargo
+check --workspace --all-targets`, clippy with `-D warnings`, fmt and the doctests are all
+clean; the suite itself was killed by memory pressure, because it competes with the ClickHouse
+guest for RAM. Run it with nothing else heavy open — and `integration` will run it in CI as
+soon as that job gets far enough, which it never has.
 
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
