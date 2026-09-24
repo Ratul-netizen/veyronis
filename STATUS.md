@@ -1,6 +1,33 @@
 # Status — pick up from here
 
-Last updated: 2026-09-24 · repo: `github.com/Ratul-netizen/veyronis`
+Last updated: 2026-09-25 · repo: `github.com/Ratul-netizen/veyronis`
+
+## Pick up here — 2026-09-25
+
+**Three threads are open. The first is code, the other two are not.**
+
+1. **KEK rotation has no operator path** — the top finding of
+   [`docs/unreached-triage.md`](./docs/unreached-triage.md) §1. Five functions
+   (`rotate_kek`, `add_retired`, `promote_kek`, `rewrap`, `get_latest`), one subsystem,
+   every caller a test, and a configuration surface that cannot express a retired key. The
+   agreed next step is a **decision document before code**, because the config surface for
+   retired keys and what triggers the re-wrap — an admin route, a CLI subcommand, a startup
+   flag — are real choices with different operational consequences.
+2. **`v0.1.0` is not published.** The tag does not exist and nothing has ever been released.
+   It needs a GitHub **Release**, published from
+   `github.com/Ratul-netizen/veyronis/releases/new` with the tag `v0.1.0` — `ci.yml`
+   triggers on `release: types: [published]`, so a bare `git push --tags` and a saved draft
+   both fire nothing. `release-artefacts` has never executed, which is why two of
+   `docs/packaging.md`'s criteria are `[~]`; publishing is what turns them into facts.
+3. **The repository is still public**, and making it private starts metering Actions
+   minutes — this CI builds a Docker image and brings up a compose stack on every push, and
+   the release job emulates arm64.
+
+**One verification is outstanding**: the full workspace suite has not run since the
+`alertable` fix in `43f3500`. `cargo check --workspace --all-targets` is clean and the three
+crates it touches pass 271 tests, but the local full run was killed by memory pressure — the
+suite competes with the ClickHouse guest for RAM, so run it with nothing else heavy open.
+CI is the better environment for it and has it.
 
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
