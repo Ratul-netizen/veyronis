@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE ingest_token SET revoked_at = now()\n             WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e676ab1de67b6ae86500dbf88d16177fbb49fb6547678ec4921c06e959921f70"
+}

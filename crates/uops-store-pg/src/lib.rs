@@ -55,6 +55,7 @@ pub mod error;
 pub mod facts;
 pub mod groups;
 pub mod identity;
+pub mod ingest;
 pub mod ipam;
 pub mod incidents;
 pub mod lease;
@@ -110,6 +111,7 @@ pub use runbooks::{
     RunbookRow,
 };
 pub use sealed::PgSealedStore;
+pub use ingest::{IngestToken, IssuedToken};
 pub use tenants::{TenantChange, TenantRow};
 pub use users::{
     AdminUser, Change, INVITATION_VALID_FOR, Invited, Member, PendingInvitation,

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT i.tenant_id\n              FROM ingest_token i\n              JOIN tenant t ON t.id = i.tenant_id\n             WHERE i.token_hash = $1\n               AND i.revoked_at IS NULL\n               AND (i.expires_at IS NULL OR i.expires_at > now())\n               AND t.retired_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "de6f582cdf12aad52a898de50d527df33d90642ef497250f316afd78aa664c40"
+}

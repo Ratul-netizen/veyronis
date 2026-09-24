@@ -286,8 +286,24 @@ whose buyers are defence ministries is a question that will be asked.
       `/api/v1/health` reports
 - [ ] A tarball installs the server on a host with no container runtime, and the smoke test
       that CI runs against compose passes against it
-- [ ] An ingest token authorises writing into exactly one tenant, is shown once, is revocable
-      with immediate effect, and a request carrying no token or another tenant's is refused
+- [~] An ingest token authorises writing into exactly one tenant, is shown once, is revocable
+      with immediate effect, and a request carrying no token or another tenant's is refused.
+      **The store half is built** — migration 0032, `uops_store_pg::ingest`, 9 tests, four
+      guards mutation-verified. The *request* half is not: no listener asks for a token yet, so
+      "a request carrying no token is refused" has nothing to refuse it
+      > **One thing the build added that §4.2 did not think of.** A retired tenant's tokens have
+      > to stop working, and the cascade does not do it: since migration 0031 a tenant is
+      > *retired* rather than deleted, so `ON DELETE CASCADE` almost never fires. The
+      > authentication query carries `t.retired_at IS NULL` instead. Leaving it out is the same
+      > shape as leaving it out of `all_tenant_ids` and worse in consequence — there a removed
+      > customer's devices went on being *polled*, which shows up as traffic; here the writes
+      > *succeed*, so the installation goes on storing a customer's telemetry and billing the
+      > disk while believing it stopped serving them. Nothing about it looks like an error.
+      >
+      > Also decided while writing the table, and recorded there: **no `last_used_at`.** It is
+      > the first column anybody asks for, and it is a write on the hottest path this product
+      > has to record a fact that is stale when read. The collector registry already reports
+      > throughput, which answers the operator's actual question.
 - [ ] A listener can be declared as requiring a token or not; an existing unauthenticated
       listener keeps working after the migration that adds this
 - [ ] An ingest token does not let a sender assert which resource it is — an unknown emitter
