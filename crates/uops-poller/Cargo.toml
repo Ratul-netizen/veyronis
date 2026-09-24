@@ -46,6 +46,9 @@ sqlx.workspace = true
 # The live availability test checks whether this machine has unprivileged ICMP before
 # asserting anything, the same way the SNMP tests check for the agent fixture.
 socket2.workspace = true
+# `live_lab` asks the oracle `uops_incident::candidate` takes — `is_upstream_of` within
+# `RADIUS` — of the graph the EVE-NG estate produced, so it needs that constant.
+uops-incident.workspace = true
 uops-profile.workspace = true
 uops-secrets.workspace = true
 uuid.workspace = true

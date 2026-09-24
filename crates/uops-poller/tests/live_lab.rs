@@ -285,6 +285,65 @@ async fn the_lab_estate_becomes_a_topology_graph() {
          over again: `record_neighbours` correct, tested, and reaching nothing"
     );
 
+    // --- what M9 can and cannot do with a purely LLDP-discovered estate -----------------
+    //
+    // Two traversals, and the difference is the whole of §2.4. `resource_neighbourhood`
+    // includes `connected_to` and is undirected: it answers *are these two near each other*,
+    // which is what groups alerts into one incident. `resource_dependencies` excludes
+    // `connected_to` and is directed: it answers *does this one depend on that one*, which is
+    // what picks an origin and suppresses the rest.
+    //
+    // A cable is symmetric and causality is not, so that split is right. Its consequence on
+    // this estate is the thing worth writing down: **LLDP alone gives grouping and cannot give
+    // an origin.** Every edge here is `connected_to`, so `is_upstream_of` is false between
+    // every pair of cabled devices — correctly — and downstream suppression has nothing to act
+    // on until something establishes dependency: interface `member_of` edges from a poll, a
+    // `hosts` edge from a hypervisor, or an operator saying so.
+    let by_role: BTreeMap<String, ResourceId> = by_address
+        .values()
+        .filter_map(|id| {
+            let name = graph.nodes.iter().find(|n| n.id == *id)?.name.clone();
+            // `leaf-01-000600` -> `leaf-01`: the MAC suffix makes it unique, the prefix is the
+            // role a reader is looking for.
+            Some((name.rsplit_once('-')?.0.to_owned(), *id))
+        })
+        .collect();
+
+    let role = |r: &str| -> ResourceId { *by_role.get(r).unwrap_or_else(|| panic!("{r}: {by_role:?}")) };
+
+    // Grouping: within RADIUS hops of leaf-01, by the undirected walk.
+    let hood = store
+        .neighbourhood(&scope, role("leaf-01"))
+        .await
+        .expect("neighbourhood");
+    let names: BTreeMap<ResourceId, String> =
+        graph.nodes.iter().map(|n| (n.id, n.name.clone())).collect();
+
+    println!("\n  within RADIUS = {} of leaf-01:", uops_incident::RADIUS);
+    for (id, depth) in &hood.within {
+        println!("    {depth} hop  {}", names.get(id).cloned().unwrap_or_default());
+    }
+
+    for near in ["lb-01", "app-01", "spine-01"] {
+        assert!(
+            hood.within.contains_key(&role(near)),
+            "{near} is one hop from leaf-01 over a cabled link and is not in its              neighbourhood, so their alerts would never group into one incident"
+        );
+    }
+    assert!(
+        !hood.within.contains_key(&role("core-rtr-01")),
+        "core-rtr-01 is three hops from leaf-01, past RADIUS, and grouping that far turns one          datacenter into one incident"
+    );
+
+    // Origin: nothing is upstream of anything, because every edge is `connected_to`.
+    assert!(
+        hood.upstream.is_empty(),
+        "something is upstream of leaf-01 on an estate whose only edges are `connected_to`.          Either a dependency edge arrived from somewhere, which is good and this assertion          should be relaxed, or `resource_dependencies` has started walking adjacency, which          would make a cable imply causation"
+    );
+
+    println!("\n  upstream of leaf-01: {} — LLDP gives adjacency, not dependency",
+             hood.upstream.len());
+
     // Both ends of every cabled link walk it, so the adjacency count is what a sorted pair
     // collapses to — the dedup property the schema's UNIQUE alone does not give.
     let reported: usize = walked.values().sum();

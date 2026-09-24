@@ -215,6 +215,43 @@ test now asks each device for `sysName.0` and records it, which is what identity
 does on a real sweep. Worth keeping in the document because the symptom — a full neighbour
 walk and an empty graph — looks exactly like the M5 defect in §4 and is a different cause.
 
+### What M9 can and cannot do with this estate
+
+Two traversals, and the difference is the whole of M9 §2.4. Migration 0022:
+
+| | walks | directed | answers |
+|---|---|---|---|
+| `resource_neighbourhood` | `connected_to`, `depends_on`, `member_of`, `hosts`, `runs` | no | *are these two near each other* — which **groups** alerts into one incident |
+| `resource_dependencies` | everything except `connected_to` | yes | *does this one depend on that one* — which picks an **origin** and suppresses the rest |
+
+A cable is symmetric and causality is not, so excluding `connected_to` from the directed walk
+is right. The consequence on this estate is the thing worth writing down.
+
+Asked of `leaf-01`, with `RADIUS = 2`:
+
+```text
+  within:   0 hop  leaf-01
+            1 hop  spine-01, lb-01, app-01
+            2 hop  edge-fw, leaf-02
+  upstream: 0
+```
+
+Grouping works exactly as designed — the leaf, its two servers, its spine, and out to two
+hops, with `core-rtr-01` at three hops correctly excluded, because grouping that far turns one
+datacenter into one incident.
+
+**And nothing is upstream of anything.** Every edge here is `connected_to`, because LLDP is all
+that discovered them, so `is_upstream_of` is false between every pair of cabled devices. So on
+an estate discovered purely by LLDP, **M9 groups and cannot suppress**: a spine failure produces
+one incident containing everything nearby, with no origin chosen and no downstream symptom
+marked.
+
+That is not a defect and it is not nothing. Suppression needs a *dependency*, and one arrives
+from somewhere else: interface `member_of` edges a poll creates, a `hosts` edge from a
+hypervisor, or an operator saying so. Anybody reading M9 §2.4 and expecting adjacency alone to
+drive suppression will be wrong, and the test asserts the upstream set is empty so that the day
+it stops being empty is a day somebody has to look at.
+
 ## 6. Running it
 
 The lab is `uops-estate` in EVE-NG and is driven through its REST API. Fabric addresses are
