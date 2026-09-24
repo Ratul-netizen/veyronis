@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT count(*)                                      AS \"total!\",\n                   count(r.role) FILTER (WHERE r.role = 'admin') AS \"held!\"\n              FROM tenant t\n              -- The account being live is part of the *join*, not a separate predicate.\n              -- As a `LEFT JOIN app_user` it would filter nothing — a left join keeps the\n              -- row either way — and a disabled account would still count as an admin.\n              -- Checked here as well as at login for the same reason `role_for` does it:\n              -- a live session must stop working the moment the account does.\n              LEFT JOIN user_tenant_role r\n                     ON r.tenant_id = t.id\n                    AND r.user_id = $1\n                    AND EXISTS (\n                        SELECT 1 FROM app_user u\n                         WHERE u.id = r.user_id AND u.disabled_at IS NULL\n                    )\n             WHERE t.org_id = $2\n               -- A retired tenant is not one anybody has to hold admin on. Without this a\n               -- tenant nobody administered would break `OrgAdmin` for everyone in the\n               -- organization, permanently — which is the lockout of\n               -- `docs/tenant-lifecycle.md` §2 arriving through the back door.\n               AND t.retired_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "held!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "20873f8d8b77b83aded9c896cf792a58dba57557945155f7b16aae363f6d47d7"
+}

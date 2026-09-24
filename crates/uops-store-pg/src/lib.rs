@@ -74,6 +74,7 @@ pub mod slo;
 pub mod sso;
 pub mod store;
 pub mod sweep_ingest;
+pub mod tenants;
 pub mod topology;
 pub mod users;
 
@@ -109,6 +110,7 @@ pub use runbooks::{
     RunbookRow,
 };
 pub use sealed::PgSealedStore;
+pub use tenants::{TenantChange, TenantRow};
 pub use users::{
     AdminUser, Change, INVITATION_VALID_FOR, Invited, Member, PendingInvitation,
 };

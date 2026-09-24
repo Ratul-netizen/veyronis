@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id AS \"id: TenantId\" FROM tenant ORDER BY created_at, id",
+  "query": "\n            SELECT id AS \"id: TenantId\"\n              FROM tenant\n             WHERE retired_at IS NULL\n             ORDER BY created_at, id\n            ",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "d2098139b38e1f936c3317dbbafbdf8de9591f35cdc6303cf8ae5311787f1aa2"
+  "hash": "8e259de651dd29dfc804d9f9991447d8fa618c32061574f9efd1cea341144aa6"
 }

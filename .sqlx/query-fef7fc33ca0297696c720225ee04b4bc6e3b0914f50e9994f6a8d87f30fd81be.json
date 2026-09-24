@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE tenant SET retired_at = NULL\n             WHERE id = $1 AND org_id = $2 AND retired_at IS NOT NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fef7fc33ca0297696c720225ee04b4bc6e3b0914f50e9994f6a8d87f30fd81be"
+}

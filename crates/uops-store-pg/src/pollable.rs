@@ -135,6 +135,13 @@ impl PgStore {
     /// visible loop rather than in a `WHERE` clause. This returns identifiers and
     /// nothing else: no tenant's data crosses here, only the fact that it exists.
     ///
+    /// **Retired tenants are excluded, and that is the whole point of the filter.** Four
+    /// scheduling loops call this every turn — the poller fleet, the sweeper, the alert
+    /// scheduler and the alert run loop — so without it a tenant somebody had removed would
+    /// go on being polled, swept and alerted on. A "removed" customer whose devices are still
+    /// being reached over the network is worse than one that was never removed, because
+    /// somebody believes it stopped. `docs/tenant-lifecycle.md` §4.2.
+    ///
     /// # Errors
     ///
     /// Storage failures.
@@ -144,7 +151,12 @@ impl PgStore {
         // which happens to contain the string the scanner looks for and would have let
         // this pass for the wrong reason.
         let rows = sqlx::query_scalar!(
-            r#"SELECT id AS "id: TenantId" FROM tenant ORDER BY created_at, id"#
+            r#"
+            SELECT id AS "id: TenantId"
+              FROM tenant
+             WHERE retired_at IS NULL
+             ORDER BY created_at, id
+            "#
         )
         .fetch_all(self.pool())
         .await

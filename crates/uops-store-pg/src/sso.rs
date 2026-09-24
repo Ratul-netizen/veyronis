@@ -779,6 +779,11 @@ impl PgStore {
                          WHERE u.id = r.user_id AND u.disabled_at IS NULL
                     )
              WHERE t.org_id = $2
+               -- A retired tenant is not one anybody has to hold admin on. Without this a
+               -- tenant nobody administered would break `OrgAdmin` for everyone in the
+               -- organization, permanently — which is the lockout of
+               -- `docs/tenant-lifecycle.md` §2 arriving through the back door.
+               AND t.retired_at IS NULL
             "#,
             user as ActorId,
             org as OrgId,
