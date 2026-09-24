@@ -2906,6 +2906,7 @@ dependencies = [
  "tokio",
  "uops-core",
  "uops-discover",
+ "uops-incident",
  "uops-poll",
  "uops-profile",
  "uops-secrets",
