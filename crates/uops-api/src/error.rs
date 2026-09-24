@@ -39,6 +39,13 @@ pub enum ApiError {
     #[error("{0}")]
     BadRequest(String),
 
+    /// The request was well-formed and the state refuses it — a duplicate, or a change that
+    /// would break an invariant the product keeps. Distinct from `BadRequest` because
+    /// nothing about the input was wrong, and telling somebody to fix their input would
+    /// send them looking in the wrong place.
+    #[error("{0}")]
+    Conflict(String),
+
     /// The deployment has not configured something this route needs. A 503 rather than
     /// a 500: nothing is broken, a capability is switched off, and the message says
     /// which variable turns it on.
@@ -61,6 +68,7 @@ impl ApiError {
             Self::Forbidden(why) => (StatusCode::FORBIDDEN, "forbidden", (*why).to_owned()),
             Self::NotFound => (StatusCode::NOT_FOUND, "not-found", "not found".to_owned()),
             Self::BadRequest(detail) => (StatusCode::BAD_REQUEST, "invalid-input", detail.clone()),
+            Self::Conflict(detail) => (StatusCode::CONFLICT, "conflict", detail.clone()),
             Self::Unavailable(why) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "not-configured",

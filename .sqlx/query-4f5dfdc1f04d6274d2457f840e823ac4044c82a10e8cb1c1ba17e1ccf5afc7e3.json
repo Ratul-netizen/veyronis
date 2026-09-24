@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE user_invitation SET superseded_at = now()\n             WHERE id = $1 AND org_id = $2\n               AND accepted_at IS NULL AND superseded_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f5dfdc1f04d6274d2457f840e823ac4044c82a10e8cb1c1ba17e1ccf5afc7e3"
+}

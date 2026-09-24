@@ -55,6 +55,15 @@ fn hasher() -> Result<Argon2<'static>> {
 }
 
 /// Hash a password for storage.
+/// The shortest password the product accepts.
+///
+/// A floor and nothing else. Composition rules — a digit, a symbol, a capital — measurably
+/// push people toward predictable substitutions and a sticky note, and
+/// `docs/user-administration.md` §6 declines them. Twelve because the hash parameters above
+/// are what actually make a short password expensive to attack, and this is the length below
+/// which that stops being true.
+pub const MINIMUM_LENGTH: usize = 12;
+
 pub fn hash(password: &Secret<String>) -> Result<PasswordHashString> {
     let mut salt = [0u8; 16];
     getrandom::fill(&mut salt).map_err(|e| Error::Random(e.to_string()))?;

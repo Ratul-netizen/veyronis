@@ -541,14 +541,14 @@ async fn the_last_administrator_cannot_be_demoted_or_revoked() -> Result<()> {
 
     assert_eq!(
         w.store
-            .grant_role_guarded(w.org, &w.scope(), only, Role::Viewer, by)
+            .grant_role_guarded(&w.scope(), only, Role::Viewer, by)
             .await?,
         Change::WouldLeaveNoAdmin,
         "lowering the only admin leaves nobody who can put them back — a change does this \
          as surely as a revoke"
     );
     assert_eq!(
-        w.store.revoke_role_guarded(w.org, &w.scope(), only).await?,
+        w.store.revoke_role_guarded(&w.scope(), only).await?,
         Change::WouldLeaveNoAdmin
     );
 
@@ -569,7 +569,7 @@ async fn a_role_can_be_granted_changed_and_revoked() -> Result<()> {
 
     assert_eq!(
         w.store
-            .grant_role_guarded(w.org, &w.scope(), person, Role::Viewer, admin)
+            .grant_role_guarded(&w.scope(), person, Role::Viewer, admin)
             .await?,
         Change::Done
     );
@@ -577,7 +577,7 @@ async fn a_role_can_be_granted_changed_and_revoked() -> Result<()> {
 
     assert_eq!(
         w.store
-            .grant_role_guarded(w.org, &w.scope(), person, Role::Operator, admin)
+            .grant_role_guarded(&w.scope(), person, Role::Operator, admin)
             .await?,
         Change::Done,
         "re-granting changes the role rather than failing, so there is no separate update"
@@ -588,7 +588,7 @@ async fn a_role_can_be_granted_changed_and_revoked() -> Result<()> {
     );
 
     assert_eq!(
-        w.store.revoke_role_guarded(w.org, &w.scope(), person).await?,
+        w.store.revoke_role_guarded(&w.scope(), person).await?,
         Change::Done
     );
     assert_eq!(w.store.role_for(person, w.tenant).await?, None);
@@ -602,7 +602,7 @@ async fn a_grant_records_who_made_it() -> Result<()> {
     let person = w.person("person", None).await;
 
     w.store
-        .grant_role_guarded(w.org, &w.scope(), person, Role::Viewer, admin)
+        .grant_role_guarded(&w.scope(), person, Role::Viewer, admin)
         .await?;
 
     let granted_by: Option<uuid::Uuid> = sqlx::query_scalar(
@@ -631,7 +631,7 @@ async fn a_role_cannot_be_granted_to_another_organizations_user() -> Result<()> 
 
     assert_eq!(
         mine.store
-            .grant_role_guarded(mine.org, &mine.scope(), outsider, Role::Admin, admin)
+            .grant_role_guarded(&mine.scope(), outsider, Role::Admin, admin)
             .await?,
         Change::NoSuchUser
     );

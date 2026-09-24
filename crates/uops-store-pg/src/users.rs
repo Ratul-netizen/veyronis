@@ -137,6 +137,83 @@ impl PgStore {
         Ok(())
     }
 
+    /// The organization owning a tenant.
+    ///
+    /// Read inside the transaction rather than taken as an argument, because a caller that
+    /// could pass an organization could pass the wrong one — and the administrative lock is
+    /// only mutual exclusion if everybody derives the same key from the same fact.
+    async fn org_of(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        tenant: TenantId,
+    ) -> Result<Option<OrgId>> {
+        // tenant-exempt: the tenant is the bound parameter; this reads which organization
+        // owns it, which is not a tenant-scoped fact.
+        let row = sqlx::query_scalar!(
+            r#"SELECT org_id FROM tenant WHERE id = $1"#,
+            tenant as TenantId,
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| map("tenant", tenant.to_string(), e))?;
+        Ok(row.map(Into::into))
+    }
+
+    /// Withdraw a live invitation.
+    ///
+    /// `false` when there is no live invitation with that id in this organization. Marked
+    /// superseded rather than deleted, so a withdrawn invitation is still an answer to "what
+    /// happened to the link you sent me".
+    ///
+    /// This is the answer to a mistyped address, and the reason no account is created until
+    /// somebody accepts: there is nothing here to tombstone.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn withdraw_invitation(&self, org: OrgId, id: uuid::Uuid) -> Result<bool> {
+        // tenant-exempt: an invitation is into an organization.
+        let affected = sqlx::query!(
+            r#"
+            UPDATE user_invitation SET superseded_at = now()
+             WHERE id = $1 AND org_id = $2
+               AND accepted_at IS NULL AND superseded_at IS NULL
+            "#,
+            id,
+            org as OrgId,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(|e| map("invitation", id.to_string(), e))?
+        .rows_affected();
+        Ok(affected > 0)
+    }
+
+    /// The stored password hash for one account, if it has one.
+    ///
+    /// For the one caller that needs to verify a password it was handed for an account it
+    /// already knows — changing one's own. `user_credentials` is keyed on an address because
+    /// that is what a sign-in supplies; this is keyed on the account because that is what a
+    /// session establishes.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `PostgreSQL` said.
+    pub async fn password_hash_of(&self, user: ActorId) -> Result<Option<PasswordHashString>> {
+        // tenant-exempt: a user is an organization-level record, and the account is
+        // established by its own session rather than by a scope.
+        let row = sqlx::query_scalar!(
+            r#"SELECT password_hash FROM app_user WHERE id = $1 AND disabled_at IS NULL"#,
+            user as ActorId,
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| map("user", user.to_string(), e))?;
+
+        // `from_stored`, as `user_credentials` does: the string came out of the column it
+        // was written to, so there is nothing to validate that writing it did not already.
+        Ok(row.flatten().map(PasswordHashString::from_stored))
+    }
+
     /// Everybody in an organization, with the state an administrator acts on.
     ///
     /// Includes disabled accounts: an administrator who cannot see a suspended account
@@ -540,14 +617,9 @@ impl PgStore {
         .await
         .map_err(|e| map("user", user.to_string(), e))?;
 
-        // tenant-exempt: sessions are not tenant-scoped.
-        sqlx::query!(
-            r#"UPDATE session SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL"#,
-            user as ActorId,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| map("session", user.to_string(), e))?;
+        // `revoke_sessions_of`'s statement, shared — in this transaction, so the account and
+        // its sessions stop together or not at all.
+        Self::revoke_sessions_on(&mut *tx, user).await?;
 
         tx.commit()
             .await
@@ -677,7 +749,6 @@ impl PgStore {
     /// Whatever `PostgreSQL` said.
     pub async fn grant_role_guarded(
         &self,
-        org: OrgId,
         scope: &TenantScope,
         user: ActorId,
         role: Role,
@@ -690,6 +761,9 @@ impl PgStore {
             .await
             .map_err(|e| map("role", user.to_string(), e))?;
 
+        let Some(org) = Self::org_of(&mut tx, tenant).await? else {
+            return Ok(Change::NoSuchUser);
+        };
         Self::lock_admin(&mut tx, org).await?;
 
         // The organization is checked against the tenant's, so a caller holding admin on
@@ -718,23 +792,11 @@ impl PgStore {
             return Ok(Change::WouldLeaveNoAdmin);
         }
 
-        sqlx::query!(
-            r#"
-            INSERT INTO user_tenant_role (user_id, tenant_id, role, granted_by)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (user_id, tenant_id)
-            DO UPDATE SET role = EXCLUDED.role,
-                          granted_at = now(),
-                          granted_by = EXCLUDED.granted_by
-            "#,
-            user as ActorId,
-            tenant as TenantId,
-            role as Role,
-            by as ActorId,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| map("role", user.to_string(), e))?;
+        // The same statement `grant_role` runs, shared rather than copied — see
+        // `auth.rs::grant_role_on`. `granted_by` is named rather than `None`, which is the
+        // whole difference between this and the unguarded primitive: a role granted through
+        // the product has somebody behind it.
+        Self::grant_role_on(&mut *tx, user, tenant, role, Some(by)).await?;
 
         tx.commit()
             .await
@@ -750,12 +812,7 @@ impl PgStore {
     /// # Errors
     ///
     /// Whatever `PostgreSQL` said.
-    pub async fn revoke_role_guarded(
-        &self,
-        org: OrgId,
-        scope: &TenantScope,
-        user: ActorId,
-    ) -> Result<Change> {
+    pub async fn revoke_role_guarded(&self, scope: &TenantScope, user: ActorId) -> Result<Change> {
         let tenant = scope.tenant_id();
         let mut tx = self
             .pool()
@@ -763,23 +820,17 @@ impl PgStore {
             .await
             .map_err(|e| map("role", user.to_string(), e))?;
 
+        let Some(org) = Self::org_of(&mut tx, tenant).await? else {
+            return Ok(Change::NoSuchUser);
+        };
         Self::lock_admin(&mut tx, org).await?;
 
         if Self::is_last_admin(&mut tx, tenant, user).await? {
             return Ok(Change::WouldLeaveNoAdmin);
         }
 
-        let affected = sqlx::query!(
-            r#"DELETE FROM user_tenant_role WHERE user_id = $1 AND tenant_id = $2"#,
-            user as ActorId,
-            tenant as TenantId,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| map("role", user.to_string(), e))?
-        .rows_affected();
-
-        if affected == 0 {
+        // As above: `revoke_role`'s statement, shared.
+        if !Self::revoke_role_on(&mut *tx, user, tenant).await? {
             return Ok(Change::NoSuchUser);
         }
 

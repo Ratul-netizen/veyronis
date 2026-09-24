@@ -437,6 +437,107 @@ const CASES: &[RouteCase] = &[
     // to use another's session to do it.
     // The two logs. Tenant-scoped like everything else: one customer's auditor must not
     // be able to read another customer's reads, which in an MSP is the whole point.
+    // The people in an organization — `docs/user-administration.md`. Mixed, and the split is
+    // the whole design:
+    //
+    // *Who is a person here* is organization-level and takes `OrgAdmin`, so it is `Unscoped`
+    // for the same reason the SSO configuration routes are — a caller who reaches them can
+    // already see every tenant they could name. The cross-*organization* property is the one
+    // that matters for these, and it is asserted in `crates/uops-store-pg/tests/users.rs`,
+    // which drives two organizations directly rather than through one session.
+    //
+    // *Who may see this customer* is one tenant's membership and takes admin on the tenant in
+    // the header, so those three are `Scoped` like everything else.
+    RouteCase {
+        path: "/api/v1/users",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/users",
+        probe: None,
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"email":"nobody@example.test","display_name":"Nobody"}"#),
+    },
+    RouteCase {
+        path: "/api/v1/users/invitations",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/users/invitations/{id}",
+        probe: Some("/api/v1/users/invitations/018f0000-0000-7000-8000-0000000000ba"),
+        method: "DELETE",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/users/{id}/disable",
+        probe: Some("/api/v1/users/018f0000-0000-7000-8000-0000000000bb/disable"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/users/{id}/enable",
+        probe: Some("/api/v1/users/018f0000-0000-7000-8000-0000000000bb/enable"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/users/{id}/break-glass",
+        probe: Some("/api/v1/users/018f0000-0000-7000-8000-0000000000bb/break-glass"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: None,
+    },
+    // Redeeming an invitation is reached by somebody with no account at all, so there is no
+    // tenant to be wrong about and no session to scope. What stops it being useful to a
+    // stranger is the token: `routes/users.rs` refuses every bad one with one sentence.
+    RouteCase {
+        path: "/api/v1/invitations/{token}",
+        probe: Some("/api/v1/invitations/not-a-token"),
+        method: "POST",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"password":"a sufficiently long one"}"#),
+    },
+    // Changing one's own password needs no role and is about the caller, not a tenant.
+    RouteCase {
+        path: "/api/v1/me/password",
+        probe: None,
+        method: "PUT",
+        expectation: Expectation::Unscoped,
+        body: Some(r#"{"current":"whatever this is","new":"a sufficiently long one"}"#),
+    },
+    // These three are one tenant's membership list, so a caller holding a session on another
+    // tenant must get a 404 — the same contract as every other scoped route.
+    RouteCase {
+        path: "/api/v1/tenants/roles",
+        probe: None,
+        method: "GET",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
+    RouteCase {
+        path: "/api/v1/users/{id}/role",
+        probe: Some("/api/v1/users/018f0000-0000-7000-8000-0000000000bb/role"),
+        method: "PUT",
+        expectation: Expectation::Scoped,
+        body: Some(r#"{"role":"viewer"}"#),
+    },
+    RouteCase {
+        path: "/api/v1/users/{id}/role",
+        probe: Some("/api/v1/users/018f0000-0000-7000-8000-0000000000bb/role"),
+        method: "DELETE",
+        expectation: Expectation::Scoped,
+        body: None,
+    },
     RouteCase {
         path: "/api/v1/audit/changes",
         probe: None,

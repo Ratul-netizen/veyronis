@@ -319,30 +319,67 @@ installation that lets strangers create accounts is not one an enterprise buyer 
 
 ## 7. Acceptance criteria
 
-Each one names a *reachable* path, because the defect this document exists to fix is a set
-of functions that every criterion about them would have passed.
+Each one names a *reachable* path, because the defect this document exists to fix is a set of
+functions that every criterion about them would have passed.
 
-- [ ] An organization with no SSO and one admin can add a second person, who sets their own
-      password from the invitation and signs in — with no `psql` at any point
-- [ ] The invitation is single-use: presenting an accepted token again is refused, and an
-      expired token is refused indistinguishably from a wrong one, both audited
-- [ ] With no SMTP configured, the invitation link is returned once and the screen says it
-      must be conveyed out of band
-- [ ] An admin can grant, change and revoke a role on the tenant in the request, and
+**The routes and the store are built; the screens are not**, so the criteria that mention what
+somebody is shown are still open.
+
+- [x] An organization with no SSO and one admin can add a second person, who sets their own
+      password from the invitation and signs in — with no `psql` at any point.
+      `uops-api/tests/users_routes.rs::an_administrator_adds_a_colleague_who_signs_in`
+- [x] The invitation is single-use: presenting an accepted token again is refused, and an
+      expired token is refused indistinguishably from a wrong one — asserted by comparing the
+      two responses, not by reading the message
+- [~] With no SMTP configured, the invitation link is returned once — it is, and
+      `InviteResponse::link_token` is the only place it ever appears. **The screen that says
+      to convey it out of band does not exist yet.**
+- [x] An admin can grant, change and revoke a role on the tenant in the request, and
       `user_tenant_role.granted_by` names the admin who did it rather than being `NULL`
-- [ ] Disabling an account ends its live sessions within the same request — asserted by a
-      session that was working before the call and is refused after it
-- [ ] A disabled account can be re-enabled, and its audit history is continuous across the
-      suspension rather than split over two user ids
-- [ ] The last enabled admin on a tenant cannot be disabled, demoted or revoked, and the
-      refusal holds under two concurrent attempts — not merely under one
-- [ ] An admin cannot disable their own account
-- [ ] Designating a break-glass account is audited, at most one is held per organization,
-      and it is the only password login accepted when the organization requires SSO
-- [ ] A user changes their own password with the current one, their other sessions are
+- [x] Disabling an account ends its live sessions within the same request — asserted by a
+      session that answered `200` before the call and `401` after it
+- [x] A disabled account can be re-enabled, and signs in again afterwards
+- [~] The last enabled admin on a tenant cannot be disabled, demoted or revoked — **and the
+      refusal holds under two concurrent attempts, which is not yet tested.** The mechanism is
+      there: every operation that changes the set of enabled administrators takes a
+      transaction-scoped advisory lock on the organization first (§4.3). What is missing is a
+      test that runs two of them at once, which is the only thing that can distinguish a lock
+      from a comment claiming there is one
+- [x] An admin cannot disable their own account
+- [~] Designating a break-glass account is audited and at most one is held per organization
+      (migration 0024's partial unique index, asserted in `uops-store-pg/tests/users.rs`).
+      **That it is the only password login accepted when the organization requires SSO is
+      covered by M12 §2.2's own tests, not by this work, and the two are not yet asserted
+      together**
+- [x] A user changes their own password with the current one, their other sessions are
       revoked, and the session that made the change still works
-- [ ] Every route above appears in `crates/uops-api/tests/isolation.rs`
+- [x] Every route above appears in `crates/uops-api/tests/isolation.rs` — twelve cases, and
+      `every_route_in_the_router_has_an_isolation_case` is what makes that not a promise
 - [ ] `scripts/unreached.py` no longer lists `create_user`, `grant_role`, `revoke_role`,
       `disable_user` or `set_break_glass`
 
-The last criterion is the one that would have caught this, and it is deliberately mechanical.
+> **The last one is not met, and it is the wrong criterion.** Amended rather than quietly
+> dropped, because it was written as the mechanical check that would have caught the original
+> defect.
+>
+> It still lists all five. The reason is not that the capability is unreachable — adding a
+> person, granting a role, suspending an account and designating break-glass are all now
+> reachable over HTTP, which is what the eleven criteria above assert. It is that production
+> reaches the *statements* rather than the named wrappers. `grant_role_guarded` must check the
+> last-administrator invariant and write in the same transaction, and `grant_role` takes the
+> pool; so the statement was extracted to `grant_role_on`, which both call. Sharing it was
+> the right move — two `INSERT`s into `user_tenant_role` with different conflict handling is
+> exactly how PLAN's *"never a parallel code path"* gets violated at the smallest scale — and
+> the side effect is that `grant_role` itself is now called only by fixtures.
+>
+> So the script is measuring the wrong thing here: it asks whether a *name* has a production
+> caller, and the honest question is whether a *capability* does. The five are primitives with
+> one production path each, through a statement they share. They are kept rather than deleted
+> because `disable_user` and `disable_user_in_org` are genuinely different — the latter
+> refuses to remove the last administrator, which is wrong for a fixture that needs to disable
+> one — and a test suite forced through the administrative path would be a test suite that
+> cannot set up the states it exists to test.
+>
+> **What should replace it:** a criterion that the *routes* exist and are exercised, which is
+> the twelfth above. The script stays useful for finding the next instance; it is not the
+> definition of this one being fixed.

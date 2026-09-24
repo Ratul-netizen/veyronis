@@ -224,6 +224,26 @@ impl PgStore {
         role: Role,
         granted_by: Option<ActorId>,
     ) -> Result<()> {
+        Self::grant_role_on(self.pool(), user, tenant, role, granted_by).await
+    }
+
+    /// The statement itself, over any executor.
+    ///
+    /// Two callers need it and one of them is inside a transaction: `users.rs` checks the
+    /// last-administrator invariant under a lock and must write in the same transaction it
+    /// checked in. Sharing the statement rather than copying it is PLAN's *"never a parallel
+    /// code path"* applied at the smallest scale — two `INSERT`s into one table with
+    /// different conflict handling is precisely how they drift.
+    pub(crate) async fn grant_role_on<'e, E>(
+        executor: E,
+        user: ActorId,
+        tenant: TenantId,
+        role: Role,
+        granted_by: Option<ActorId>,
+    ) -> Result<()>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         sqlx::query!(
             r#"
             INSERT INTO user_tenant_role (user_id, tenant_id, role, granted_by)
@@ -238,22 +258,37 @@ impl PgStore {
             role as Role,
             granted_by as Option<ActorId>,
         )
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(|e| map("role", user.to_string(), e))?;
         Ok(())
     }
 
     pub async fn revoke_role(&self, user: ActorId, tenant: TenantId) -> Result<()> {
-        sqlx::query!(
+        Self::revoke_role_on(self.pool(), user, tenant).await.map(|_| ())
+    }
+
+    /// As [`Self::grant_role_on`]. Returns whether a grant was actually removed, which the
+    /// administrative path needs in order to answer "no such grant" separately from
+    /// "refused".
+    pub(crate) async fn revoke_role_on<'e, E>(
+        executor: E,
+        user: ActorId,
+        tenant: TenantId,
+    ) -> Result<bool>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
+        let affected = sqlx::query!(
             r#"DELETE FROM user_tenant_role WHERE user_id = $1 AND tenant_id = $2"#,
             user as ActorId,
             tenant as TenantId,
         )
-        .execute(self.pool())
+        .execute(executor)
         .await
-        .map_err(|e| map("role", user.to_string(), e))?;
-        Ok(())
+        .map_err(|e| map("role", user.to_string(), e))?
+        .rows_affected();
+        Ok(affected > 0)
     }
 
     /// The user's role on one tenant, or `None` if they have none.
@@ -417,12 +452,21 @@ impl PgStore {
     /// End every session for a user. "Sign out everywhere", and what disabling an
     /// account should do immediately rather than within twelve hours.
     pub async fn revoke_sessions_of(&self, user: ActorId) -> Result<u64> {
+        Self::revoke_sessions_on(self.pool(), user).await
+    }
+
+    /// As [`Self::grant_role_on`]: the same statement, over any executor, because disabling
+    /// an account must end its sessions inside the transaction that disabled it.
+    pub(crate) async fn revoke_sessions_on<'e, E>(executor: E, user: ActorId) -> Result<u64>
+    where
+        E: sqlx::PgExecutor<'e>,
+    {
         // tenant-exempt: sessions are not tenant-scoped.
         let affected = sqlx::query!(
             r#"UPDATE session SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL"#,
             user as ActorId,
         )
-        .execute(self.pool())
+        .execute(executor)
         .await
         .map_err(|e| map("session", user.to_string(), e))?
         .rows_affected();

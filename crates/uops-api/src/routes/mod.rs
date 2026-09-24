@@ -29,6 +29,7 @@ pub mod subnets;
 pub mod sso;
 pub mod runbooks;
 pub mod topology;
+pub mod users;
 pub mod path;
 
 use axum::routing::{any, delete, get, patch, post, put};
@@ -51,6 +52,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/auth/login", post(auth::login))
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
+        // Redeeming an invitation is unauthenticated because whoever holds the link has no
+        // account yet — the token is the whole authorisation. Same discipline as `login`:
+        // one sentence for every refusal, since distinguishing *expired* from *never
+        // existed* confirms a token was once real.
+        .route("/api/v1/invitations/{token}", post(users::accept))
         // Single sign-on -- M12 §2.2. The first three are unauthenticated because they
         // are reached by somebody who has not signed in; routes/sso.rs has the table of
         // what that exposes and what closes each hole. The rest need the admin role on
@@ -301,6 +307,27 @@ pub fn router(state: AppState) -> Router {
         // from tests alone. Admin, because an audit log names people.
         .route("/api/v1/audit/changes", get(audit_log::changes))
         .route("/api/v1/audit/reads", get(audit_log::reads))
+        // The people in an organization — `docs/user-administration.md`. `create_user`,
+        // `grant_role`, `revoke_role` and `disable_user` have existed since M1 and were
+        // called by seventeen test files and nothing in production; these are the callers.
+        //
+        // Two authorisations, because there are two questions. *Who is a person here* is
+        // organization-level and takes `OrgAdmin`. *Who may see this customer* belongs to one
+        // tenant and takes admin on the tenant in the header.
+        .route("/api/v1/users", get(users::list).post(users::invite))
+        .route("/api/v1/users/invitations", get(users::invitations))
+        .route("/api/v1/users/invitations/{id}", delete(users::withdraw))
+        .route("/api/v1/users/{id}/disable", post(users::disable))
+        .route("/api/v1/users/{id}/enable", post(users::enable))
+        .route("/api/v1/users/{id}/break-glass", post(users::break_glass))
+        .route("/api/v1/tenants/roles", get(users::roles))
+        .route(
+            "/api/v1/users/{id}/role",
+            put(users::grant).delete(users::revoke),
+        )
+        // Changing one's own password is not administration — every user needs it and no
+        // role is required — so it sits on `/me` rather than among the routes above.
+        .route("/api/v1/me/password", put(users::change_password))
         .route("/api/v1/sites/{id}/location", put(sites::place))
         .route("/api/v1/query", post(query::run))
         // The tail is its own route rather than a flag on the one above, because it is
