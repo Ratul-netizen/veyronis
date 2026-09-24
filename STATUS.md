@@ -90,10 +90,12 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > an admin never sets another person's password and why the last admin cannot be removed —
 > and as of 2026-09-24 the store and the eleven routes exist, with a test that invites
 > somebody, has them choose their own password, signs them in and grants them a role over
-> HTTP with no `psql`. **The screens do not exist yet**, so the two criteria about what
-> somebody is shown are still open, and one criterion was amended as wrong rather than met
-> (see §7 of that document: `unreached.py` asks whether a *name* has a production caller,
-> and the honest question is whether a *capability* does).
+> HTTP with no `psql` — and the screens: People and Access on `/users`, the invitation-accept
+> page, and `/account`, where somebody can change their own password for the first time.
+> **Ten of its twelve criteria are met.** One is `[~]` (break-glass under required SSO is
+> covered by M12 §2.2 and not asserted together with this) and one is `[ ]`, amended as the
+> wrong criterion rather than met: `unreached.py` asks whether a *name* has a production
+> caller, and the honest question is whether a *capability* does. §7 of that document says why.
 > `docs/tenant-lifecycle.md` covers creating and retiring a tenant, and found the thing that
 > would have made the first successful use of the feature a lockout: creating a tenant raises
 > the denominator in `is_org_admin`, so the admin who creates one loses organization-wide
@@ -119,9 +121,9 @@ closed on 2026-09-24; M12's two-poller sample count was measured and closed earl
 recorded above. They were not failed criteria — they are things every criterion about them
 would have passed, which is the point.
 
-One is closed below the interface: **user administration** has a store layer, eleven routes
-and 35 tests, and an installation can now add a second person. Its screens are the work in
-flight. The other is open: **there is still no way to create a second tenant**, so the MSP
+One is closed: **user administration** has a store layer, eleven routes, three screens and
+52 tests, and an installation can now add a second person, suspend a departing one, and let
+anybody change their own password. The other is open: **there is still no way to create a second tenant**, so the MSP
 shape `docs/security-overview.md` describes remains unreachable, and `docs/tenant-lifecycle.md`
 is the plan for it.
 
