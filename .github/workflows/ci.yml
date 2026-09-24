@@ -30,6 +30,19 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
+      # Before anything compiles, because a missing compile-time include fails three jobs
+      # with an error about the file and nothing about the cause. `assignments.tsv` — the
+      # IEEE MAC table, whose own README says it is committed on purpose — was caught by a
+      # blanket `*.tsv` rule written for bench/ artefacts, so it never was. Clippy, the
+      # RustCrypto build and the sqlx metadata check all failed on it on every push.
+      #
+      # `--self-test` first: the check reports nothing on a healthy tree, which is what a
+      # broken regex reports too.
+      - name: Every compile-time include is committed
+        run: |
+          python3 scripts/committed-includes.py --self-test
+          python3 scripts/committed-includes.py
+
       - name: Format
         run: cargo fmt --all --check
 
@@ -277,10 +290,19 @@ jobs:
       # build verifies something that is no longer there.
       - name: Query metadata is current
         run: |
-          cargo sqlx prepare --workspace --check -- --all-targets || {
-            echo "::error::.sqlx is stale — run: cargo sqlx prepare --workspace -- --all-targets"
+          if ! cargo sqlx prepare --workspace --check -- --all-targets > prepare.log 2>&1; then
+            cat prepare.log
+            # The old version of this step reported ".sqlx is stale" for *any* failure,
+            # including the workspace not compiling. That is a wrong answer rather than a
+            # vague one, and it sent somebody looking for a stale cache that was never stale
+            # while the real error — a missing include_str! data file — sat in the log above.
+            if grep -qE "^error: (could not compile|couldn't read)" prepare.log; then
+              echo "::error::the workspace does not compile, so the query metadata could not               be checked at all. The compiler error above is the failure; .sqlx is not implicated."
+            else
+              echo "::error::.sqlx is stale — run: cargo sqlx prepare --workspace -- --all-targets"
+            fi
             exit 1
-          }
+          fi
 
       # ---- ClickHouse -------------------------------------------------------------
 

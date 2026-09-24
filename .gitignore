@@ -15,6 +15,15 @@ bench/results/*.raw
 *.tsv
 *.tsv.gz
 
+# ...except the IEEE MAC-assignment table, which `crates/uops-oui/data/README.md` has a
+# section titled "Why this is committed rather than downloaded" about: an air-gapped build
+# cannot fetch it, and `include_str!` needs it present at compile time. The blanket rule
+# above was written for bench/ artifacts and caught this one too, so it was never committed
+# and three CI jobs — Clippy, the RustCrypto build, and the sqlx metadata check — failed on
+# every push with `couldn't read .../data/assignments.tsv`. 1.7 MB, and the document that
+# says it is committed was right.
+!crates/uops-oui/data/assignments.tsv
+
 # Secrets. Nothing in this project should ever hold key material in the tree,
 # but defence in depth costs nothing.
 .env

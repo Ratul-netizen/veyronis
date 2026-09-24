@@ -27,9 +27,21 @@ RUN npm run build
 # --- the server -------------------------------------------------------------------
 FROM rust:1.98-alpine AS server
 
-# musl-dev for the C toolchain rustc's linker calls. No OpenSSL: nothing in this
-# workspace links it — see the TLS note in Cargo.toml.
-RUN apk add --no-cache musl-dev
+# musl-dev for the C toolchain rustc's linker calls.
+#
+# openssl-dev and pkgconfig because this workspace *does* link OpenSSL on Linux, which the
+# comment here used to deny. `uops-oidc` uses `ureq` with `native-tls`, and `native-tls` is
+# SChannel on Windows, Security.framework on macOS and **OpenSSL on Linux** — so a build on
+# a developer's Windows machine never pulls `openssl-sys` and this image always did. The
+# result was `Could not find directory of OpenSSL installation` and a failed image build on
+# every push, which nobody saw because three other jobs were failing too.
+#
+# Dynamically linked against Alpine's OpenSSL rather than vendored: Alpine patches it, and
+# vendoring would compile OpenSSL from source on every cold build to save a 3 MB runtime
+# dependency the base image already carries. The musl *tarball* in `release-artefacts` is a
+# different question — a static binary handed to a host with no container runtime cannot
+# rely on that host having libssl, and that job has never run. See docs/packaging.md.
+RUN apk add --no-cache musl-dev openssl-dev pkgconfig
 
 WORKDIR /build
 
@@ -71,9 +83,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # --- what actually ships ----------------------------------------------------------
 FROM alpine:3.21
 
-# ca-certificates is not for us — nothing here speaks TLS — but for anything an
-# operator exec's into the container to do. libgcc is what a musl Rust binary needs.
-RUN apk add --no-cache ca-certificates libgcc
+# ca-certificates *is* for us, which the comment here used to deny. The outbound OIDC
+# client speaks TLS directly to an identity provider — `docs/security-overview.md` calls it
+# "the one exception" — and validates it against the operating system's trust store, which
+# is this file. Without it, SSO discovery fails on a correctly configured provider.
+#
+# openssl for libssl.so, since the binaries are dynamically linked against it now. libgcc is
+# what a musl Rust binary needs.
+RUN apk add --no-cache ca-certificates libgcc openssl
 
 # Not root. There is nothing in this image that needs to be, and a container that runs
 # as root is a finding in every procurement checklist this product will meet.
