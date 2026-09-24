@@ -37,6 +37,8 @@ import { Layout } from "./layout";
 import { ExplorePage } from "./explore";
 import { FlowPage } from "./flowpage";
 import { ServicesPage } from "./servicespage";
+import { AcceptInvitePage } from "./acceptinvite";
+import { AccountPage } from "./accountpage";
 import { AuditPage } from "./auditpage";
 import { SloPage } from "./slopage";
 import { SubnetsPage } from "./subnetspage";
@@ -44,6 +46,7 @@ import { TracePage } from "./tracepage";
 import { IncidentsPage } from "./incidentspage";
 import { OverviewPage } from "./overview";
 import { LoginPage } from "./pages";
+import { UsersPage } from "./userspage";
 import { AlertsPage, ChannelsPage, RulesPage } from "./alerts";
 import { DashboardPage, DashboardsPage } from "./dashboard";
 import {
@@ -109,6 +112,18 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   component: LoginPage,
+});
+
+// Outside the shell, and deliberately: whoever follows this link has no session, no tenant
+// and no navigation to show them. `docs/user-administration.md` §4.1 — the token is the
+// whole authorisation.
+const invitationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invitation/$token",
+  component: function Invitation() {
+    const { token } = invitationRoute.useParams();
+    return <AcceptInvitePage token={token} />;
+  },
 });
 
 const shellRoute = createRoute({
@@ -245,6 +260,18 @@ const auditRoute = createRoute({
   component: AuditPage,
 });
 
+const usersRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/users",
+  component: UsersPage,
+});
+
+const accountRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/account",
+  component: AccountPage,
+});
+
 const slosRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/slos",
@@ -306,6 +333,7 @@ const dashboardRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  invitationRoute,
   shellRoute.addChildren([
     overviewRoute,
     mapRoute,
@@ -317,6 +345,8 @@ const routeTree = rootRoute.addChildren([
     subnetsRoute,
     slosRoute,
     auditRoute,
+    usersRoute,
+    accountRoute,
     incidentsRoute,
     exploreRoute,
     alertsRoute,

@@ -322,8 +322,10 @@ installation that lets strangers create accounts is not one an enterprise buyer 
 Each one names a *reachable* path, because the defect this document exists to fix is a set of
 functions that every criterion about them would have passed.
 
-**The routes and the store are built; the screens are not**, so the criteria that mention what
-somebody is shown are still open.
+**The store, the routes and the screens are built.** `web/src/userspage.tsx` is the People and
+Access screens, `acceptinvite.tsx` is the one page in the app that works with no session, and
+`accountpage.tsx` is where somebody changes their own password — which nothing could do before,
+since `update_password_hash` was reached only by the transparent rehash during a sign-in.
 
 - [x] An organization with no SSO and one admin can add a second person, who sets their own
       password from the invitation and signs in — with no `psql` at any point.
@@ -331,9 +333,11 @@ somebody is shown are still open.
 - [x] The invitation is single-use: presenting an accepted token again is refused, and an
       expired token is refused indistinguishably from a wrong one — asserted by comparing the
       two responses, not by reading the message
-- [~] With no SMTP configured, the invitation link is returned once — it is, and
-      `InviteResponse::link_token` is the only place it ever appears. **The screen that says
-      to convey it out of band does not exist yet.**
+- [x] With no SMTP configured, the invitation link is returned once and the screen says it
+      must be conveyed out of band — `users.ts::CONVEY_OUT_OF_BAND`, shown beside the link
+      with a copy button, and asserted to say both that it appears once and what to do if it
+      is lost. `InviteResponse::link_token` remains the only place the token ever appears;
+      the invitation *list* is asserted not to carry it
 - [x] An admin can grant, change and revoke a role on the tenant in the request, and
       `user_tenant_role.granted_by` names the admin who did it rather than being `NULL`
 - [x] Disabling an account ends its live sessions within the same request — asserted by a
@@ -349,11 +353,11 @@ somebody is shown are still open.
       > two in a million, and the mutation is now caught on every attempt. A race can only be
       > tested by racing; it can be tested often.
 - [x] An admin cannot disable their own account
-- [~] Designating a break-glass account is audited and at most one is held per organization
-      (migration 0024's partial unique index, asserted in `uops-store-pg/tests/users.rs`).
-      **That it is the only password login accepted when the organization requires SSO is
-      covered by M12 §2.2's own tests, not by this work, and the two are not yet asserted
-      together**
+- [~] Designating a break-glass account is audited, at most one is held per organization
+      (migration 0024's partial unique index, asserted in `uops-store-pg/tests/users.rs`), and
+      the People screen offers it. **That it is the only password login accepted when the
+      organization requires SSO is covered by M12 §2.2's own tests, not by this work, and the
+      two are still not asserted together** — the one criterion here that no new test covers
 - [x] A user changes their own password with the current one, their other sessions are
       revoked, and the session that made the change still works
 - [x] Every route above appears in `crates/uops-api/tests/isolation.rs` — twelve cases, and

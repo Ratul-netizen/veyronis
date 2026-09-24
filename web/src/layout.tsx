@@ -77,6 +77,12 @@ const NAV: { heading: string; items: { to: string; label: string; exact?: boolea
       // so rather than the sidebar hiding it — a control that vanishes by role is one
       // people ask each other about.
       { to: "/audit", label: "Audit" },
+      // The people who can sign in, and who may see which customer. Beside the audit log
+      // rather than behind a settings gear: the two answer halves of one question a
+      // regulated buyer asks, and until this screen existed an installation using passwords
+      // had exactly one user forever. Admin-only, and the screen says so — see Audit above
+      // for why that is not the sidebar's job.
+      { to: "/users", label: "People" },
       // Under Operations, and next to the things it is used during. A runbook is not part
       // of the inventory — it is what somebody does to the inventory at 3 a.m.
       { to: "/runbooks", label: "Runbooks" },
@@ -196,9 +202,12 @@ export function Layout() {
         <TenantSwitcher />
         <div className="spacer" />
         <RangePicker />
-        <span className="dim" title={me.email}>
+        {/* The name is the link to one's own account, which is where a password is
+            changed. Not in the sidebar: it is not a place in the estate, it is the one
+            page about the person reading the screen. */}
+        <Link to="/account" search={keepSearch} className="dim" title={me.email}>
           {me.display_name}
-        </span>
+        </Link>
         <button
           className="quiet"
           onClick={() => {
