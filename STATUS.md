@@ -1,6 +1,6 @@
 # Status — pick up from here
 
-Last updated: 2026-09-23 · repo: `github.com/Ratul-netizen/veyronis`
+Last updated: 2026-09-24 · repo: `github.com/Ratul-netizen/veyronis`
 
 > Read this first on a new machine. [PLAN.md](./PLAN.md) is strategy,
 > [SPEC.md](./SPEC.md) is the M0–M4 implementation spec, this is *where we are*.
@@ -68,11 +68,41 @@ is the only milestone not started**, and PLAN §10 calls it *direction, not comm
 > same transport. The lab now returns the cabled tree: `nodes: 4, edges: 3`, every edge
 > `discovered_by: lldp`, and 6 reported adjacencies collapsed to 3 by the sorted pair.
 
+> **Found 2026-09-24 by `scripts/unreached.py`: there is no user administration, and no way
+> to create a second tenant.** `create_user`, `grant_role`, `revoke_role`, `disable_user`
+> and `set_break_glass` are all implemented and tested — seventeen test files call
+> `create_user` — and **no production code calls any of them**. `bootstrap` makes the first
+> admin and SSO's `provision` onboards users from group mappings, so every SSO deployment is
+> fine; an organization using passwords has one user forever, no installation can disable a
+> departing employee or change a role without `psql`, and nobody can change their own
+> password. `docs/security-overview.md` and `Role::Admin`'s own doc comment both say an
+> admin manages users and roles.
+>
+> The heavier half is tenancy. The only `INSERT INTO tenant` outside tests is
+> `bootstrap.rs:152`, and `bootstrap` runs once — there is no `create_tenant` at all. So a
+> running installation has exactly **one** tenant, permanently, and the MSP story
+> `security-overview.md` sells (*"admin on one customer and viewer on another"*) is not
+> reachable. `TenantScope` is enforced by the type system and asserted across every route in
+> `isolation.rs`; production can currently only ever have one side of that boundary.
+>
+> **Decided, not yet built** — `docs/user-administration.md` covers users, roles and the
+> account lifecycle, including why an admin never sets another person's password and why
+> the last admin cannot be removed. Tenant creation is its own document and has not been
+> written: its decisions are about slug immutability, what happens to a removed tenant's
+> telemetry, and whether the platform resource in `self-monitoring.md` §4 is per tenant or
+> per organization. **This is an open gap against M12, which is otherwise complete.**
+
 **One criterion across all thirteen is not met**, and it is not hidden: M12's cross-tenant
 isolation, which reopens with every surface a later milestone adds and is currently
-satisfied — all 73 registered route paths have a case in `isolation.rs`. M10's dry run against a real SSH
-server was the other one and closed on 2026-09-24; M12's two-poller sample count was
-measured and closed earlier.
+satisfied — all 44 registered route paths have a case in `isolation.rs`, the only one
+absent being the `/api/{*rest}` fallback, which it exercises as
+`/api/v1/no-such-endpoint`. M10's dry run against a real SSH server was the other one and
+closed on 2026-09-24; M12's two-poller sample count was measured and closed earlier.
+
+**Two gaps are open that no criterion ever asked about**, both found on 2026-09-24 and both
+recorded above: there is no user administration, and no way to create a second tenant. They
+are not failed criteria — they are things every criterion about them would have passed,
+which is the point.
 
 M12 is the one that changed what the product *is* rather than what it does: it now
 survives losing a process, authenticates the way an organisation already does, knows what

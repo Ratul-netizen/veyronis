@@ -102,6 +102,16 @@ one customer and viewer on another with a single account. Organization-wide sett
 identity providers, group mappings, collector assignment — require admin on *every* tenant
 in the organization, because those decisions are about more than one customer.
 
+> **Two parts of that are not reachable yet, as of 2026-09-24.** The role model is enforced
+> everywhere it is read, and it is what `TenantScope` and the isolation tests are built on.
+> What is missing is the administration of it: nothing in the product grants or revokes a
+> role, creates or disables a user, or creates a second tenant — an organization using
+> passwords has one user, and every installation has one tenant. SSO organizations are
+> unaffected: group mappings do provision users and grant roles. `docs/user-administration.md`
+> records the decisions for the first half; the second has no document yet. Said here rather
+> than left for a buyer to discover, because a security overview that overstates by one
+> sentence is worth less than one that is dull and exact.
+
 **Group-to-role mapping is configuration, not inference.** Nothing guesses that a group
 called `network-admins` means admin. A user whose groups map to nothing authenticates
 successfully and is refused, with an audit entry naming the groups they had.

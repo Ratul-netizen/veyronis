@@ -38,6 +38,9 @@ pub enum Role {
     /// Also acknowledge alerts, resolve identity review, edit resources and rules.
     Operator,
     /// Also manage credentials, users, roles and tenants, and read the audit log.
+    ///
+    /// **Managing users, roles and tenants is not reachable in the product** — the store
+    /// functions exist and nothing calls them. See `docs/user-administration.md`.
     Admin,
 }
 
