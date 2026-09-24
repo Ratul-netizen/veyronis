@@ -12,27 +12,46 @@ first run — see §4.
 
 ## 1. What it is
 
-Four Debian nodes under EVE-NG, cabled into a tree rather than a segment:
+Nine nodes under EVE-NG, cabled as a small datacenter and **routed**, not flat:
 
 ```text
-                Mgmt — bridged to the real LAN, eth0 on every node
-                 │
-   edge-fw ── core-sw-01 ── lb-01
-                    └────── app-01
+   Mgmt — bridged to the real LAN (pnet0). Out-of-band: every fabric device by DHCP.
+     │
+  core-rtr-01 ── edge-fw ── spine-01 ─┬─ leaf-01 ──┬─ lb-01     10.10.6.10
+                                      │            └─ app-01    10.10.6.11
+                                      └─ leaf-02 ──┬─ app-02    10.10.7.10
+                                                   └─ db-01     10.10.7.11
 ```
 
-The shape is deliberate. `core-sw-01` is upstream of both leaves, so taking it down should
-produce **one incident with two suppressed symptoms** — which is the only way to exercise
-M9's topology-aware suppression against discovered adjacency rather than a fixture.
+| | address | why |
+|---|---|---|
+| fabric — `core-rtr-01`, `edge-fw`, `spine-01`, `leaf-01`, `leaf-02` | DHCP on Mgmt | out-of-band management, which is how a datacenter is run: losing a switch's forwarding must not lose the ability to *see* the switch |
+| workloads — `lb-01`, `app-01`, `app-02`, `db-01` | `10.10.<leaf>.0/24` only | reachable **only through their leaf**, which is what makes the dependency real |
+
+**The routing is the point.** A flat /24 where the product can reach every node directly
+makes M9's topology-aware suppression cosmetic — the graph says one thing and reachability
+says another, so a suppression test passes whether or not suppression works. Here, stopping
+`leaf-01` genuinely removes `lb-01` and `app-01`, and demonstrably leaves `leaf-02`'s servers
+alone:
+
+```text
+before      leaf-01 up    lb-01 up    app-01 up    app-02 up
+stop leaf-01
+after       leaf-01 DOWN  lb-01 DOWN  app-01 DOWN  app-02 up
+```
+
+That is one root cause, two downstream symptoms, and a blast radius that stops at the right
+place — verified 24 September 2026, and the reason the estate is worth running.
 
 **Every node speaks what the product actually reads**, and nothing more:
 
 | | why it is there |
 |---|---|
-| `snmpd`, v2c | MIB-2 `system` and `interfaces` — polling, and `sysObjectID` for identity |
-| `lldpd` with `-x` (AgentX) | hands LLDP-MIB to snmpd. **Without AgentX there is no LLDP in SNMP at all** |
+| `snmpd`, v2c, community `uopslab` | MIB-2 `system` and `interfaces` — polling, and `sysObjectID` for identity |
+| `lldpd` with `-x` (AgentX) | hands LLDP-MIB to `snmpd`. **Without AgentX there is no LLDP in SNMP at all** |
 | `rsyslog`, RFC 5424 | the log collector's input |
-| ICMP | availability — though see §3 |
+| `haproxy` | on `lb-01`, so a load balancer is a load balancer |
+| ICMP | availability — though see §5 |
 
 ## 2. Why these images and not vendor ones
 
@@ -41,6 +60,11 @@ obtain them is not a way this project will. Debian with `snmpd` and `lldpd` prod
 *genuine* SNMP and *genuine* LLDP — the protocols are the same ones a switch speaks, and
 they are what the product consumes. A licensed image, if one is available, drops into
 `/opt/unetlab/addons/qemu/` and joins the same topology.
+
+One image, `linux-uopsnode`, is cloned nine times. A node's role comes from its **EVE-NG node
+number**, which it reads out of its own MAC — EVE-NG assigns `00:50:00:00:0N:00` to node *N*'s
+first interface, and that is the only thing a plain Linux node can observe about its place in
+a topology. There is no cloud-init datasource and no metadata service.
 
 ## 3. Three things building it taught, all of them about cloning
 
@@ -63,10 +87,36 @@ golden image.
    script fails silently and the tool you thought you installed is not there. Which turns
    into a diagnostic that reports "command not found" where you expected a device answer.
 
-**A fourth, about the host rather than the lab:** this machine has 16 GB and was running
+**A fourth and a fifth, from growing it from four nodes to nine on 24 September 2026.**
+
+4. **The naming table was a hardcoded list of four, and its fallback lied.** The provisioning
+   script mapped node numbers `02`, `03` and `04` to names and fell through to
+   `NAME=edge-fw`. Adding five nodes therefore produced five devices that told the product,
+   over SNMP, that they were all `edge-fw` — `core-rtr-01` reported `edge-fw-000500`. The
+   product was not wrong; it was faithfully reporting what the estate claimed. The fallback is
+   now `node-NN`, which is still wrong and is *visibly* wrong rather than plausible. Exactly
+   the shape of the Dockerfile's stale binary list in `docs/packaging.md` §2: a hardcoded list
+   beside a comment warning against hardcoded lists.
+
+5. **Spare interfaces can be detached through the API after all.** The previous script carried
+   a workaround — `90-unused.network` holding `ens4`–`ens6` down — with the note *"EVE-NG would
+   not let the spare interfaces be unlinked through its API, so they sit on the same segment as
+   ens3."* The API rejects `network_id: 0` with *"invalid network_id (20033)"* and accepts an
+   **empty string**, which detaches cleanly. The workaround is no longer needed, and the
+   topology now has no interface on a segment the diagram does not show.
+
+**A sixth, about the host rather than the lab:** this machine has 16 GB and was running
 EVE-NG, a second VM for `ClickHouse`, the product, and a desktop. Committed memory reached
 22.5 GB, and all four nodes were killed once with no OOM entry inside the guest. A lab this
 small is not free.
+
+> **And at nine nodes the binding constraint turned out not to be memory.** It is the CPU: an
+> i5-7300HQ with **four logical processors**, of which EVE-NG has two and the `ClickHouse`
+> guest had four — six vCPUs on four threads, with nine nested QEMU nodes booting. Nine nodes
+> at 4 096 MB fit comfortably in EVE-NG's 6 144 MB (59% used); what did not fit was the
+> scheduling. Trimming the `ClickHouse` guest to 2 vCPU and 2 048 MB was worth more than any
+> memory change. Boots take minutes, and an address that has not appeared yet is usually a
+> node still waiting for CPU rather than a node that failed.
 
 ## 4. What it found immediately
 
@@ -124,7 +174,42 @@ log full of failures.
 
 ## 6. Running it
 
-The image is built by the scripts recorded in `docs/dev-environment.md`; the lab is
-`uops-estate` in EVE-NG and is driven through its REST API. Node addresses are DHCP, and
-the reliable way to map a node to its address is EVE-NG's own MAC scheme — node *N*'s first
-interface is `00:50:00:00:0N:00` — rather than boot order.
+The lab is `uops-estate` in EVE-NG and is driven through its REST API. Fabric addresses are
+DHCP, and the reliable way to map a node to its address is EVE-NG's own MAC scheme — node *N*'s
+first interface is `00:50:00:00:0N:00` — rather than boot order.
+
+**The provisioning is `scripts/lab-firstboot.sh`.** This section used to say the image was
+"built by the scripts recorded in `docs/dev-environment.md`". It was not recorded anywhere: it
+existed only inside `linux-uopsnode`'s qcow2 on the EVE-NG guest, so the lab could not be
+rebuilt, inspected or reasoned about without extracting a file from a disk image — which is
+what had to be done to grow it to nine nodes. Installing it into the image is one command on
+the EVE-NG host:
+
+```bash
+IMG=/opt/unetlab/addons/qemu/linux-uopsnode/virtioa.qcow2
+cp -a "$IMG" "$IMG.bak"                      # the image is 730 MB; the copy is cheap insurance
+virt-customize -a "$IMG" \
+  --upload lab-firstboot.sh:/usr/local/sbin/uops-firstboot.sh \
+  --chmod 0755:/usr/local/sbin/uops-firstboot.sh
+```
+
+A node marks firstboot done in `/var/lib/uops-firstboot.done`, so changing the script needs the
+node overlays discarded — `GET /api/labs/uops-estate.unl/nodes/wipe` after a stop — or the old
+configuration simply persists and nothing says why.
+
+**The workload subnets need a route on the monitoring host**, because the servers are
+deliberately not on Mgmt. On Windows:
+
+```
+route add 10.10.6.0 mask 255.255.255.0 <leaf-01 Mgmt address>
+route add 10.10.7.0 mask 255.255.255.0 <leaf-02 Mgmt address>
+```
+
+Without these the four servers are unreachable and look like a broken lab rather than a
+missing route. They are not persistent; `-p` makes them so, at the cost of a stale route when
+a leaf's lease moves.
+
+**What the estate is reached with:** EVE-NG's API and shell are `admin`/`eve` and `root`/`eve`;
+SNMP is v2c, community `uopslab`, read-only. All of it is a lab on a private segment and all of
+it is written down here on purpose — the previous state of affairs was that none of it was, and
+a lab nobody can log into is a lab that cannot be repaired.
