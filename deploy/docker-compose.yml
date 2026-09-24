@@ -197,6 +197,19 @@ services:
       UOPS_PUBLIC_URL: http://localhost:8080
       UOPS_ORG_NAME: "Example organization"
       UOPS_TENANT_NAME: "Example tenant"
+      # The slug, and it has to be set here rather than left to default.
+      #
+      # `UOPS_TENANT_SLUG` defaults to "default", while all three shipped listener files —
+      # deploy/{otlp,syslog,flow}/listeners.yaml — name tenant "example". So the stack
+      # created one tenant and the collectors looked for another: all three refused to
+      # start and were restarted forever by `restart: unless-stopped`, printing "the
+      # listener file names tenant \"example\", which does not exist" once a second.
+      #
+      # SPEC §M1's criterion is that `docker compose up` gives a working stack from a
+      # clean checkout, and a stack whose three collectors crash-loop is not one. Found by
+      # the guard that derives its service list from `restart: unless-stopped` — the one
+      # added because a declared service is not a running service.
+      UOPS_TENANT_SLUG: example
       UOPS_ADMIN_EMAIL: admin@example.invalid
       # The same file the poller reads. A credential the API sealed that the poller
       # cannot open is a device that silently never gets polled, which is the worst way

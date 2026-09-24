@@ -311,7 +311,10 @@ async fn write_key(dir: &Path, key: &str) -> std::io::Result<PathBuf> {
     // second check we get for free and do not rely on.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
+        // No `OpenOptionsExt`: that trait extends *std*'s `OpenOptions`, and this is
+        // tokio's, which carries `mode` as an inherent method under `feature! { #![unix] }`.
+        // Importing it was a no-op that `-D warnings` turned into an error on Linux — and
+        // one invisible on Windows, where this block is never compiled at all.
         use tokio::io::AsyncWriteExt as _;
 
         let mut file = tokio::fs::OpenOptions::new()
